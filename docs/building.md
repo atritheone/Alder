@@ -25,6 +25,8 @@ Start the Python service with `PYTHONPATH` set to the repository's `backend` dir
 - `speech/ffmpeg/` — FFmpeg and ffprobe.
 - `speech/qa/` — separate transcription-check runtime and base.en model.
 
+Run `work/venv/Scripts/python.exe scripts/prepare-reading-resources.py` to provision the checksum-pinned Apache Tika document extractor. Its original JAR includes its component licences and runs under Alder's bundled Java.
+
 Use `scripts/prepare-core-resources.py` for the portable core interpreter, the exact application packages, and checksum-verified WordNet/OMW dictionaries. It supports explicit source paths, `--archive-base`, `--offline` and `--verify-only`; use `--help` for build-machine configuration. Use `scripts/prepare-speech-resources.py` to assemble and verify speech resources from the pinned development installation and cached official models. Use `scripts/prepare-publishing-tools.ps1` for pinned, checksum-verified publishing tools and fonts. These are build-time operations. Runtime resource verification is mandatory before packaging and errors if any required component is missing; it also runs an isolated core import and offline dictionary audit.
 
 The large models are deliberately absent from Git. Builders provide model artifacts through the resource provisioning process; end users receive them in the completed release. No API key is bundled or required.

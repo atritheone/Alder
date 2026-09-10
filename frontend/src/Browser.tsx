@@ -85,9 +85,9 @@ export const deviceCatalog = [
 ];
 const categories = [
   { id: "Ideas", icon: Lightbulb },
-  { id: "Clips", icon: Blocks },
+  { id: "Drafts", icon: Blocks },
   { id: "Words", icon: BookOpen },
-  { id: "Language devices", icon: SlidersHorizontal },
+  { id: "Language tools", icon: SlidersHorizontal },
   { id: "Voices", icon: AudioLines },
   { id: "Styles", icon: Type },
   { id: "Templates", icon: FileText },
@@ -201,7 +201,7 @@ export default function Browser({
           <div className="filter-area">
             <strong>{category}</strong>
             <div className="filter-chips">
-              {(category === "Language devices"
+              {(category === "Language tools"
                 ? ["All", "Analysis", "Transform", "Speech"]
                 : ideaCats
               ).map((f) => (
@@ -249,7 +249,7 @@ export default function Browser({
                   <small>{idea.pos}</small>
                 </button>
               ))
-            ) : category === "Clips" ? (
+            ) : category === "Drafts" ? (
               project.clips
                 .filter((c) =>
                   `${c.title} ${c.text}`
@@ -271,7 +271,7 @@ export default function Browser({
                     <small>clip</small>
                   </button>
                 ))
-            ) : category === "Language devices" ? (
+            ) : category === "Language tools" ? (
               deviceCatalog
                 .filter(
                   (d) =>

@@ -63,7 +63,8 @@ import {
 } from "./api";
 import { useProject } from "./useProject";
 import Browser, { deviceCatalog } from "./Browser";
-import Workspace from "./Workspace";
+import BookWorkspace from "./BookWorkspace";
+import { bookText, newChapter } from "./book";
 import Editor, { type EditorHandle } from "./Editor";
 import DefinitionStudio from "./DefinitionStudio";
 import RulesManager from "./RulesManager";
@@ -206,11 +207,7 @@ export default function App() {
     [audioFormat, setAudioFormat] = useState("wav");
   const [completion, setCompletion] = useState<string[]>([]);
   const [view, setView] = useState(() =>
-      savedChoice(
-        "alder.view",
-        ["Sandbox", "Collation", "Manuscript", "Page Preview"],
-        "Sandbox",
-      ),
+      savedChoice("alder.view", ["Write", "Pages", "Page Preview"], "Write"),
     ),
     [detail, setDetail] = useState(() =>
       savedChoice("alder.detail", ["Clip", "Devices", "Narration"], "Clip"),
@@ -236,7 +233,7 @@ export default function App() {
     [audioDuration, setAudioDuration] = useState(0),
     [activeJob, setActiveJob] = useState<Job | null>(null),
     [hint, setHint] = useState(
-      "Select a clip to explore its words. Double-click an empty slot to write.",
+      "Write in the chapter above. Explore words and experiment in the sandbox below.",
     ),
     [word, setWord] = useState("I"),
     [selection, setSelection] = useState(""),
@@ -269,8 +266,11 @@ export default function App() {
       savedNumber("alder.browserWidth", 342, 240, 800),
     ),
     [detailHeight, setDetailHeight] = useState(() =>
-      savedNumber("alder.detailHeight", 310, 180, 700),
+      savedNumber("alder.bookSandboxHeight", 230, 180, 700),
     );
+  const [chapterId, setChapterId] = useState<string | null>(null);
+  const [writingFocus, setWritingFocus] = useState(true);
+  const bookEditor = useRef<EditorHandle>(null);
   const editor = useRef<EditorHandle>(null),
     audio = useRef<HTMLAudioElement>(null),
     importFile = useRef<HTMLInputElement>(null),
@@ -281,6 +281,12 @@ export default function App() {
   const clip = project?.clips.find((c) => c.id === selected) || null,
     track = project?.tracks.find((t) => t.id === clip?.trackId) || null,
     content = clip ? chosenClip(clip) : null;
+  const chapter =
+    project?.book?.chapters.find((c) => c.id === chapterId) ||
+    project?.book?.chapters[0];
+  const activeContent = writingFocus && chapter ? chapter : content;
+  const targetEditor = () =>
+    writingFocus ? bookEditor.current : editor.current;
   const run = useCallback(
     async (fn: () => Promise<void>) => {
       try {
@@ -355,11 +361,11 @@ export default function App() {
   }, [speed, loop]);
   useEffect(() => {
     setAnalysis(null);
-    if (!content || !project) {
+    if (!activeContent || !project) {
       return;
     }
     let cancelled = false;
-    const text = content.text;
+    const text = activeContent.text;
     const rules = track?.devices
       .filter(
         (d) =>
@@ -389,7 +395,9 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [
-    content?.text,
+    activeContent?.text,
+    writingFocus,
+    chapter?.id,
     clip?.id,
     clip?.activeVariantId,
     project?.id,
@@ -461,7 +469,7 @@ export default function App() {
     trackId: string,
     slot: number,
     text = "",
-    title = "Untitled clip",
+    title = "Untitled draft",
   ) => {
     const id = uid();
     change((p) => {
@@ -486,6 +494,7 @@ export default function App() {
     setSelected(id);
     setDetail("Clip");
     setDetailOpen(true);
+    setWritingFocus(false);
     setTimeout(() => editor.current?.focus(), 50);
   };
   const newProject = () =>
@@ -501,9 +510,9 @@ export default function App() {
         {
           name: "template",
           label: "Template",
-          value: "blank",
+          value: "book",
           options: [
-            { value: "blank", label: "Blank workspace" },
+            { value: "blank", label: "Blank document" },
             { value: "demo", label: "First light · a guided example" },
             { value: "essay", label: "Essay" },
             { value: "book", label: "Book" },
@@ -514,208 +523,20 @@ export default function App() {
       action: async (v) => {
         await flush();
         load(await api("/api/projects", "POST", v));
-        setView("Sandbox");
+        setView("Write");
       },
     });
-  const addTrack = () =>
-    setForm({
-      title: "New language track",
-      fields: [
-        {
-          name: "name",
-          label: "Track name",
-          value: `Language ${(project?.tracks.length || 0) + 1}`,
-          required: true,
-        },
-        { name: "role", label: "Role", value: "Writing" },
-        {
-          name: "color",
-          label: "Track colour",
-          value: ["#9baeff", "#c391d6", "#89cbc4", "#d4c58e"][
-            (project?.tracks.length || 0) % 4
-          ],
-          type: "color",
-        },
-      ],
-      submit: "Add track",
-      action: (v) =>
-        change((p) =>
-          p.tracks.push({
-            id: uid(),
-            name: v.name,
-            role: v.role,
-            color: v.color,
-            voiceId: "default",
-            muted: false,
-            solo: false,
-            devices: [],
-          }),
-        ),
-    });
-  const editTrack = (id: string) => {
-    const t = project?.tracks.find((t) => t.id === id);
-    if (!t) return;
-    setForm({
-      title: "Track settings",
-      fields: [
-        { name: "name", label: "Name", value: t.name, required: true },
-        { name: "role", label: "Role", value: t.role },
-        { name: "color", label: "Colour", value: t.color, type: "color" },
-        {
-          name: "voiceId",
-          label: "Default voice",
-          value: t.voiceId,
-          options: voices.map((v) => ({ value: v.id, label: v.name })),
-        },
-      ],
-      submit: "Apply",
-      action: (v) =>
-        change((p) => Object.assign(p.tracks.find((t) => t.id === id)!, v)),
-      danger: {
-        label: "Delete track",
-        action: () =>
-          change((p) => {
-            const ids = p.clips
-              .filter((c) => c.trackId === id)
-              .map((c) => c.id);
-            p.clips = p.clips.filter((c) => c.trackId !== id);
-            p.placements = p.placements.filter((x) => !ids.includes(x.clipId));
-            p.tracks = p.tracks.filter((t) => t.id !== id);
-          }),
-      },
-    });
-  };
-  const addSection = () =>
-    setForm({
-      title: "Add document section",
-      fields: [
-        {
-          name: "title",
-          label: "Section title",
-          value: `Chapter ${(project?.sections.length || 0) + 1}`,
-          required: true,
-        },
-        {
-          name: "role",
-          label: "Role",
-          value: "chapter",
-          options: [
-            "introduction",
-            "part",
-            "chapter",
-            "appendix",
-            "notes",
-            "backmatter",
-          ].map((v) => ({ value: v, label: v })),
-        },
-      ],
-      submit: "Add section",
-      action: (v) =>
-        change((p) =>
-          p.sections.push({
-            id: uid(),
-            title: v.title,
-            role: v.role,
-            order: p.sections.length,
-          }),
-        ),
-    });
-  const editSection = (id: string) => {
-    const section = project?.sections.find((s) => s.id === id);
-    if (section)
-      setForm({
-        title: "Section settings",
-        fields: [
-          {
-            name: "title",
-            label: "Title",
-            value: section.title,
-            required: true,
-          },
-          { name: "role", label: "Role", value: section.role },
-          {
-            name: "order",
-            label: "Position (first = 1)",
-            value: section.order + 1,
-            type: "number",
-          },
-        ],
-        submit: "Apply",
-        action: (v) =>
-          change((p) => {
-            const s = p.sections.find((x) => x.id === id)!;
-            s.title = v.title;
-            s.role = v.role;
-            const ordered = p.sections
-              .filter((x) => x.id !== id)
-              .sort((a, b) => a.order - b.order);
-            ordered.splice(
-              Math.max(0, Math.min(ordered.length, Number(v.order) - 1)),
-              0,
-              s,
-            );
-            ordered.forEach((s, i) => (s.order = i));
-            p.sections = ordered;
-          }),
-      });
-  };
   const collate = (id: string, sectionId?: string) => {
-    change((p) => {
-      if (!p.sections.length)
-        p.sections.push({
-          id: uid(),
-          title: "Chapter 1",
-          role: "chapter",
-          order: 0,
-        });
-      const section = sectionId || p.sections[0].id;
-      p.placements.push({
-        id: uid(),
-        clipId: id,
-        sectionId: section,
-        order: p.placements.filter((x) => x.sectionId === section).length,
-        include: true,
-        frozenDocument: null,
-        frozenText: null,
-      });
-    });
+    const source = project?.clips.find((c) => c.id === id);
+    if (!source) return;
+    bookEditor.current?.insertDocument(chosenClip(source).document);
     setHint(
-      "A linked clip was added to the collation. Edits will follow the source.",
+      "Inserted a copy into the chapter. The sandbox keeps its own wording.",
     );
   };
-  const placement = (id: string, action: string) =>
-    change((p) => {
-      const item = p.placements.find((x) => x.id === id);
-      if (!item) return;
-      if (action === "remove")
-        p.placements = p.placements.filter((x) => x.id !== id);
-      if (action === "include") item.include = !item.include;
-      if (action === "freeze") {
-        if (item.frozenDocument) {
-          item.frozenDocument = null;
-          item.frozenText = null;
-        } else {
-          const c = p.clips.find((c) => c.id === item.clipId);
-          if (c) {
-            item.frozenDocument = structuredClone(chosenClip(c).document);
-            item.frozenText = chosenClip(c).text;
-          }
-        }
-      }
-      if (action === "up" || action === "down") {
-        const list = p.placements
-          .filter((x) => x.sectionId === item.sectionId)
-          .sort((a, b) => a.order - b.order);
-        const at = list.findIndex((x) => x.id === id),
-          next = at + (action === "up" ? -1 : 1);
-        if (next >= 0 && next < list.length)
-          [list[at], list[next]] = [list[next], list[at]];
-        list.forEach((x, i) => (x.order = i));
-      }
-    });
   const insertIdea = (idea: Idea) => {
-    if (clip && editor.current) {
-      editor.current.insert(idea.word);
+    if (targetEditor()) {
+      targetEditor()!.insert(idea.word);
       setHint(`Inserted “${idea.word}” from ${idea.category}.`);
     } else if (project)
       createClip(project.tracks[0]?.id || "", 0, idea.word, idea.word);
@@ -767,20 +588,6 @@ export default function App() {
     setJobs((j) => [job, ...j.filter((x) => x.id !== job.id)]);
     setHint("Preparing local narration…");
   };
-  const readRow = (slot: number) => {
-    if (!project) return;
-    const anySolo = project.tracks.some((t) => t.solo);
-    const texts = project.tracks
-      .filter((t) => !t.muted && (!anySolo || t.solo))
-      .map((t) =>
-        project.clips.find((c) => c.trackId === t.id && c.slot === slot),
-      )
-      .filter(Boolean)
-      .map((c) => chosenClip(c!).text);
-    if (texts.length)
-      void run(() => startSpeech(undefined, "selection", texts.join("\n\n")));
-    else setHint("This row has no clips on audible tracks.");
-  };
   const transport = () => {
     if (
       audio.current?.src &&
@@ -789,13 +596,7 @@ export default function App() {
     ) {
       if (playing) audio.current.pause();
       else void audio.current.play().catch((e) => setError(e.message));
-    } else
-      void run(() =>
-        startSpeech(
-          selected || undefined,
-          view === "Sandbox" ? "clip" : "collation",
-        ),
-      );
+    } else void run(() => startSpeech(selected || undefined, "collation"));
   };
   const saveProject = async () => {
     if (!project) return;
@@ -889,7 +690,7 @@ export default function App() {
       return;
     }
     setForm({
-      title: "Split clip",
+      title: "Split draft",
       description:
         "Create two independent clips at a paragraph boundary. The source clip, its takes, and existing collation placements are retained.",
       fields: [
@@ -986,7 +787,7 @@ export default function App() {
     setForm({
       title: "Find and replace",
       description:
-        "Find searches the current clip. Replace all changes the selected clip and is undoable.",
+        "Search the active chapter or sandbox draft. Replacements preserve surrounding formatting and can be undone.",
       fields: [
         { name: "find", label: "Find", value: word },
         { name: "replace", label: "Replace with" },
@@ -995,31 +796,23 @@ export default function App() {
           label: "Action",
           options: [
             { value: "find", label: "Find next" },
-            { value: "replace", label: "Replace all in clip" },
+            { value: "replace", label: "Replace all" },
           ],
         },
       ],
       submit: "Apply",
       action: (v) => {
-        if (!content || !v.find) return;
-        const at = content.text.indexOf(v.find);
+        if (!activeContent || !v.find) return;
+        const start = targetEditor()?.getSelectionOffsets().end || 0;
+        const next = activeContent.text.indexOf(v.find, start),
+          at = next >= 0 ? next : activeContent.text.indexOf(v.find);
         if (at < 0) {
-          setHint("No matching text in this clip.");
+          setHint("No matching text.");
           return;
         }
         if (v.mode === "find")
-          editor.current?.selectRange(at, at + v.find.length);
-        else {
-          const map = (n: DocNode): DocNode => ({
-            ...n,
-            text: n.text?.split(v.find).join(v.replace),
-            content: n.content?.map(map),
-          });
-          updateContent(
-            map(content.document),
-            content.text.split(v.find).join(v.replace),
-          );
-        }
+          targetEditor()?.selectRange(at, at + v.find.length);
+        else targetEditor()?.replaceAll(v.find, v.replace || "");
       },
     });
   useEffect(() => {
@@ -1038,11 +831,9 @@ export default function App() {
       if (!editable) {
         if (e.code === "Space") {
           e.preventDefault();
-          transport();
-        }
-        if (e.key === "Tab") {
-          e.preventDefault();
-          setView((v) => (v === "Sandbox" ? "Collation" : "Sandbox"));
+          window.dispatchEvent(
+            new CustomEvent("alder-reading-command", { detail: "toggle" }),
+          );
         }
         if ((e.ctrlKey || e.metaKey) && e.key === "z") {
           e.preventDefault();
@@ -1089,7 +880,7 @@ export default function App() {
     await flush();
     const asset = await upload(`/api/projects/${project.id}/assets`, file);
     load(await api(`/api/projects/${project.id}`));
-    editor.current?.image(
+    targetEditor()?.image(
       `/api/projects/${project.id}/assets/${asset.id}`,
       asset.id,
       file.name.replace(/\.[^.]+$/, ""),
@@ -1178,20 +969,36 @@ export default function App() {
     ],
     Create: [
       {
-        label: "Language clip",
+        label: "Sandbox draft",
         action: () =>
           createClip(
             track?.id || project.tracks[0]?.id || "",
             clip ? clip.slot + 1 : 0,
           ),
       },
-      { label: "Language track…", action: addTrack },
-      { label: "Document section…", action: addSection },
+      {
+        label: "Chapter",
+        action: () => {
+          const c = newChapter(
+            `Chapter ${(project.book?.chapters.length || 0) + 1}`,
+          );
+          change((p) => p.book!.chapters.push(c));
+          setChapterId(c.id);
+          setView("Write");
+        },
+      },
+
       { label: "Idea sample…", action: () => openPanel("ideas") },
       { label: "Definition card…", action: () => openPanel("definitions") },
     ],
-    Playback: [
-      { label: playing ? "Pause" : "Read / play", action: transport },
+    Read: [
+      {
+        label: "Pause / resume reading",
+        action: () =>
+          window.dispatchEvent(
+            new CustomEvent("alder-reading-command", { detail: "toggle" }),
+          ),
+      },
       {
         label: "Read selection",
         action: () => void run(() => startSpeech(undefined, "selection")),
@@ -1301,130 +1108,57 @@ export default function App() {
           <Save size={13} />
         </button>
       </div>
-      <div className="transport">
-        <button
-          className="browser-toggle"
-          aria-label="Toggle browser"
-          onClick={() => setBrowserOpen((v) => !v)}
-        >
-          {browserOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
+      <div className="writing-commandbar">
+        <button onClick={() => importFile.current?.click()}>
+          <FolderOpen size={14} />
+          Open document
         </button>
-        <div className="transport-group">
-          <span className="control-label">Read</span>
-          <select
-            aria-label="Playback speed"
-            value={speed}
-            onChange={(e) => setSpeed(Number(e.target.value))}
-          >
-            {[0.75, 1, 1.25, 1.5, 1.75, 2].map((s) => (
-              <option key={s} value={s}>
-                {s.toFixed(2)}×
-              </option>
-            ))}
-          </select>
-          <button
-            className={loop ? "active" : ""}
-            aria-label="Loop playback"
-            title="Loop playback"
-            onClick={() => setLoop((v) => !v)}
-          >
-            <Repeat2 />
-          </button>
-        </div>
-        <div className="transport-group">
-          <span className="control-label">Language</span>
-          <select
-            aria-label="Project language"
-            value={project.language}
-            onChange={(e) =>
-              change((p) => {
-                p.language = e.target.value;
-              })
-            }
-          >
-            <option value="en">English</option>
-          </select>
-        </div>
-        <div className="transport-middle">
-          <div className="position-display">
-            {duration(time)}
-            <span>/ {duration(audioDuration)}</span>
-          </div>
-          <button
-            className={"play-button " + (playing ? "playing" : "")}
-            title={playing ? "Pause" : "Play / read"}
-            aria-label={playing ? "Pause playback" : "Play narration"}
-            onClick={transport}
-          >
-            {playing ? (
-              <Pause fill="currentColor" />
-            ) : (
-              <Play fill="currentColor" />
-            )}
-          </button>
-          <button
-            title="Stop"
-            aria-label="Stop playback"
-            onClick={() => {
-              audio.current?.pause();
-              if (audio.current) audio.current.currentTime = 0;
-              setTime(0);
-            }}
-          >
-            <Square fill="currentColor" />
-          </button>
-          <button
-            title="Read selection"
-            aria-label="Read selection"
-            onClick={() => void run(() => startSpeech(undefined, "selection"))}
-          >
-            <Volume2 />
-          </button>
-          <button
-            title="New clip"
-            aria-label="New clip"
-            onClick={() =>
-              createClip(
-                track?.id || project.tracks[0]?.id || "",
-                clip ? clip.slot + 1 : 0,
-              )
-            }
-          >
-            <Plus />
-          </button>
-        </div>
-        <div className="transport-group render-status">
-          <span
-            className={
-              "status-light " +
-              (jobs.some((j) =>
-                ["queued", "preparing", "generating", "checking"].includes(
-                  j.status,
-                ),
-              )
-                ? "busy"
-                : "")
-            }
-          />
-          <span>
-            {activeJob &&
-            ["queued", "preparing", "generating", "checking"].includes(
-              activeJob.status,
-            )
-              ? `${activeJob.message || "Rendering"} ${Math.round(activeJob.progress <= 1 ? activeJob.progress * 100 : activeJob.progress)}%`
-              : "Chatterbox · Local"}
-          </span>
-        </div>
         <button
-          title="Document setup"
-          aria-label="Document setup"
-          onClick={() => openPanel("settings")}
+          onClick={() =>
+            void run(async () => {
+              const text = window.alder?.readClipboard
+                ? await window.alder.readClipboard()
+                : await navigator.clipboard.readText();
+              if (!text.trim())
+                throw new Error("The clipboard contains no text.");
+              const c = newChapter("Clipboard", textDoc(text));
+              change((p) => p.book!.chapters.push(c));
+              setChapterId(c.id);
+              setView("Write");
+            })
+          }
         >
-          <Settings2 />
+          <Copy size={14} />
+          Clipboard
         </button>
-        <button className="export-button" onClick={() => openPanel("export")}>
+        <button onClick={() => openPanel("styles")}>
+          <FileText size={14} />
+          Styles
+        </button>
+        <button onClick={() => openPanel("settings")}>
+          <Settings2 size={14} />
+          Page setup
+        </button>
+        <button
+          onClick={() => {
+            const c = newChapter(
+              `Chapter ${project.book!.chapters.length + 1}`,
+            );
+            change((p) => p.book!.chapters.push(c));
+            setChapterId(c.id);
+            setView("Write");
+          }}
+        >
+          <Plus size={14} />
+          Chapter
+        </button>
+        <span>
+          {project.book?.chapters.length || 0} chapters ·{" "}
+          {words(bookText(project))} words
+        </span>
+        <button onClick={() => openPanel("export")}>
           <Download size={14} />
-          Export
+          Export book
         </button>
       </div>
       <div className="workspaces">
@@ -1458,9 +1192,8 @@ export default function App() {
           </div>
           <div className="view-tabs" role="tablist">
             {[
-              { name: "Sandbox", icon: Columns3 },
-              { name: "Collation", icon: AlignJustify },
-              { name: "Manuscript", icon: BookOpen },
+              { name: "Write", icon: FileText },
+              { name: "Pages", icon: Columns3 },
               { name: "Page Preview", icon: FileText },
             ].map(({ name, icon: Icon }) => (
               <button
@@ -1502,68 +1235,61 @@ export default function App() {
               />
             </>
           )}
-          <Workspace
+          <BookWorkspace
+            key={project.id}
             project={project}
+            change={change}
+            flush={flush}
             view={view}
-            selected={selected}
-            onSelect={selectClip}
-            onCreate={createClip}
-            onMove={(id, trackId, slot, copy) =>
-              change((p) => {
-                const source = p.clips.find((c) => c.id === id);
-                if (!source) return;
-                const occupied = p.clips.find(
-                  (c) => c.trackId === trackId && c.slot === slot,
-                );
-                if (copy) {
-                  let free = slot;
-                  while (
-                    p.clips.some(
-                      (c) => c.trackId === trackId && c.slot === free,
-                    )
-                  )
-                    free++;
-                  p.clips.push({
-                    ...structuredClone(source),
-                    id: uid(),
-                    trackId,
-                    slot: free,
-                    title: source.title + " copy",
-                    variants: [],
-                    activeVariantId: null,
-                    document: structuredClone(chosenClip(source).document),
-                    text: chosenClip(source).text,
-                  });
-                } else {
-                  if (occupied && occupied.id !== id) {
-                    occupied.trackId = source.trackId;
-                    occupied.slot = source.slot;
-                  }
-                  source.trackId = trackId;
-                  source.slot = slot;
-                }
+            chapterId={chapterId}
+            onChapter={(id) => {
+              setChapterId(id);
+              setWritingFocus(true);
+              setAnalysis(null);
+            }}
+            editorRef={bookEditor}
+            onSelection={(w, selection) => {
+              setWord(w);
+              setSelection(selection);
+              setCandidate("");
+            }}
+            onFocus={() => setWritingFocus(true)}
+            onComplete={() =>
+              api<{ suggestions: string[] }>(
+                `/api/complete?prefix=${encodeURIComponent(word)}&projectId=${project.id}`,
+              )
+                .then((r) => setCompletion(r.suggestions))
+                .catch((e) => setError(e.message))
+            }
+            onImage={() => imageFile.current?.click()}
+            onLink={() =>
+              setForm({
+                title: "Insert link",
+                fields: [
+                  {
+                    name: "url",
+                    label: "URL",
+                    value: "https://",
+                    required: true,
+                  },
+                  {
+                    name: "label",
+                    label: "Link text",
+                    value: selection || word,
+                  },
+                ],
+                submit: "Insert",
+                action: (v) => {
+                  if (!/^https?:\/\//i.test(v.url))
+                    throw new Error("Use an http or https link.");
+                  bookEditor.current?.link(v.label, v.url);
+                },
               })
             }
-            onPlay={(id, scope) => void run(() => startSpeech(id, scope))}
-            onRow={readRow}
-            onTrack={editTrack}
-            onToggleTrack={(id, field) =>
-              change((p) => {
-                const t = p.tracks.find((t) => t.id === id)!;
-                t[field] = !t[field];
-              })
+            onRead={(c) =>
+              void run(() => startSpeech(undefined, "selection", c.text))
             }
-            onVoice={(id, voiceId) =>
-              change((p) => {
-                p.tracks.find((t) => t.id === id)!.voiceId = voiceId;
-              })
-            }
-            voices={voices}
-            onAddTrack={addTrack}
-            onCollate={collate}
-            onPlacement={placement}
-            onAddSection={addSection}
-            onSection={editSection}
+            annotations={writingFocus ? analysis?.annotations : undefined}
             previewKey={previewRevision}
             previewUrl={mediaUrl(
               `/api/projects/${project.id}/preview?r=${previewRevision}`,
@@ -1584,7 +1310,7 @@ export default function App() {
             >
               {clip ? (
                 <input
-                  aria-label="Clip title"
+                  aria-label="Sandbox draft title"
                   value={clip.title}
                   onChange={(e) =>
                     change((p) => {
@@ -1594,7 +1320,7 @@ export default function App() {
                   }
                 />
               ) : (
-                <span>No clip selected</span>
+                <span>No sandbox draft selected</span>
               )}
             </div>
             <div className="detail-tabs" role="tablist">
@@ -1613,25 +1339,19 @@ export default function App() {
                   ) : (
                     <AudioLines size={12} />
                   )}{" "}
-                  {t}
+                  {t === "Clip"
+                    ? "Sandbox"
+                    : t === "Devices"
+                      ? "Language tools"
+                      : t}
                 </button>
               ))}
             </div>
             <span className="detail-spacer" />
             {clip && (
               <>
-                <span
-                  className="link-count"
-                  title="Linked collation placements"
-                >
-                  <Link size={12} />
-                  {
-                    project.placements.filter((p) => p.clipId === clip.id)
-                      .length
-                  }
-                </span>
                 <select
-                  aria-label="Active take"
+                  aria-label="Draft version"
                   value={clip.activeVariantId || ""}
                   onChange={(e) =>
                     change((p) => {
@@ -1648,29 +1368,29 @@ export default function App() {
                   ))}
                 </select>
                 <button
-                  title="Create alternate take"
-                  aria-label="Create alternate take"
+                  title="Create draft version"
+                  aria-label="Create draft version"
                   onClick={variant}
                 >
                   <GitBranch size={13} />
                 </button>
                 <button
-                  title="Duplicate clip"
-                  aria-label="Duplicate clip"
+                  title="Duplicate draft"
+                  aria-label="Duplicate draft"
                   onClick={duplicate}
                 >
                   <Copy size={13} />
                 </button>
                 <button
-                  title="Split clip"
-                  aria-label="Split clip"
+                  title="Split draft"
+                  aria-label="Split draft"
                   onClick={splitClip}
                 >
                   <Scissors size={13} />
                 </button>
                 <button
-                  title="Consolidate with next clip"
-                  aria-label="Consolidate clips"
+                  title="Combine with next draft"
+                  aria-label="Combine drafts"
                   onClick={mergeClip}
                 >
                   <Combine size={13} />
@@ -1679,7 +1399,7 @@ export default function App() {
                   className="add-collation"
                   onClick={() => collate(clip.id)}
                 >
-                  Add to collation <ArrowRight size={12} />
+                  Insert into chapter <ArrowRight size={12} />
                 </button>
               </>
             )}
@@ -1705,7 +1425,7 @@ export default function App() {
                     </label>
                   </div>
                   <label>
-                    Track
+                    Collection
                     <select
                       value={clip.trackId}
                       onChange={(e) =>
@@ -1734,7 +1454,7 @@ export default function App() {
                   <label>
                     Voice
                     <select
-                      aria-label="Clip voice"
+                      aria-label="Draft voice"
                       value={clip.voiceId || ""}
                       onChange={(e) =>
                         change((p) => {
@@ -1743,7 +1463,7 @@ export default function App() {
                         })
                       }
                     >
-                      <option value="">Track default</option>
+                      <option value="">Default voice</option>
                       {voices.map((v) => (
                         <option key={v.id} value={v.id}>
                           {v.name}
@@ -1771,17 +1491,17 @@ export default function App() {
                     onClick={() => void run(() => startSpeech(clip.id))}
                   >
                     <Play size={12} />
-                    Read clip
+                    Read draft
                   </button>
                   <button
                     className="wide subtle"
                     onClick={() =>
                       setForm({
-                        title: "Delete clip",
+                        title: "Delete draft",
                         description:
-                          "This removes the clip and its collation placements. You can undo the change.",
+                          "This removes the sandbox draft. Text already copied into the book is retained. You can undo the change.",
                         fields: [],
-                        submit: "Delete clip",
+                        submit: "Delete draft",
                         action: () =>
                           change((p) => {
                             p.clips = p.clips.filter((c) => c.id !== clip.id);
@@ -1793,11 +1513,12 @@ export default function App() {
                     }
                   >
                     <Trash2 size={11} />
-                    Delete clip
+                    Delete draft
                   </button>
                 </aside>
                 <Editor
                   ref={editor}
+                  onFocus={() => setWritingFocus(false)}
                   document={content.document}
                   identity={`${clip.id}:${clip.activeVariantId || "original"}`}
                   onChange={updateContent}
@@ -1806,7 +1527,9 @@ export default function App() {
                     setSelection(s);
                     setCandidate("");
                   }}
-                  annotations={analysis?.annotations}
+                  annotations={
+                    !writingFocus ? analysis?.annotations : undefined
+                  }
                   showStructure={structure}
                   onToggleStructure={() => setStructure((v) => !v)}
                   onImage={() => imageFile.current?.click()}
@@ -1837,7 +1560,7 @@ export default function App() {
                       action: (v) => {
                         if (!/^https?:\/\//i.test(v.url))
                           throw new Error("Use an http or https link.");
-                        editor.current?.link(v.label, v.url);
+                        targetEditor()?.link(v.label, v.url);
                       },
                     })
                   }
@@ -1878,7 +1601,11 @@ export default function App() {
                           className={lexTab === t ? "active" : ""}
                           onClick={() => setLexTab(t)}
                         >
-                          {t}
+                          {t === "Clip"
+                            ? "Sandbox"
+                            : t === "Devices"
+                              ? "Language tools"
+                              : t}
                         </button>
                       ),
                     )}
@@ -1890,7 +1617,7 @@ export default function App() {
                           <div className="check-item" key={a.id}>
                             <button
                               onClick={() =>
-                                editor.current?.selectRange(a.start, a.end)
+                                targetEditor()?.selectRange(a.start, a.end)
                               }
                             >
                               <span className="check-type">{a.type}</span>
@@ -1900,7 +1627,7 @@ export default function App() {
                               <button
                                 className="suggestion-button"
                                 onClick={() =>
-                                  editor.current?.replaceRange(
+                                  targetEditor()?.replaceRange(
                                     a.start,
                                     a.end,
                                     a.suggestion!,
@@ -1947,7 +1674,7 @@ export default function App() {
                       ) : (
                         <div className="no-findings">
                           <Check size={20} />
-                          <p>No findings in this clip.</p>
+                          <p>No findings in this text.</p>
                         </div>
                       )
                     ) : lexTab === "Definition" ? (
@@ -2046,7 +1773,10 @@ export default function App() {
                             startSpeech(
                               undefined,
                               "selection",
-                              content.text.replace(word, candidate),
+                              (activeContent?.text || "").replace(
+                                word,
+                                candidate,
+                              ),
                             ),
                           )
                         }
@@ -2056,7 +1786,7 @@ export default function App() {
                       <button
                         className="accent"
                         onClick={() => {
-                          editor.current?.replace(candidate);
+                          targetEditor()?.replace(candidate);
                           setCandidate("");
                         }}
                       >
@@ -2069,11 +1799,11 @@ export default function App() {
             ) : (
               <div className="detail-empty">
                 <FileText size={28} />
-                <p>Double-click an empty clip slot to start writing.</p>
+                <p>Create a sandbox draft to experiment with wording.</p>
                 <button
                   onClick={() => createClip(project.tracks[0]?.id || "", 0)}
                 >
-                  Create language clip
+                  New sandbox draft
                 </button>
               </div>
             )
@@ -2301,7 +2031,7 @@ export default function App() {
                   }
                 >
                   <Play size={13} />
-                  Render collation
+                  Render book
                 </button>
                 <button onClick={() => openPanel("voices")}>
                   Manage voices
@@ -2319,7 +2049,7 @@ export default function App() {
               <div className="job-list">
                 {!jobs.length && (
                   <div className="empty-small">
-                    No narration jobs yet. Select a clip and press Read clip.
+                    No narration jobs yet. Choose a chapter or draft to read.
                   </div>
                 )}
                 {jobs.map((job) => (
@@ -2496,7 +2226,7 @@ export default function App() {
           {saveState}
         </span>
         <span className="status-project-count">
-          {words(collatedText(project))} collated words
+          {words(bookText(project))} book words
         </span>
         <button
           className={detailOpen ? "active" : ""}
@@ -2517,7 +2247,7 @@ export default function App() {
             <button
               key={item}
               onClick={() => {
-                editor.current?.replace(item);
+                targetEditor()?.replace(item);
                 setCompletion([]);
               }}
             >
@@ -2543,16 +2273,23 @@ export default function App() {
         hidden
         ref={importFile}
         type="file"
-        accept=".txt,.md,.markdown,.html,.htm,.docx,.epub"
+        multiple
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file)
+          const files = Array.from(e.target.files || []);
+          if (files.length)
             void run(async () => {
-              setBusy("Importing document…");
+              setBusy("Importing documents…");
               try {
                 await flush();
-                load(await upload(`/api/projects/${project.id}/import`, file));
-                setView("Collation");
+                for (const file of files) {
+                  const imported = await upload<Project>(
+                    `/api/projects/${project.id}/import`,
+                    file,
+                  );
+                  load(imported);
+                  setChapterId(imported.book?.chapters.at(-1)?.id || null);
+                }
+                setView("Write");
               } finally {
                 setBusy("");
               }
@@ -2623,7 +2360,7 @@ export default function App() {
                     dictionary: "Project dictionary",
                     styles: "Styles",
                     assets: "Project assets",
-                    export: "Export collation",
+                    export: "Export book",
                     help: "Getting started",
                     about: "About Alder",
                     accessibility: "Accessibility",
@@ -2953,6 +2690,15 @@ export default function App() {
                             required: true,
                           },
                           { name: "spoken", label: "Speak as", required: true },
+                          {
+                            name: "mode",
+                            label: "Match",
+                            value: "literal",
+                            options: [
+                              { value: "literal", label: "Literal wording" },
+                              { value: "regex", label: "Regular expression" },
+                            ],
+                          },
                         ],
                         submit: "Add pronunciation",
                         action: (v) =>
@@ -2961,6 +2707,7 @@ export default function App() {
                               id: uid(),
                               word: v.word,
                               spoken: v.spoken,
+                              regex: v.mode === "regex",
                               caseSensitive: false,
                               voiceId: null,
                             }),
@@ -3043,7 +2790,7 @@ export default function App() {
                   onChange={change}
                   onError={setError}
                   onApply={(id, kind) => {
-                    editor.current?.style(id, kind);
+                    targetEditor()?.style(id, kind);
                     setPanel(null);
                   }}
                 />
@@ -3060,8 +2807,8 @@ export default function App() {
                     ))
                   ) : (
                     <p>
-                      No project assets yet. Insert an image in a language clip
-                      to collect it with the project.
+                      No project assets yet. Insert an image in a chapter or
+                      sandbox draft to collect it with the project.
                     </p>
                   )}
                   <button onClick={() => imageFile.current?.click()}>
@@ -3077,13 +2824,14 @@ export default function App() {
                       <h2>{project.name}</h2>
                       <p>
                         {project.sections.length} sections ·{" "}
-                        {project.placements.filter((p) => p.include).length}{" "}
-                        included passages · {words(collatedText(project))} words
+                        {project.book?.chapters.filter((c) => c.include).length}{" "}
+                        included chapters · {words(collatedText(project))} words
                       </p>
                     </div>
                   </div>
                   <p>
-                    Export the ordered collation at its current saved revision.
+                    Export the book in chapter order at its current saved
+                    revision.
                   </p>
                   <label className="checkbox-label">
                     <input
@@ -3211,9 +2959,10 @@ export default function App() {
                     High contrast
                   </label>
                   <p>
-                    Use Tab outside the editor to switch Sandbox and Collation.
-                    Space controls playback outside text fields. Ctrl+S saves;
-                    Ctrl+F finds text. Every clip slot is keyboard focusable.
+                    Use the Write and Pages views to write and arrange your
+                    book. Space controls playback outside text fields. Ctrl+S
+                    saves; Ctrl+F finds text. Chapter and page navigation are
+                    keyboard accessible.
                   </p>
                 </div>
               )}
@@ -3222,27 +2971,28 @@ export default function App() {
                   <h2>A place to work with language.</h2>
                   <ol>
                     <li>
-                      <strong>Collect.</strong> Browse Ideas. Drag a sample such
-                      as Prime → I into an empty slot.
+                      <strong>Write.</strong> Write continuous chapter text on
+                      the main pages. Formatting, lists, tables, images and page
+                      breaks belong to the document.
                     </li>
                     <li>
-                      <strong>Write.</strong> Select a clip and write in the
-                      lower editor. Select a word to explore alternatives,
-                      forms, and definitions.
+                      <strong>Shape the book.</strong> Add and reorder chapters
+                      in the Book navigator. Use Pages to move the text on a
+                      page into a new reading order.
                     </li>
                     <li>
-                      <strong>Try a take.</strong> Create an alternate take
-                      before experimenting. Audition it with Chatterbox and keep
-                      the wording you prefer.
+                      <strong>Explore language.</strong> Select words in your
+                      chapter to explore alternatives and definitions. Keep
+                      experiments in independent sandbox drafts below.
                     </li>
                     <li>
-                      <strong>Collate.</strong> Add clips to the collation,
-                      arrange their order within sections, and inspect the
-                      manuscript.
+                      <strong>Read.</strong> Open a document, choose Chatterbox
+                      or a Windows SAPI voice, and follow the spoken words. Read
+                      the chapter, book, selection or from the cursor.
                     </li>
                     <li>
-                      <strong>Publish.</strong> Set document styles, preview
-                      pages, and export your writing or narration.
+                      <strong>Publish.</strong> Use Page Preview to inspect the
+                      final typeset output, then export a document or narration.
                     </li>
                   </ol>
                   <p>
@@ -3250,8 +3000,9 @@ export default function App() {
                     to collect the project and its assets into a portable file.
                   </p>
                   <p>
-                    Clip links share edits. Duplicates are independent. Frozen
-                    collation placements retain a particular revision.
+                    Chapters contain continuous text. Pages flow automatically.
+                    Moving pages preserves their current boundaries with page
+                    breaks. The sandbox keeps independent drafts.
                   </p>
                 </div>
               )}

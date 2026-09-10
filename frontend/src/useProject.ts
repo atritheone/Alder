@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project } from "./types";
 import { api } from "./api";
+import { migrateBook } from "./book";
 export function useProject() {
   const [project, setProject] = useState<Project | null>(null),
     [saveState, setSaveState] = useState("Opening project…"),
@@ -12,9 +13,11 @@ export function useProject() {
     timer = useRef<ReturnType<typeof setTimeout> | null>(null),
     flight = useRef<Promise<void> | null>(null);
   const load = useCallback((p: Project) => {
+    const converted = !p.book;
+    p = migrateBook(p);
     current.current = p;
     revision.current = p.revision;
-    dirty.current = false;
+    dirty.current = converted;
     serial.current++;
     setProject(p);
     setSaveState("All changes saved");
@@ -76,6 +79,9 @@ export function useProject() {
     },
     [flush],
   );
+  useEffect(() => {
+    if (project && dirty.current) void flush().catch(() => {});
+  }, [project?.id, flush]);
   useEffect(() => {
     let cancelled = false;
     (async () => {

@@ -17,7 +17,7 @@ from xml.etree.ElementTree import ParseError
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from . import __version__, language
@@ -266,8 +266,6 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         p = store.get(project_id)
         content = await uploaded(file)
         suffix = Path(file.filename or "document.txt").suffix.lower()
-        if suffix not in {".txt", ".md", ".markdown", ".html", ".htm", ".docx", ".epub"}:
-            raise ValidationError("Supported imports are text, Markdown, HTML, DOCX, and EPUB.")
         scratch = store.data_dir / "imports"
         scratch.mkdir(exist_ok=True)
         fd, file_path = tempfile.mkstemp(prefix="import-", suffix=suffix, dir=scratch)
@@ -297,6 +295,9 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         p["placements"].append({"id": uid("placement_"), "clipId": clip_id, "sectionId": section["id"],
                                 "order": max((x["order"] for x in p["placements"] if x["sectionId"] == section["id"]), default=-1) + 1})
         p["lastImport"] = {"name": file.filename, "warnings": imported.get("warnings", []), "clipId": clip_id, "createdAt": now()}
+        if p.get("book"):
+            p["book"]["chapters"].append({"id": uid("chapter_"), "title": imported.get("title") or Path(file.filename).stem,
+                "document": p["clips"][-1]["document"], "text": "", "include": True, "role": "chapter", "voiceId": None})
         return await run_in_threadpool(store.update, project_id, p, p["revision"])
 
     @app.get("/api/projects/{project_id}/preview", response_class=HTMLResponse)
@@ -304,6 +305,15 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         p = store.get(project_id)
         html = await run_in_threadpool(publication().render_html, p, {"assetRoot": store.asset_dir(project_id)})
         return HTMLResponse(html, headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data: 'self'; font-src data: 'self'; base-uri 'none'; frame-ancestors 'self' http://localhost:5173 http://127.0.0.1:5173 http://localhost:4173 http://127.0.0.1:4173 alder:"})
+
+    @app.get("/api/speech/jobs/{job_id}/subtitles")
+    async def reading_subtitles(job_id: str, format: str = "srt"):
+        from .reading import subtitles
+        job = speech.get_job(job_id)
+        if job["status"] != "ready":
+            raise ValidationError("Complete the narration before exporting timed text.")
+        text = subtitles(job, format)
+        return Response(text, media_type="text/plain; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="narration.{format}"'})
 
     @app.post("/api/projects/{project_id}/export")
     async def export(project_id: str, request: Request):

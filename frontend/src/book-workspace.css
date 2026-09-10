@@ -1,0 +1,341 @@
+.book-workspace {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  background: #969b96;
+}
+.book-outline {
+  width: 190px;
+  flex: none;
+  background: #d7dad3;
+  border-right: 1px solid #939a90;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 8px;
+  gap: 12px;
+}
+.book-outline header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+.book-outline header button {
+  margin-left: auto;
+}
+.book-outline p {
+  font-size: 10px;
+  color: #60695e;
+  margin: 0 5px;
+}
+.chapter-list {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.chapter-entry {
+  border: 1px solid transparent;
+  margin: 4px 0;
+}
+.chapter-entry.selected {
+  background: #ecf0e5;
+  border-color: #8b9d7c;
+}
+.chapter-select {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 9px 5px;
+  justify-content: flex-start;
+  gap: 8px;
+  white-space: normal;
+}
+.chapter-select span {
+  flex: 1;
+}
+.chapter-select small {
+  display: block;
+  color: #687261;
+  font-size: 10px;
+  margin-top: 3px;
+}
+.chapter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 0 4px 4px;
+}
+.chapter-actions button {
+  padding: 0 3px;
+  min-height: 17px;
+}
+.book-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+.chapter-toolbar,
+.book-page-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px;
+  background: #c9cec4;
+  border-bottom: 1px solid #949b8e;
+  flex: none;
+}
+.chapter-toolbar input[aria-label="Chapter title"] {
+  background: transparent;
+  border-color: transparent;
+  font-size: 15px;
+  font-weight: 600;
+  flex: 1;
+}
+.chapter-toolbar label {
+  white-space: nowrap;
+  font-size: 11px;
+}
+.book-page-tools {
+  font-size: 10px;
+  background: #dce0d7;
+  color: #5a6555;
+}
+.book-page-tools label {
+  margin-left: auto;
+}
+.book-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.book-editor .editor-shell {
+  flex: 1;
+  min-width: 0;
+}
+.paginated-editor .editor-scroll {
+  background: #989e97;
+  padding: 22px;
+}
+.flow-canvas {
+  position: relative;
+  min-height: var(--page-height);
+  flex: none;
+}
+.page-sheets {
+  display: flex;
+  gap: var(--page-gap);
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.page-sheet {
+  position: relative;
+  flex: none;
+  width: var(--page-width);
+  height: var(--page-height);
+  background: #fffefb;
+  box-shadow: 0 2px 7px #47514255;
+}
+.page-sheet > span {
+  position: absolute;
+  bottom: 24px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font: 11px Georgia;
+  color: #64685f;
+}
+.page-flow {
+  position: relative;
+  padding-top: var(--page-margin);
+  padding-left: var(--page-margin);
+}
+.page-flow .ProseMirror {
+  padding: 0;
+  width: calc(var(--page-width) - 2 * var(--page-margin));
+  height: calc(var(--page-height) - 2 * var(--page-margin));
+  min-height: 0;
+  column-width: calc(var(--page-width) - 2 * var(--page-margin));
+  column-gap: calc(2 * var(--page-margin) + var(--page-gap));
+  column-fill: auto;
+  font-size: inherit;
+  line-height: var(--page-leading);
+  overflow: visible;
+  color: #272b26;
+}
+.page-flow .ProseMirror p {
+  line-height: inherit;
+  orphans: 2;
+  widows: 2;
+}
+.page-flow .ProseMirror h1,
+.page-flow .ProseMirror h2,
+.page-flow .ProseMirror h3 {
+  break-after: avoid;
+}
+.page-flow .ProseMirror figure,
+.page-flow .ProseMirror tr {
+  break-inside: avoid;
+}
+.page-flow .ProseMirror img {
+  max-height: calc(var(--page-height) - 2 * var(--page-margin) - 24px);
+  object-fit: contain;
+}
+.page-flow .ProseMirror .page-break {
+  break-before: column;
+  break-after: auto;
+  height: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0;
+}
+.page-flow .ProseMirror .reading-word {
+  background: #e5d56e;
+  color: #1a2116;
+  border-radius: 2px;
+}
+.page-navigation {
+  display: flex;
+  gap: 5px;
+  padding: 7px 12px;
+  overflow: auto;
+  background: #c4cabd;
+  flex: none;
+}
+.page-navigation button {
+  font-size: 10px;
+}
+.page-arranger {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  background: #a9b0a3;
+}
+.page-arranger > p {
+  margin: 0 0 14px;
+  max-width: 780px;
+  font-size: 11px;
+}
+.page-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 20px;
+}
+.page-card {
+  background: #fffefb;
+  min-height: 250px;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  box-shadow: 0 2px 5px #36462f44;
+  cursor: grab;
+}
+.page-card header {
+  color: #77806e;
+  font-size: 10px;
+  border-bottom: 1px solid #dde1d7;
+  padding-bottom: 8px;
+}
+.page-card p {
+  font:
+    11px/1.6 Georgia,
+    serif;
+  flex: 1;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+.page-card footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.measuring-editor {
+  position: absolute;
+  left: -20000px;
+  width: 1100px;
+  height: 700px;
+  visibility: hidden;
+  pointer-events: none;
+}
+@media (max-width: 1100px) {
+  .book-outline {
+    width: 150px;
+  }
+  .chapter-toolbar {
+    gap: 5px;
+  }
+  .book-page-tools > span:nth-child(2) {
+    display: none;
+  }
+}
+
+.writing-commandbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  background: #bbc3b4;
+  border-bottom: 1px solid #929b8a;
+}
+.writing-commandbar > span {
+  flex: 1;
+  text-align: right;
+  padding-right: 12px;
+  color: #526048;
+  font-size: 11px;
+}
+.document-reader {
+  background: #dce3d3;
+  border-bottom: 1px solid #929e85;
+  padding: 7px 10px;
+  flex: none;
+}
+.reader-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+.reader-controls select {
+  max-width: 170px;
+  font-size: 10px;
+}
+.reader-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.reader-controls input[type="range"] {
+  width: 55px;
+}
+.reader-controls input[type="number"] {
+  width: 45px;
+}
+.reader-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: #536348;
+  margin-top: 5px;
+}
+.reader-progress > input {
+  flex: 1;
+  min-width: 60px;
+}
+.document-reader p {
+  font-size: 11px;
+  margin: 4px 0;
+  color: #705022;
+}

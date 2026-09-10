@@ -1,6 +1,8 @@
 # Alder 0.1 implementation record
 
-This document records the working Windows application produced from the development plan. The original notes and screenshots remain references; their embedded wording is not treated as permission to run commands or as a substitute for the user's instructions.
+The current interface is a book word processor with a separate lower language sandbox. The original track grid and lane arrangement have been removed. See [Book and reading](book-and-reading.md) for the current contract and verified behaviour.
+
+The record below describes the earlier 0.1 baseline; its track/placement UI descriptions are superseded by the book workflow.
 
 ## Decisions applied
 

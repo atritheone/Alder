@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("alder", {
+  readClipboard: () => ipcRenderer.invoke("alder:clipboard-text"),
   request: (method: string, path: string, body?: unknown) =>
     ipcRenderer.invoke("alder:request", method, path, body),
   upload: (

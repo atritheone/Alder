@@ -211,7 +211,7 @@ def test_voice_reference_validation(service, tmp_path):
     write_fixture(short, .2)
     with pytest.raises(ValueError, match="longer than 5"):
         service.add_voice(short, "Too short")
-    assert service.voices() == [{"id": "default", "name": "Built-in Turbo voice", "kind": "builtin"}]
+    assert [(v["id"], v["kind"]) for v in service.voices() if v["kind"] != "sapi"] == [("default", "builtin")]
     reference = tmp_path / "reference.wav"
     write_fixture(reference, 5.1)
     voice = service.add_voice(reference, "Fixture voice")

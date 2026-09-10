@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 const root = path.resolve(process.argv[2] || "work/bundle-resources");
 const required = [
   "python/python.exe",
@@ -14,6 +15,7 @@ const required = [
   "speech/ffmpeg/ffprobe.exe",
   "speech/qa/python/python.exe",
   "fonts/LiberationSerif-Regular.ttf",
+  "tools/tika/tika-app-3.3.2.jar",
 ];
 const files = [];
 function walk(p) {
@@ -40,6 +42,12 @@ for (const [name, test] of [
   if (!files.some((f) => test.test(f))) missing.push(name);
 if (missing.length)
   throw new Error("Incomplete self-contained resources: " + missing.join(", "));
+const tika = path.join(root, "tools/tika/tika-app-3.3.2.jar");
+if (
+  createHash("sha512").update(fs.readFileSync(tika)).digest("hex") !==
+  "88c2032cba0d45feea361e6eebd2918bd04707614cdda5d89a1b167da5503c98e7b4cd368336f0402d559abcaf5006fcc7c825c32c749ae0417ea2f3b8423aba"
+)
+  throw new Error("Bundled document extractor failed its checksum.");
 for (const name of [
   "core-resource-manifest.json",
   "core-runtime-audit.json",

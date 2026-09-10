@@ -68,6 +68,7 @@ export type Idea = {
 };
 export type Asset = { id: string; name: string; mime: string; path?: string };
 export type Pronunciation = {
+  regex?: boolean;
   id: string;
   word: string;
   spoken: string;
@@ -92,6 +93,7 @@ export type NamedStyle = StyleProperties & {
   basedOn?: string | null;
 };
 export type Project = {
+  book?: { version: 1; chapters: Chapter[] };
   id: string;
   name: string;
   revision: number;
@@ -120,6 +122,15 @@ export type Project = {
     [key: string]: any;
   };
   assets: Asset[];
+};
+export type Chapter = {
+  id: string;
+  title: string;
+  role: string;
+  document: DocNode;
+  text: string;
+  include: boolean;
+  voiceId: string | null;
 };
 export type Annotation = {
   id: string;
@@ -204,6 +215,14 @@ export type SpeechReviewRequest = {
   note?: string;
 };
 export type SpeechChunk = {
+  wordTimings?: {
+    text: string;
+    sourceStart: number;
+    sourceEnd: number;
+    startSeconds: number;
+    endSeconds: number;
+  }[];
+  timingError?: string;
   id: string;
   text: string;
   spokenText?: string;
@@ -233,6 +252,7 @@ export type SpeechChunk = {
   }[];
 };
 export type Job = {
+  settings?: { pauseSeconds?: number };
   id: string;
   projectId: string;
   sourceRevision: number;
@@ -263,6 +283,7 @@ export type Voice = { id: string; name: string; [key: string]: any };
 declare global {
   interface Window {
     alder?: {
+      readClipboard?: () => Promise<string>;
       request: (method: string, path: string, body?: unknown) => Promise<any>;
       upload: (
         path: string,

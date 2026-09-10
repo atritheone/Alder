@@ -31,9 +31,11 @@ def main():
                 started = time.perf_counter()
                 # No source-text prompt: the recogniser must independently report
                 # audio rather than be biased toward the words being checked.
-                segments, info = model.transcribe(request["path"], language="en", beam_size=5, temperature=0, condition_on_previous_text=False, vad_filter=False, word_timestamps=False)
+                segments, info = model.transcribe(request["path"], language="en", beam_size=5, temperature=0, condition_on_previous_text=False, vad_filter=False, word_timestamps=True)
+                segments = list(segments)
                 pieces = [{"text": segment.text.strip(), "startSeconds": segment.start, "endSeconds": segment.end, "averageLogProbability": segment.avg_logprob, "noSpeechProbability": segment.no_speech_prob} for segment in segments]
-                response = {"id": request.get("id"), "ok": True, "transcript": " ".join(piece["text"] for piece in pieces), "segments": pieces, "language": info.language, "seconds": round(time.perf_counter() - started, 3), "health": health}
+                words = [{"text": w.word.strip(), "startSeconds": w.start, "endSeconds": w.end} for segment in segments for w in (segment.words or [])]
+                response = {"id": request.get("id"), "ok": True, "transcript": " ".join(piece["text"] for piece in pieces), "segments": pieces, "words": words, "language": info.language, "seconds": round(time.perf_counter() - started, 3), "health": health}
         except Exception as exc:
             traceback.print_exc(file=sys.stderr)
             response = {"id": request.get("id"), "ok": False, "error": f"{type(exc).__name__}: {exc}"}

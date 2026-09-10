@@ -181,6 +181,10 @@ export function styleUsageCount(project: Project, id: string): number {
     (node.marks || []).filter((mark) => mark.attrs?.styleId === id).length +
     (node.content || []).reduce((total, child) => total + count(child), 0);
   return (
+    (project.book?.chapters.reduce(
+      (n, chapter) => n + count(chapter.document),
+      0,
+    ) || 0) +
     project.clips.reduce(
       (total, clip) =>
         total +

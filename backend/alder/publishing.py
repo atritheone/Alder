@@ -72,6 +72,8 @@ def project_document(project: dict) -> list[dict]:
     A project with no placements has an empty collation. Draft clips are never
     silently added to an output. Muted/solo track states affect audition only.
     """
+    from .book import publication_project
+    project = publication_project(project)
     clips = {c["id"]: c for c in project.get("clips", [])}
     sections = sorted(enumerate(project.get("sections", [])), key=lambda x: (_order(x[1], x[0]), x[0]))
     result = []
@@ -121,7 +123,8 @@ def _number(value, default, low, high):
 def _prepare_publication(project, options=None, warnings=None):
     """Resolve styles and optional generated matter on an isolated snapshot."""
     warnings = warnings if warnings is not None else []
-    prepared = copy.deepcopy(project)
+    from .book import publication_project
+    prepared = copy.deepcopy(publication_project(project))
     styles = {s["id"]: s for s in prepared.get("styles", [])}
     resolved, visiting = {}, set()
 
@@ -225,7 +228,7 @@ def _settings(project, options=None):
     values["lineHeight"] = _number(values.get("lineHeight"), 1.6, 1, 3)
     values["marginMm"] = _number(values.get("marginMm"), 22, 5, 65)
     values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Georgia")))[:100] or "Georgia"
-    values["pageSize"] = values.get("pageSize") if values.get("pageSize") in ("A4", "A5", "Letter", "Legal") else "A4"
+    values["pageSize"] = values.get("pageSize") if values.get("pageSize") in ("A4", "A5", "Letter", "Legal", "6x9") else "A4"
     return values
 
 
@@ -400,7 +403,7 @@ def _html_node(node, project, resources, warnings, epub=False):
 
 
 def _css(settings):
-    return f"""@page {{ size: {settings['pageSize']}; margin: {settings['marginMm']:g}mm; }}
+    return f"""@page {{ size: {'6in 9in' if settings['pageSize'] == '6x9' else settings['pageSize']}; margin: {settings['marginMm']:g}mm; }}
 * {{ box-sizing: border-box; }}
 body {{ color: #202020; background: white; font-family: {settings['fontFamily']}, serif;
 font-size: {settings['fontSize']:g}pt; line-height: {settings['lineHeight']:g}; margin: 0; }}
@@ -538,7 +541,7 @@ def capabilities() -> dict:
     bundle = _bundled_root()
     bundled = next((str(p) for p in [bundle / "calibre/ebook-convert.exe", bundle / "calibre/Calibre/ebook-convert.exe", bundle / "calibre/Calibre Portable/Calibre/ebook-convert.exe", bundle / "calibre/ebook-convert"] if p.is_file()), None)
     calibre = bundled if bundled and not os.environ.get("ALDER_EBOOK_CONVERT") else _find_tool("ebook-convert", "ALDER_EBOOK_CONVERT", [Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Calibre2/ebook-convert.exe"])
-    return {"formats": list(SUPPORTED_FORMATS[:-1]) + (["azw3"] if calibre else []), "imports": ["txt", "md", "html", "docx", "epub"],
+    return {"formats": list(SUPPORTED_FORMATS[:-1]) + (["azw3"] if calibre else []), "imports": ["txt", "md", "html", "docx", "epub", "pdf", "rtf", "doc", "odt", "ods", "odp", "ppt", "pptx", "xls", "xlsx", "eml", "mobi", "azw3", "fb2", "text"],
             "epubcheck": {"available": bool(_epubcheck_command())}, "azw3": {"available": bool(calibre), "converter": calibre}}
 
 
@@ -659,7 +662,7 @@ def _docx(project, path, settings, warnings):
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
     document = Document()
     section = document.sections[0]
-    sizes = {"A4": (210, 297), "A5": (148, 210), "Letter": (215.9, 279.4), "Legal": (215.9, 355.6)}
+    sizes = {"A4": (210, 297), "A5": (148, 210), "Letter": (215.9, 279.4), "Legal": (215.9, 355.6), "6x9": (152.4, 228.6)}
     section.page_width, section.page_height = [Mm(x) for x in sizes[settings["pageSize"]]]
     section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Mm(settings["marginMm"])
     normal = document.styles["Normal"]
@@ -914,7 +917,7 @@ def _pdf(project, path, settings, warnings):
             _warn(warnings, f"PDF substituted bundled Liberation Serif for the requested font {settings['fontFamily']}.")
         else:
             _warn(warnings, "The bundled publication font is missing; PDF uses built-in Times with limited Unicode coverage.")
-    pagesize = {"A4": A4, "A5": A5, "Letter": LETTER, "Legal": LEGAL}[settings["pageSize"]]
+    pagesize = {"A4": A4, "A5": A5, "Letter": LETTER, "Legal": LEGAL, "6x9": (432, 648)}[settings["pageSize"]]
     margin = settings["marginMm"] * mm
     width = pagesize[0] - 2 * margin
     document = SimpleDocTemplate(str(path), pagesize=pagesize, leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
@@ -1389,7 +1392,7 @@ def import_document(path: Path) -> dict:
     if extension in (".txt", ".md", ".markdown", ".html", ".htm"):
         raw = path.read_bytes()
         try:
-            text = raw.decode("utf-8-sig")
+            text = raw.decode("utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig")
         except UnicodeDecodeError:
             text = raw.decode("cp1252", errors="replace")
             _warn(warnings, "Input was not UTF-8; it was decoded as Windows-1252. Check accented characters.")
@@ -1439,6 +1442,9 @@ def import_document(path: Path) -> dict:
             document = {"type":"doc", "content":blocks or [{"type":"paragraph"}]}
         _warn(warnings, "EPUB was imported in spine reading order; publication metadata, CSS and separate section identities are not imported.")
     else:
-        raise ValueError("Supported import formats are TXT, Markdown, HTML, DOCX and EPUB.")
+        from .text_import import extract_text
+        text, notices = extract_text(path)
+        warnings.extend(notices)
+        document = text_document(text)
     document = _normalise_import_blocks(document)
     return {"title":title, "document":document, "text":plain_text(document), "warnings":warnings, "assets":assets}

@@ -60,115 +60,59 @@ async function insertPrimeIdea(page: Page) {
     .filter({ has: page.getByText("I", { exact: true }) });
   await expect(idea).toHaveCount(1);
   // Use the actual browser drag/drop route, including its DataTransfer payload.
-  await idea.dragTo(page.locator(".clip-slot:not(.occupied)").first());
+  await idea.dragTo(
+    page.getByRole("textbox", { name: "Chapter text editor", exact: true }),
+  );
   await expect(
-    page.getByRole("textbox", { name: "Clip text editor" }),
+    page.getByRole("textbox", { name: "Chapter text editor" }),
   ).toHaveText("I");
   await saved(page);
 }
 
 async function replaceText(page: Page, text: string) {
-  const editor = page.getByRole("textbox", { name: "Clip text editor" });
+  const editor = page.getByRole("textbox", { name: "Chapter text editor" });
   await editor.fill(text);
   await expect(editor).toHaveText(text);
   await saved(page);
 }
 
-test("authoring loop preserves variants, linked collation, undo, reopening and exact export", async ({
+test("sandbox experiments stay independent when copied into a chapter and exported", async ({
   page,
   request,
 }) => {
-  const { id, initialClips, initialPlacements } = await createProject(
-    page,
-    "authoring",
-  );
-  await insertPrimeIdea(page);
-  await page.getByLabel("Clip title", { exact: true }).fill("Opening thought");
-  await replaceText(page, "I collect words and give each idea room to grow.");
+  const { id } = await createProject(page, "independent sandbox");
+  await replaceText(page, "A book begins here.");
+  const sandbox = page.getByRole("textbox", {
+    name: "Sandbox text editor",
+    exact: true,
+  });
+  await sandbox.fill("An independent experiment.");
   await page
-    .getByRole("button", { name: "Create alternate take", exact: true })
+    .getByRole("button", { name: "Insert into chapter", exact: true })
     .click();
-  await expect(page.getByLabel("Active take")).toHaveValue(/.+/);
-  await replaceText(page, "I gather words and leave room for an idea to grow.");
-
-  await page.getByLabel("Active take").selectOption({ label: "Original" });
   await expect(
-    page.getByRole("textbox", { name: "Clip text editor" }),
-  ).toHaveText("I collect words and give each idea room to grow.");
+    page.getByRole("textbox", { name: "Chapter text editor", exact: true }),
+  ).toContainText("An independent experiment.");
+  await sandbox.fill("The experiment changed.");
   await saved(page);
-  await page.getByLabel("Active take").selectOption({ label: "Take 2" });
-  await expect(
-    page.getByRole("textbox", { name: "Clip text editor" }),
-  ).toHaveText("I gather words and leave room for an idea to grow.");
-  await saved(page);
-
-  await page
-    .getByRole("button", { name: "Add to collation", exact: true })
-    .click();
-  await saved(page);
-  await page.getByRole("tab", { name: "Collation", exact: true }).click();
-  await expect(page.locator(".arrangement-clip")).toHaveCount(
-    initialPlacements + 1,
-  );
-  await expect(
-    page
-      .locator(".arrangement-clip")
-      .filter({ hasText: "Opening thought" })
-      .locator("p"),
-  ).toHaveText("I gather words and leave room for an idea to grow.");
-  await page
-    .getByRole("button", { name: "Undo project change", exact: true })
-    .click();
-  await expect(page.locator(".arrangement-clip")).toHaveCount(
-    initialPlacements,
-  );
-  await page
-    .getByRole("button", { name: "Redo project change", exact: true })
-    .click();
-  await expect(page.locator(".arrangement-clip")).toHaveCount(
-    initialPlacements + 1,
-  );
-  await saved(page);
-
-  // The editor and export must resolve the accepted take, including after reload.
-  await page.reload();
-  await saved(page);
-  await page.getByRole("tab", { name: "Sandbox", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Clip Opening thought", exact: true })
-    .click();
-  await expect(page.getByLabel("Active take")).toHaveValue(/.+/);
-  await expect(
-    page.getByRole("textbox", { name: "Clip text editor" }),
-  ).toHaveText("I gather words and leave room for an idea to grow.");
-  const persisted = await (
+  const p = await (
     await request.get(`http://127.0.0.1:8765/api/projects/${id}`)
   ).json();
-  expect(persisted.clips).toHaveLength(initialClips + 1);
-  const opening = persisted.clips.find(
-    (clip: { title: string }) => clip.title === "Opening thought",
-  );
-  expect(opening.text).toBe("I collect words and give each idea room to grow.");
-  expect(opening.variants[0].text).toBe(
-    "I gather words and leave room for an idea to grow.",
-  );
-  expect(persisted.placements).toHaveLength(initialPlacements + 1);
-
-  await menu(page, "File", "Export…");
-  await page.getByRole("button", { name: "Plain text Exact wording" }).click();
-  await expect(page.locator(".export-result strong")).toContainText(".txt");
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Save export…", exact: true }).click();
-  const artifact = await downloadPromise;
-  const file = await artifact.path();
-  expect(file).toBeTruthy();
-  const exported = await readFile(file!, "utf8");
-  expect(exported).toContain(
-    "I gather words and leave room for an idea to grow.",
-  );
-  expect(exported).not.toContain(
-    "I collect words and give each idea room to grow.",
-  );
+  expect(p.book.chapters[0].text).toContain("An independent experiment.");
+  expect(p.book.chapters[0].text).not.toContain("The experiment changed.");
+  expect(
+    p.clips.some((c: { text: string }) => c.text === "The experiment changed."),
+  ).toBe(true);
+  const result = await (
+    await request.post(`http://127.0.0.1:8765/api/projects/${id}/export`, {
+      data: { format: "txt" },
+    })
+  ).json();
+  const text = await (
+    await request.get("http://127.0.0.1:8765" + result.downloadUrl)
+  ).text();
+  expect(text).toContain("An independent experiment.");
+  expect(text).not.toContain("The experiment changed.");
 });
 
 test("project dictionary definitions are saved and available in the word sandbox", async ({
@@ -211,48 +155,46 @@ test("project dictionary definitions are saved and available in the word sandbox
     ]),
   );
   await expect(
-    page.getByRole("textbox", { name: "Clip text editor" }),
+    page.getByRole("textbox", { name: "Chapter text editor" }),
   ).toHaveText("Aldercraft gives language a useful shape.");
 });
 
-test("frozen collation placements preserve their wording while the linked source changes", async ({
+test("legacy frozen wording migrates into a chapter without changing archived drafts", async ({
   page,
   request,
 }) => {
-  const { id } = await createProject(page, "frozen placement");
-  await insertPrimeIdea(page);
-  await replaceText(page, "A fixed quotation belongs to this edition.");
-  await page
-    .getByRole("button", { name: "Add to collation", exact: true })
-    .click();
-  await saved(page);
-  await page.getByRole("tab", { name: "Collation", exact: true }).click();
-  const placement = page
-    .locator(".arrangement-clip")
-    .filter({ hasText: "A fixed quotation belongs to this edition." });
-  await placement
-    .getByRole("button", { name: "Freeze revision", exact: true })
-    .click();
-  await saved(page);
-  await replaceText(page, "The living source can evolve independently.");
-  await expect(placement.locator("p")).toHaveText(
-    "A fixed quotation belongs to this edition.",
-  );
-  const persisted = await (
-    await request.get(`http://127.0.0.1:8765/api/projects/${id}`)
+  const p = await (
+    await request.post("http://127.0.0.1:8765/api/projects", {
+      data: { name: `Migration ${Date.now()}`, template: "blank" },
+    })
   ).json();
-  expect(
-    persisted.placements.some(
-      (placement: { frozenText: string | null }) =>
-        placement.frozenText === "A fixed quotation belongs to this edition.",
-    ),
-  ).toBe(true);
-  expect(
-    persisted.clips.some(
-      (clip: { text: string }) =>
-        clip.text === "The living source can evolve independently.",
-    ),
-  ).toBe(true);
+  const doc = (text: string) => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+  });
+  p.clips[0].document = doc("A living draft.");
+  p.placements[0].frozenDocument = doc("The preserved quotation.");
+  await request.put(`http://127.0.0.1:8765/api/projects/${p.id}`, {
+    data: { project: p, expectedRevision: p.revision },
+  });
+  await page.goto("/");
+  await page.evaluate((id) => {
+    localStorage.setItem("alder.project", id);
+    localStorage.setItem("alder.view", "Write");
+  }, p.id);
+  await page.reload();
+  await expect(
+    page.getByRole("textbox", { name: "Chapter text editor", exact: true }),
+  ).toHaveText("The preserved quotation.");
+  await replaceText(page, "An edited book chapter.");
+  const savedProject = await (
+    await request.get(`http://127.0.0.1:8765/api/projects/${p.id}`)
+  ).json();
+  expect(savedProject.clips[0].text).toBe("A living draft.");
+  expect(savedProject.placements[0].frozenText).toBe(
+    "The preserved quotation.",
+  );
+  expect(savedProject.book.chapters[0].text).toBe("An edited book chapter.");
 });
 
 test("definition cards save authored meaning and download a real 800 pixel PNG", async ({
@@ -326,7 +268,7 @@ test("a rejected short voice reference explains the error and preserves the writ
   const before = (
     await (await request.get("http://127.0.0.1:8765/api/speech/voices")).json()
   ).voices.length;
-  await menu(page, "Playback", "Voices and pronunciation…");
+  await menu(page, "Read", "Voices and pronunciation…");
   const manager = page.getByRole("dialog", { name: "voices" });
   const pcm = Buffer.alloc(44 + 8000 * 2); // Deliberately invalid one-second reference fixture.
   pcm.write("RIFF", 0);
@@ -367,7 +309,7 @@ test("a rejected short voice reference explains the error and preserves the writ
     .getByRole("button", { name: "Dismiss error", exact: true })
     .click();
   await expect(
-    page.getByRole("textbox", { name: "Clip text editor" }),
+    page.getByRole("textbox", { name: "Chapter text editor" }),
   ).toHaveText("My writing remains safe when a voice reference is rejected.");
   await saved(page);
 });
@@ -403,9 +345,7 @@ test("local narration checks spoken content and displays a waveform from real au
   await page
     .getByLabel("Content-check retries", { exact: true })
     .selectOption("0");
-  await page
-    .getByRole("button", { name: "Render collation", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Render book", exact: true }).click();
   const job = page
     .locator(".job")
     .filter({ hasText: "An idea takes shape." })

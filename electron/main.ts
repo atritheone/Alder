@@ -8,6 +8,9 @@ import {
   protocol,
   shell,
   session,
+  clipboard,
+  globalShortcut,
+  Tray,
 } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
@@ -91,6 +94,7 @@ async function request(method: string, p: string, body?: unknown) {
 }
 const command = (name: string) =>
   window?.webContents.send("alder:command", name);
+let readingTray: Tray | null = null;
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -212,6 +216,15 @@ async function registerProtocols() {
   });
 }
 function registerIPC() {
+  ipcMain.handle("alder:clipboard-text", async (e) => {
+    trusted(e);
+    const text = await clipboard.readText();
+    if (text.length > 2_000_000)
+      throw new Error(
+        "Clipboard text exceeds the two-million-character limit.",
+      );
+    return text;
+  });
   ipcMain.on("alder:flush-response", (event, id, ok, message) => {
     if (event.sender === window?.webContents) {
       flushRequests.get(id)?.({ ok: Boolean(ok), message });
@@ -399,13 +412,50 @@ app.whenReady().then(async () => {
       if (url !== "alder://app/index.html") event.preventDefault();
     });
     await window.loadURL("alder://app/index.html");
+    if (
+      !process.argv.includes("--headless-test") &&
+      !process.argv.includes("--smoke-test")
+    ) {
+      readingTray = new Tray(await app.getFileIcon(process.execPath));
+      readingTray.setToolTip("Alder · document reading");
+      readingTray.setContextMenu(
+        Menu.buildFromTemplate([
+          {
+            label: "Show Alder",
+            click: () => {
+              window?.restore();
+              window?.show();
+              window?.focus();
+            },
+          },
+          { label: "Read document", click: () => command("reading-read") },
+          {
+            label: "Pause / resume reading",
+            click: () => command("reading-toggle"),
+          },
+          { label: "Stop reading", click: () => command("reading-stop") },
+          { type: "separator" },
+          { label: "Quit Alder", click: () => window?.close() },
+        ]),
+      );
+      for (const [key, action] of [
+        ["CommandOrControl+Alt+Space", "reading-toggle"],
+        ["CommandOrControl+Alt+R", "reading-read"],
+        ["CommandOrControl+Alt+S", "reading-stop"],
+      ])
+        if (!globalShortcut.register(key, () => command(action)))
+          console.warn(`Reading shortcut unavailable: ${key}`);
+    }
     if (process.argv.includes("--smoke-test")) {
       await new Promise((r) => setTimeout(r, 4000));
       const text = await window.webContents.executeJavaScript(
         "document.body.innerText",
       );
       const result = {
-        ok: text.includes("Sandbox") && text.includes("Collation"),
+        ok:
+          text.includes("Write") &&
+          text.includes("Pages") &&
+          text.includes("Book"),
         title: window.getTitle(),
         text: text.slice(0, 1000),
         resources,
@@ -429,6 +479,10 @@ app.whenReady().then(async () => {
   }
 });
 app.on("window-all-closed", () => app.quit());
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+  readingTray?.destroy();
+});
 app.on("before-quit", (event) => {
   if (!closeAllowed) {
     event.preventDefault();

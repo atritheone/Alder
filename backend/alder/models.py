@@ -172,6 +172,14 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     for pronunciation in p["pronunciation"]:
         if not isinstance(pronunciation.get("word"), str) or not pronunciation["word"].strip() or not isinstance(pronunciation.get("spoken"), str):
             raise ValidationError("Pronunciations require a source word and a spoken form.")
+        if not isinstance(pronunciation.get("regex", False), bool):
+            raise ValidationError("Pronunciation match mode must be true or false.")
+        if pronunciation.get("regex"):
+            import regex
+            try:
+                regex.compile(pronunciation["word"])
+            except regex.error as exc:
+                raise ValidationError(f"Invalid pronunciation expression: {exc}") from exc
     for track in p["tracks"]:
         track.setdefault("voiceId", "default")
         track.setdefault("muted", False)
@@ -299,6 +307,25 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     for placement in p["placements"]:
         if placement["frozenDocument"]:
             verify_assets(placement["frozenDocument"])
+    if "book" in p:
+        book = p["book"]
+        if not isinstance(book, dict) or book.get("version") != 1:
+            raise ValidationError("Unsupported book format. The original project has been preserved.")
+        chapters = book.get("chapters")
+        if not isinstance(chapters, list) or not 1 <= len(chapters) <= 10000:
+            raise ValidationError("A book requires between 1 and 10,000 chapters.")
+        for chapter in chapters:
+            register(chapter, "chapter")
+            if not isinstance(chapter.get("title"), str) or not chapter["title"].strip() or len(chapter["title"]) > 300:
+                raise ValidationError("A chapter requires a title of 1–300 characters.")
+            chapter["document"] = validate_document(chapter.get("document"))
+            chapter["text"] = document_text(chapter["document"])
+            chapter.setdefault("include", True)
+            if not isinstance(chapter["include"], bool):
+                raise ValidationError("Chapter inclusion must be true or false.")
+            if chapter.get("voiceId") is not None and not isinstance(chapter["voiceId"], str):
+                raise ValidationError("A chapter voice must be an identifier.")
+            verify_assets(chapter["document"])
     p.setdefault("createdAt", now())
     p.setdefault("updatedAt", p["createdAt"])
     return p

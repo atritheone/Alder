@@ -211,9 +211,11 @@ class Store:
         if destination.exists() and prior and not overwrite_external and hashlib.sha256(destination.read_bytes()).hexdigest() != prior[0]:
             raise ConflictError("This project file changed outside Alder. Use Save As to preserve both versions.")
         entries: dict[str, bytes] = {"project.json": json.dumps(p, ensure_ascii=False, indent=2).encode("utf-8")}
-        voice_ids = {entry.get("voiceId") for entry in p["tracks"] + p["clips"] + p.get("pronunciation", [])} - {None, "", "default"}
+        voice_ids = {entry.get("voiceId") for entry in p["tracks"] + p["clips"] + p.get("book", {}).get("chapters", []) + p.get("pronunciation", [])} - {None, "", "default"}
         saved_voices = []
         for voice_id in sorted(voice_ids):
+            if str(voice_id).startswith("sapi-"):
+                continue  # Windows voices remain optional machine resources, never archived.
             if not isinstance(voice_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", voice_id):
                 raise ValidationError("A project refers to an invalid voice profile.")
             voice_dir = self.data_dir / "speech" / "voices" / voice_id
@@ -306,7 +308,7 @@ class Store:
             destination = self.data_dir / "speech" / "voices" / voice_id
             if (destination / "reference.wav").is_file() and hashlib.sha256((destination / "reference.wav").read_bytes()).hexdigest() != voice["hash"]:
                 replacement = uid()
-                for entry in p["tracks"] + p["clips"] + p.get("pronunciation", []):
+                for entry in p["tracks"] + p["clips"] + p.get("book", {}).get("chapters", []) + p.get("pronunciation", []):
                     if entry.get("voiceId") == voice_id:
                         entry["voiceId"] = replacement
                 voice["id"] = replacement

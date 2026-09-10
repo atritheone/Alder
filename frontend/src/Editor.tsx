@@ -8,7 +8,13 @@ import {
   useMemo,
   useId,
 } from "react";
-import { Schema, Node as PMNode, DOMParser, Fragment } from "prosemirror-model";
+import {
+  Schema,
+  Node as PMNode,
+  DOMParser,
+  Fragment,
+  Slice,
+} from "prosemirror-model";
 import { EditorState, Plugin, TextSelection } from "prosemirror-state";
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
 import {
@@ -37,6 +43,13 @@ import {
   deleteTable,
 } from "prosemirror-tables";
 import { dropCursor } from "prosemirror-dropcursor";
+import {
+  measurePages,
+  rearrangePages,
+  PAGE_GAP,
+  type FlowPage,
+  type PageLayout,
+} from "./pageFlow";
 import {
   Bold,
   Italic,
@@ -377,6 +390,11 @@ export function namedStyleTransaction(
   return tr;
 }
 export type EditorHandle = {
+  replaceAll: (find: string, replacement: string) => void;
+  getSelectionOffsets: () => { start: number; end: number };
+  insertDocument: (document: DocNode) => void;
+  navigatePage: (page: number) => void;
+  movePage: (from: number, to: number) => void;
   insert: (text: string) => void;
   replace: (text: string) => void;
   replaceRange: (start: number, end: number, text: string) => void;
@@ -388,6 +406,11 @@ export type EditorHandle = {
   getSelection: () => string;
 };
 type Props = {
+  label?: string;
+  pageLayout?: PageLayout;
+  onPages?: (pages: FlowPage[]) => void;
+  onFocus?: () => void;
+  readingRange?: { start: number; end: number } | null;
   document: DocNode;
   identity: string;
   onChange: (document: DocNode, text: string) => void;
@@ -424,7 +447,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     blocked = useRef(false);
   const [parseError, setParseError] = useState<string | null>(null),
     [rangeWarning, setRangeWarning] = useState("");
-  const [, tick] = useState(0);
+  const [version, tick] = useState(0);
+  const [flowPages, setFlowPages] = useState<FlowPage[]>([]);
   latest.current = props;
   decos.current = props.annotations || [];
   const command = (cmd: any) => {
@@ -470,6 +494,91 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   useImperativeHandle(
     ref,
     () => ({
+      replaceAll(find, replacement) {
+        const v = editableView();
+        if (!v || !find) return;
+        const projection = projectText(v.state.doc),
+          matches: { from: number; to: number }[] = [];
+        for (
+          let start = projection.text.indexOf(find);
+          start >= 0;
+          start = projection.text.indexOf(find, start + find.length)
+        )
+          matches.push(
+            projectedRange(
+              v.state.doc,
+              start,
+              start + find.length,
+              undefined,
+              projection,
+            ),
+          );
+        const tr = v.state.tr;
+        for (const span of matches.reverse())
+          tr.insertText(replacement, span.from, span.to);
+        if (matches.length) v.dispatch(tr);
+      },
+      getSelectionOffsets() {
+        const v = editableView();
+        if (!v) return { start: 0, end: 0 };
+        const { map, text } = projectText(v.state.doc);
+        const offset = (position: number) => {
+          const at = map.findIndex((p) => p >= position);
+          return at < 0 ? text.length : at;
+        };
+        return {
+          start: offset(v.state.selection.from),
+          end: offset(v.state.selection.to),
+        };
+      },
+      insertDocument(document) {
+        const v = editableView();
+        const parsed = parseEditorDocument(document);
+        if (!v || !parsed.document) return;
+        v.dispatch(
+          v.state.tr
+            .replaceSelection(new Slice(parsed.document.content, 0, 0))
+            .scrollIntoView(),
+        );
+        v.focus();
+      },
+      navigatePage(page) {
+        const v = editableView(),
+          layout = latest.current.pageLayout;
+        if (!v || !layout) return;
+        const pages = measurePages(v, layout),
+          target = pages[page];
+        if (!target) return;
+        v.dispatch(
+          v.state.tr.setSelection(
+            TextSelection.near(v.state.doc.resolve(target.from)),
+          ),
+        );
+        const scroll = host.current?.closest(".editor-scroll");
+        scroll?.scrollTo({
+          left: page * (layout.width + PAGE_GAP) * layout.zoom,
+          behavior: "smooth",
+        });
+      },
+      movePage(from, to) {
+        const v = editableView(),
+          layout = latest.current.pageLayout;
+        if (!v || !layout) return;
+        try {
+          const next = rearrangePages(
+            v.state.doc,
+            measurePages(v, layout),
+            from,
+            to,
+          );
+          if (next !== v.state.doc)
+            v.dispatch(
+              v.state.tr.replaceWith(0, v.state.doc.content.size, next.content),
+            );
+        } catch (e) {
+          setRangeWarning((e as Error).message);
+        }
+      },
       insert(text) {
         const v = editableView();
         if (!v) return;
@@ -608,6 +717,28 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           new Plugin({
             props: {
               decorations(state) {
+                const range = latest.current.readingRange;
+                if (!range || blocked.current) return DecorationSet.empty;
+                try {
+                  const { from, to } = projectedRange(
+                    state.doc,
+                    range.start,
+                    range.end,
+                  );
+                  return to > from
+                    ? DecorationSet.create(state.doc, [
+                        Decoration.inline(from, to, { class: "reading-word" }),
+                      ])
+                    : DecorationSet.empty;
+                } catch {
+                  return DecorationSet.empty;
+                }
+              },
+            },
+          }),
+          new Plugin({
+            props: {
+              decorations(state) {
                 if (blocked.current) return DecorationSet.empty;
                 const projection = projectText(state.doc);
                 if (annotationSource.current !== projection.text)
@@ -642,7 +773,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       editable: () => !blocked.current,
       attributes: {
         role: "textbox",
-        "aria-label": "Clip text editor",
+        "aria-label": props.label || "Sandbox text editor",
         "aria-multiline": "true",
         spellcheck: "false",
       },
@@ -681,6 +812,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         tick((n) => n + 1);
       },
       handleDOMEvents: {
+        focus() {
+          latest.current.onFocus?.();
+          return false;
+        },
         drop(_v, event) {
           if (blocked.current) return false;
           const e = event as DragEvent,
@@ -733,6 +868,49 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       v.updateState(v.state);
     }
   }, [props.annotations]);
+  useLayoutEffect(() => {
+    const v = view.current;
+    if (!v) return;
+    v.updateState(v.state);
+    if (props.readingRange)
+      v.dom
+        .querySelector(".reading-word")
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [props.readingRange]);
+  useLayoutEffect(() => {
+    const v = view.current;
+    if (!v || !props.pageLayout || blocked.current) return;
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!view.current) return;
+        const pages = measurePages(v, latest.current.pageLayout!);
+        setFlowPages((old) =>
+          JSON.stringify(old) === JSON.stringify(pages) ? old : pages,
+        );
+        latest.current.onPages?.(pages);
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(v.dom);
+    v.dom.addEventListener("load", measure, true);
+    document.fonts.addEventListener("loadingdone", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      v.dom.removeEventListener("load", measure, true);
+      document.fonts.removeEventListener("loadingdone", measure);
+    };
+  }, [
+    version,
+    props.identity,
+    props.document,
+    props.pageLayout,
+    props.styles,
+    props.fontSize,
+  ]);
   const mark = (name: string) =>
     view.current
       ? Boolean(
@@ -786,7 +964,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     v.focus();
   };
   return (
-    <div className="editor-shell" data-alder-editor={editorScope}>
+    <div
+      className={"editor-shell" + (props.pageLayout ? " paginated-editor" : "")}
+      data-alder-editor={editorScope}
+    >
       <style>{namedStyles.css}</style>
       {(parseError || namedStyles.error || rangeWarning) && (
         <div
@@ -999,7 +1180,36 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           fontSize: `${props.fontSize || 15}px`,
         }}
       >
-        <div ref={host} />
+        {props.pageLayout ? (
+          <div
+            className="flow-canvas"
+            style={
+              {
+                "--page-width": `${props.pageLayout.width}px`,
+                "--page-height": `${props.pageLayout.height}px`,
+                "--page-margin": `${props.pageLayout.margin}px`,
+                "--page-gap": `${PAGE_GAP}px`,
+                "--page-leading": props.pageLayout.lineHeight,
+                width:
+                  Math.max(1, flowPages.length) *
+                    (props.pageLayout.width + PAGE_GAP) -
+                  PAGE_GAP,
+                zoom: props.pageLayout.zoom,
+              } as React.CSSProperties
+            }
+          >
+            <div className="page-sheets" aria-hidden="true">
+              {Array.from({ length: Math.max(1, flowPages.length) }, (_, i) => (
+                <div className="page-sheet" key={i}>
+                  <span>{i + 1}</span>
+                </div>
+              ))}
+            </div>
+            <div className="page-flow" ref={host} />
+          </div>
+        ) : (
+          <div ref={host} />
+        )}
       </div>
     </div>
   );

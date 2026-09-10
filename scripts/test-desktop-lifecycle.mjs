@@ -40,10 +40,7 @@ let closed = false;
 try {
   const page = await app.firstWindow();
   await expect(page.locator(".save-status")).toHaveText("All changes saved");
-  await page.getByRole("tab", { name: "Sandbox", exact: true }).click();
-  const clip = page.locator(".clip-slot.occupied").first();
-  await clip.click();
-  await page.getByRole("tab", { name: "Clip", exact: true }).click();
+  await page.getByRole("tab", { name: "Write", exact: true }).click();
   const projectId = await page.evaluate(() =>
     localStorage.getItem("alder.project"),
   );
@@ -128,6 +125,29 @@ try {
       return outputs;
     }, projectId);
     features.definitionCard = "800x800 PNG";
+    features.documentReader = await page.evaluate(async () => {
+      const created = await window.alder.request("POST", "/api/projects", {
+        name: "Packaged extraction test",
+        template: "blank",
+      });
+      const bytes = Array.from(
+        new TextEncoder().encode(
+          "{\\rtf1\\ansi Alder reads rich text without external software.}",
+        ),
+      );
+      const imported = await window.alder.upload(
+        `/api/projects/${created.id}/import`,
+        "sample.rtf",
+        bytes,
+      );
+      if (!imported.clips.some((c) => c.text.includes("Alder reads rich text")))
+        throw new Error("Packaged document extraction failed.");
+      const voices = await window.alder.request("GET", "/api/speech/voices");
+      return {
+        rtf: true,
+        sapiVoices: voices.voices.filter((v) => v.kind === "sapi").length,
+      };
+    });
     const jobId = await page.evaluate(async (id) => {
       const job = await window.alder.request(
         "POST",
@@ -137,6 +157,7 @@ try {
           text: "An idea takes shape.",
           seed: 900,
           verify: true,
+          follow: true,
           verificationRetries: 0,
           format: "wav",
         },
@@ -159,6 +180,8 @@ try {
     features.speech = await page.evaluate(async (id) => {
       const job = await window.alder.request("GET", `/api/speech/jobs/${id}`);
       if (job.status !== "ready") throw new Error(job.error || "Speech failed");
+      if (!job.chunks[0].wordTimings?.length)
+        throw new Error("Packaged Chatterbox word timing is missing.");
       const response = await fetch(window.alder.mediaBase + job.audioUrl);
       const context = new AudioContext();
       const audio = await context.decodeAudioData(await response.arrayBuffer());
@@ -183,7 +206,7 @@ try {
         transcript: job.chunks[0].qa?.transcript,
       };
     }, jobId);
-    await page.getByRole("tab", { name: "Sandbox", exact: true }).click();
+    await page.getByRole("tab", { name: "Write", exact: true }).click();
   }
   const text = `Alder preserves the last edit before closing. ${Date.now()}`;
   const appPid = await app.evaluate(() => process.pid);
@@ -202,7 +225,7 @@ try {
   );
   if (!backend)
     throw new Error("Desktop did not start its owned Python service.");
-  await page.getByRole("textbox", { name: "Clip text editor" }).fill(text);
+  await page.getByRole("textbox", { name: "Chapter text editor" }).fill(text);
   // Close immediately, before the 500 ms autosave debounce can complete.
   const finished = app.waitForEvent("close", { timeout: 25_000 });
   await app.evaluate(({ BrowserWindow }) => {
@@ -215,7 +238,7 @@ try {
     [
       "-I",
       "-c",
-      'import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); row=db.execute("SELECT snapshot FROM projects WHERE id=?",(sys.argv[2],)).fetchone(); p=json.loads(row[0]); print(json.dumps({"revision":p["revision"],"texts":[c["text"] for c in p["clips"]]}))',
+      'import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); row=db.execute("SELECT snapshot FROM projects WHERE id=?",(sys.argv[2],)).fetchone(); p=json.loads(row[0]); print(json.dumps({"revision":p["revision"],"texts":[c["text"] for c in p["book"]["chapters"]]}))',
       path.join(output, "alder.sqlite3"),
       projectId,
     ],

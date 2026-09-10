@@ -105,6 +105,11 @@ export function orderedPlacements(project: Project) {
   });
 }
 export function collatedText(project: Project) {
+  if (project.book)
+    return project.book.chapters
+      .filter((c) => c.include)
+      .map((c) => c.text)
+      .join("\n\n");
   return orderedPlacements(project)
     .filter((p) => p.include)
     .map((p) => {

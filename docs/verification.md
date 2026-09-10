@@ -2,7 +2,27 @@
 
 This record distinguishes exercised behaviour from remaining limitations. It is not a declaration that every future direction in the original roadmap has shipped.
 
-## Final Windows release checks
+## Book editor and document reader checks
+
+The current interface uses continuous chapter documents, measured writing pages and an independent lower sandbox. The older workstation checks below remain historical regression evidence; their tracks/clips and import-support descriptions do not describe the current primary interface.
+
+| Check | Result |
+| --- | --- |
+| Complete backend suite with bundled resources | **122 passed**; two dependency deprecations and a non-fatal pytest cache-write warning |
+| TypeScript unit/regression suite | **22 passed** |
+| Browser authoring, reading and publishing workflows | **12 passed**, including real Chatterbox word timings, native SAPI highlighting, multi-page paragraph flow, page moves and reopen persistence |
+| Chapter publication | Included chapter order, independent sandbox content, migration of frozen wording, archived book state and 6×9-inch PDF dimensions verified |
+| Broad document import | Real PDF/RTF extraction, extensionless and UTF-16 text verified; RTF final paragraphs without a terminator are preserved through a private extraction copy |
+| Production build and bundled resource audit | Passed; **54,935 resource files** verified |
+| Packaged Windows feature/lifecycle check | Passed with external tool paths removed: RTF extraction, three installed SAPI voices discovered, Chatterbox word timings, actual PDF preview, seven written exports, definition PNG, final edit saved on close and owned backend stopped |
+
+The current packaged report is `work/packaged-lifecycle-1789054630819/report.json`. Its narration fixture produced 1.52 seconds of audio and recognised “An idea takes shape.” exactly. EPUBCheck reported zero findings. The production test uses the shipped Python, Java, document converters, models and language resources; it is not a clean-machine certification.
+
+Chatterbox following uses matched local recognition timestamps, with passage highlighting for unmatched words. It is not exact forced alignment. Installed SAPI voices provide native word events; rate, volume and pitch are supported, with a real pitch-adjusted render exercised. No independent software installation is needed for Chatterbox, document extraction or publishing. SAPI remains an optional source of compatible voices already installed on Windows.
+
+These checks do not certify every imported format or full Word, InDesign or Balabolka parity. Writing pages and final exported pages can differ; Page Preview displays the actual PDF. Full feature boundaries are in `docs/book-and-reading.md`. Tray/global shortcuts are implemented but not exercised by the headless desktop test.
+
+## Earlier Windows release checks
 
 The self-contained Windows application has been built and exercised through its Electron bridge with external tool paths removed. The packaged backend files match the current Python sources. The complete application folder is approximately **10.8 GB**.
 

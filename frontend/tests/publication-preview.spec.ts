@@ -53,7 +53,7 @@ test("PDF proof renders real exported pages and reading controls preserve source
   );
   await page.getByRole("tab", { name: "Page Preview", exact: true }).click();
   const proof = await (await response).json();
-  expect(proof.sourceRevision).toBe(saved.revision);
+  expect(proof.sourceRevision).toBe(saved.revision + 1);
   expect(proof.validation.pages).toBeGreaterThan(1);
   const canvas = page.locator(".publication-canvas-scroll canvas");
   await expect(canvas).toBeVisible();
@@ -104,7 +104,7 @@ test("PDF proof renders real exported pages and reading controls preserve source
   const finalProject = await (
     await request.get(`/api/projects/${project.id}`)
   ).json();
-  expect(finalProject.revision).toBe(saved.revision);
+  expect(finalProject.revision).toBe(saved.revision + 1);
   expect(finalProject.clips[0].document).toEqual(saved.clips[0].document);
   expect(errors).toEqual([]);
   await expect(page.locator(".publication-error")).toHaveCount(0);
@@ -146,5 +146,5 @@ test("failed PDF generation can be retried without losing the project", async ({
   );
   expect(
     (await (await request.get(`/api/projects/${project.id}`)).json()).revision,
-  ).toBe(project.revision);
+  ).toBe(project.revision + 1);
 });

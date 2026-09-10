@@ -1,4 +1,20 @@
 import type { Node as PMNode } from "prosemirror-model";
+import type { DocNode } from "./types";
+
+export function documentText(node: DocNode): string {
+  if (node.type === "text") return node.text || "";
+  if (["hardBreak", "hard_break"].includes(node.type)) return "\n";
+  if (silent.has(node.type)) return "";
+  return (node.content || [])
+    .map(documentText)
+    .join(
+      ["tableRow", "table_row"].includes(node.type)
+        ? "\t"
+        : separated.has(node.type)
+          ? "\n"
+          : "",
+    );
+}
 
 /** Exact UTF-16 text projection used by backend/alder/models.document_text.
  * map[n] is the ProseMirror boundary at text offset n, including empty blocks.

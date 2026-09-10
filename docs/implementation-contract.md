@@ -1,6 +1,8 @@
 # Alder implementation contract
 
-Application integration contract, 10 September 2026. Frontend and Electron use the API below; backend modules separate persistence, language analysis, publishing and isolated speech workers. This describes integration boundaries rather than a generated API schema.
+Current books add an optional `book: {version:1, chapters:Chapter[]}` aggregate. Chapter owns `id,title,role,document,text,include,voiceId`; array order is book order. The original tracks/clips/placements are retained for archive compatibility and independent scratch material, and are never the source of a converted book's publication. See [Book and reading](book-and-reading.md).
+
+Original application integration contract, 10 September 2026. Frontend and Electron use the API below; backend modules separate persistence, language analysis, publishing and isolated speech workers. This describes integration boundaries rather than a generated API schema.
 
 Python package: backend/alder. API FastAPI, default development port 8765 on 127.0.0.1, configured ALDER_DATA_DIR outside OneDrive (default LOCALAPPDATA/Alder). Optional ALDER_SESSION_TOKEN bearer auth, enabled by desktop shell; development loopback origins 127.0.0.1:5173 and localhost:5173. JSON camelCase throughout. Each service gets Store; heavy optional libraries load only inside relevant functions.
 
