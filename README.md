@@ -28,10 +28,6 @@ rearranged, compared, published, and heard within one application.
 
 Alder is named after **Dr. Alder Wright**.
 
-The current release is **Alder 0.1** for Windows. Its writing, publishing, and
-speech resources are included in the application. End users do not need to
-install other software, create a remote account, or supply an API key.
-
 ## How to use
 
 Create a project from a blank, essay, book, or example template, then create a
