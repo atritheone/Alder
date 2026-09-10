@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.psd binary
+
+# Retain imported upstream formatting and the original notes verbatim.
+chatterbox/** -whitespace linguist-vendored
+project_notes.txt -whitespace
+hardware.txt -whitespace

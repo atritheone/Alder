@@ -1,0 +1,61 @@
+
+
+Features
+
+Notepad ++
+	Word Database
+	Selection and Auto Completion
+	Spell-check
+Word
+	Font Modulation
+	Paragraph Modulation
+	Insert
+		Image
+		Table
+		...
+	Show / Hide Backend Elements
+		Indenting lines
+		Highlighting brackets
+		Page / line breaks
+Grammarly
+	Language Rules
+		Verbose
+		Ascending & Descending
+		Repetition
+			Plugin Rules
+InDesign
+	Document Setup
+		Margins
+		Indents
+		...
+	Parts
+		Introduction
+		...
+	Styles (Font Rules)
+Calibre eBook Editor
+	EPUB Checker
+	eBook Mode
+	Export to EPUB and AZW3
+Balabolka
+	Text to Speech with selection of voices
+	Pronunciation Dictionary 
+
+
+Browser
+	Ideas
+		Prime
+			I
+	Connectors
+
+
+Sandbox
+	Text to speech
+	Scrolling thesaurus
+	Terminations
+	Prefixes
+	Suffixes
+	Synonyms and antonyms
+	Print definitions
+
+
+Collating View

@@ -1,0 +1,26 @@
+node_modules/
+dist/
+dist-electron/
+release/
+work/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+*.tsbuildinfo
+chatterbox/outputs/
+desktop.ini
+*.log
+.env
+.env.*
+!.env.example
+
+
+test-results/
+playwright-report/
+
+# Project documents and reference images excluded from source control.
+/Alder-development-plan.md
+/THIRD-PARTY-NOTICES.md
+/Images/

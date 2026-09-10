@@ -1,0 +1,84 @@
+.styles-manager .quiet {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+.style-list {
+  border-top: 1px solid var(--border, #777);
+  margin: 10px 0;
+}
+.style-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border, #777);
+}
+.style-row > div {
+  flex: 1;
+  min-width: 0;
+}
+.style-row small {
+  display: block;
+  margin-top: 3px;
+  opacity: 0.75;
+}
+.style-row button {
+  min-height: 26px;
+}
+.style-editor {
+  padding: 12px;
+  border: 1px solid var(--border, #777);
+  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.style-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin: 12px 0;
+}
+.style-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+.style-fields input,
+.style-fields select {
+  width: 100%;
+  min-height: 28px;
+  box-sizing: border-box;
+}
+.style-preview {
+  overflow: hidden;
+  padding: 12px 16px;
+  background: #f1eee4;
+  color: #292c28;
+  border: 1px solid #868981;
+}
+.style-preview small {
+  font:
+    11px "Segoe UI",
+    sans-serif;
+  color: #555;
+}
+.style-preview p {
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.style-editor footer {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+}
+.style-editor footer span {
+  flex: 1;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.style-warning {
+  padding: 10px;
+  background: #eadca5;
+  color: #292d25;
+}

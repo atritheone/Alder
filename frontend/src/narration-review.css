@@ -1,0 +1,340 @@
+.narration-review {
+  width: 100%;
+  margin-top: 9px;
+  border-top: 1px solid #a0ae91;
+  font-size: 11px;
+  text-align: left;
+  color: #34412e;
+}
+.narration-review > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 1px;
+  cursor: pointer;
+}
+.narration-review > summary:before {
+  content: "▸";
+  font-size: 12px;
+}
+.narration-review[open] > summary:before {
+  content: "▾";
+}
+.narration-review summary:focus-visible {
+  outline: 2px solid #346868;
+  outline-offset: 1px;
+}
+.narration-review > summary small {
+  margin-left: auto;
+  font-size: 10px;
+  color: #66745b;
+}
+.narration-review-body {
+  padding: 0 2px 7px;
+}
+.narration-review-note {
+  font-size: 10px;
+  line-height: 1.5;
+  color: #66745b;
+  margin: 5px 0 9px;
+  white-space: normal;
+}
+.narration-chunk-review {
+  border: 1px solid #a4af97;
+  background: #e0e5d8;
+  margin-top: 5px;
+}
+.narration-chunk-review > summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  list-style: none;
+  padding: 6px 7px;
+  cursor: pointer;
+  background: #cfd8c3;
+  min-height: 26px;
+}
+.narration-chunk-review > summary:before {
+  content: "▸";
+}
+.narration-chunk-review[open] > summary:before {
+  content: "▾";
+}
+.narration-chunk-review > summary strong {
+  font-size: 10px;
+}
+.narration-chunk-review > summary > span {
+  font-size: 9px;
+  color: #637056;
+}
+.narration-chunk-review > summary .narration-check-state {
+  margin-left: auto;
+  color: #465c34;
+}
+.narration-chunk-review.qa-needs_review > summary,
+.narration-chunk-review.qa-error > summary {
+  background: #e7d9b5;
+}
+.narration-chunk-review.qa-needs_review .narration-check-state,
+.narration-chunk-review.qa-error .narration-check-state {
+  color: #7b5429;
+}
+.narration-chunk-content {
+  padding: 7px 9px;
+}
+.narration-chunk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.narration-chunk-actions button {
+  font-size: 10px;
+  min-height: 22px;
+}
+.narration-chunk-actions > span {
+  font-size: 9px;
+  color: #6b785f;
+  margin-left: auto;
+}
+.narration-wording {
+  margin: 0;
+}
+.narration-wording > div {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  border-top: 1px solid #bec9b2;
+  padding: 6px 0;
+  gap: 8px;
+}
+.narration-wording dt {
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-size: 9px;
+  color: #728165;
+  padding-top: 2px;
+}
+.narration-wording dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    12px/1.5 Georgia,
+    serif;
+  color: #34412e;
+}
+.narration-check-details table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  margin: 8px 0;
+  table-layout: fixed;
+}
+.narration-check-details caption {
+  text-align: left;
+  font-size: 10px;
+  color: #6b785f;
+  margin-bottom: 4px;
+}
+.narration-check-details th,
+.narration-check-details td {
+  border: 1px solid #b5c1a7;
+  padding: 5px 6px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.narration-check-details th {
+  background: #d0d9c4;
+  font-weight: 600;
+}
+.narration-check-details th:first-child {
+  width: 86px;
+}
+.narration-check-score {
+  font-size: 10px;
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  color: #465c34;
+  margin: 7px 0;
+}
+.narration-check-score span {
+  color: #77856b;
+}
+.narration-check-model {
+  font-size: 9px;
+  color: #7d8874;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  white-space: normal;
+  margin: 8px 0 2px;
+}
+.narration-review-error {
+  background: #ead9b3;
+  color: #7b5429;
+  border-left: 3px solid #bd9253;
+  padding: 7px;
+  font-size: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.narration-attempts {
+  border-top: 1px solid #b9c4ac;
+  margin-top: 8px;
+  padding-top: 5px;
+}
+.narration-attempts > summary {
+  font-size: 10px;
+  color: #5d7050;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.narration-attempts article {
+  padding: 7px;
+  background: #d6dfcc;
+  margin-top: 5px;
+}
+.narration-attempts article > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+.narration-attempts article > header > span {
+  font-size: 9px;
+  color: #748468;
+}
+.narration-attempts article > p {
+  white-space: pre-wrap;
+  font:
+    11px/1.4 Georgia,
+    serif;
+}
+.narration-waveform-toggle {
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+.narration-waveform {
+  border: 1px solid #9ba78f;
+  background: #cbd3c1;
+  margin: 3px 0 9px;
+}
+.narration-waveform canvas {
+  display: block;
+  width: 100%;
+  height: 88px;
+  cursor: crosshair;
+}
+.narration-waveform label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  font:
+    9px Consolas,
+    monospace;
+}
+.narration-waveform input {
+  flex: 1;
+  min-height: 14px;
+  height: 14px;
+}
+.narration-waveform p {
+  font-size: 9px;
+  margin: 0;
+  padding: 1px 6px 5px;
+  color: #748368;
+}
+.narration-waveform-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #637557;
+  padding: 8px 0;
+}
+.narration-listening-decision {
+  border-top: 1px solid #b6c2a8;
+  margin: 8px 0;
+  padding: 7px 0;
+  font-size: 10px;
+}
+.narration-manually-accepted {
+  color: #425c31;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.narration-manually-accepted > span {
+  display: block;
+  white-space: pre-wrap;
+  font-style: italic;
+}
+.narration-review-note-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 5px 0 !important;
+}
+.narration-review-note-input input {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+}
+.narration-listened {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 !important;
+  font-size: 10px;
+}
+.narration-listened input {
+  width: 13px !important;
+  height: 13px !important;
+  min-height: 0;
+}
+.narration-listening-decision > button {
+  font-size: 10px;
+}
+.speech-options {
+  margin: 8px 0;
+  border-top: 1px solid #a3af95;
+  padding: 7px 0;
+  font-size: 10px;
+}
+.speech-options summary {
+  cursor: pointer;
+  font-size: 10px;
+  padding: 3px 0;
+}
+.speech-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 7px 0;
+  font-size: 10px;
+}
+.speech-options input,
+.speech-options select {
+  width: 100%;
+  font-size: 10px;
+  min-width: 0;
+}
+.speech-options p {
+  font-size: 9px;
+  line-height: 1.45;
+  color: #6a795d;
+  margin: 5px 0;
+}
+.speech-options details {
+  border-top: 1px solid #b6c2a8;
+  margin-top: 7px;
+  padding-top: 5px;
+}
+.speech-options > button {
+  font-size: 9px;
+  margin-top: 6px;
+}
