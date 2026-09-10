@@ -22,7 +22,7 @@
 
 ## About Alder
 
-Alder is an **organic language engine**: a desktop workstation for processing,
+Alder is an **Organic Language Engine (OLE)** - a desktop workstation for processing,
 editing, and creating language. Words and passages can be collected, explored,
 rearranged, compared, published, and heard within one application.
 
