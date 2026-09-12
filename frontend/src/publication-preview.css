@@ -4,7 +4,7 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  background: #a7aaa1;
+  background: #a9a9a9;
   overflow: hidden;
 }
 .publication-toolbar {
@@ -13,8 +13,8 @@
   gap: 6px;
   align-items: center;
   padding: 7px 9px;
-  background: #c1c7b7;
-  border-bottom: 1px solid #8d9781;
+  background: #c5c5c5;
+  border-bottom: 1px solid #939393;
   flex: none;
   font-size: 11px;
 }
@@ -43,9 +43,9 @@
   margin-right: auto;
 }
 .publication-modes button[aria-pressed="true"] {
-  background: #f0c347;
-  color: #21251b;
-  border-color: #8b824b;
+  background: #c4c4c4;
+  color: #232323;
+  border-color: #808080;
 }
 .publication-proof-status {
   display: flex;
@@ -54,14 +54,14 @@
   align-items: center;
   padding: 5px 10px;
   font-size: 10px;
-  background: #d3dac8;
+  background: #d7d7d7;
   flex: none;
   min-height: 24px;
-  color: #48543d;
+  color: #505050;
 }
 .publication-proof-status strong {
   font-weight: 500;
-  color: #825a18;
+  color: #5e5e5e;
 }
 .publication-canvas-scroll {
   flex: 1;
@@ -74,13 +74,13 @@
 .publication-canvas-scroll canvas {
   display: block;
   background: white;
-  box-shadow: 0 3px 14px #20271945;
+  box-shadow: 0 3px 14px #25252545;
   margin: 0 auto;
   max-width: none;
 }
 .publication-loading {
   padding: 40px 10px;
-  color: #35432a;
+  color: #3e3e3e;
   font-size: 12px;
 }
 .publication-page-text {
@@ -88,7 +88,7 @@
   margin: 12px auto 0;
   font-size: 11px;
   text-align: left;
-  background: #dce3d3;
+  background: #e0e0e0;
   padding: 7px 10px;
 }
 .publication-page-text summary {
@@ -103,9 +103,9 @@
   align-items: center;
   gap: 12px;
   padding: 10px;
-  color: #792f15;
-  background: #fae2c8;
-  border-bottom: 1px solid #c99572;
+  color: #3d3d3d;
+  background: #e5e5e5;
+  border-bottom: 1px solid #9e9e9e;
   font-size: 12px;
 }
 .publication-error span {
@@ -120,7 +120,7 @@
   font-size: 11px;
   max-height: 125px;
   overflow: auto;
-  background: #efe5c9;
+  background: #e5e5e5;
   flex: none;
 }
 .publication-warnings summary {
@@ -142,12 +142,12 @@
 }
 .publication-reading-scroll iframe {
   display: block;
-  border: 1px solid #8d9781;
+  border: 1px solid #939393;
   min-width: 300px;
   min-height: 100%;
   flex: none;
   background: white;
-  box-shadow: 0 3px 14px #20271930;
+  box-shadow: 0 3px 14px #25252530;
 }
 @media (max-width: 1000px) {
   .publication-toolbar > strong {

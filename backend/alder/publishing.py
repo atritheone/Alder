@@ -69,7 +69,7 @@ def _order(obj, fallback):
 def project_document(project: dict) -> list[dict]:
     """Resolve included placements, frozen snapshots and accepted variants.
 
-    A project with no placements has an empty collation. Draft clips are never
+    A project with no placements has an empty collation. Draft drafts are never
     silently added to an output. Muted/solo track states affect audition only.
     """
     from .book import publication_project
@@ -104,7 +104,7 @@ def project_document(project: dict) -> list[dict]:
                 else:
                     document = clip.get("document") or text_document(clip.get("text", ""))
             if not isinstance(document, dict) or document.get("type") != "doc":
-                raise ValueError("A publication clip must contain a structured document.")
+                raise ValueError("A publication draft must contain a structured document.")
             blocks.extend(copy.deepcopy(document.get("content", [])))
             ids.append(clip["id"])
         result.append({"id": section["id"], "title": section.get("title", ""), "role": section.get("role", "chapter"),
@@ -220,15 +220,17 @@ def _prepare_publication(project, options=None, warnings=None):
 
 
 def _settings(project, options=None):
-    values = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22, "fontFamily": "Georgia",
+    values = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22, "fontFamily": "Sitka Text",
               "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True, "includeTitle": True, "includeToc": False}
     values.update(project.get("settings", {}))
     values.update(options or {})
     values["fontSize"] = _number(values.get("fontSize"), 12, 6, 72)
     values["lineHeight"] = _number(values.get("lineHeight"), 1.6, 1, 3)
     values["marginMm"] = _number(values.get("marginMm"), 22, 5, 65)
-    values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Georgia")))[:100] or "Georgia"
+    values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Sitka Text")))[:100] or "Sitka Text"
     values["pageSize"] = values.get("pageSize") if values.get("pageSize") in ("A4", "A5", "Letter", "Legal", "6x9") else "A4"
+    values["orientation"] = "landscape" if values.get("orientation") == "landscape" else "portrait"
+    values["firstPageNumber"] = int(_number(values.get("firstPageNumber"), 1, 1, 9999))
     return values
 
 
@@ -403,7 +405,8 @@ def _html_node(node, project, resources, warnings, epub=False):
 
 
 def _css(settings):
-    return f"""@page {{ size: {'6in 9in' if settings['pageSize'] == '6x9' else settings['pageSize']}; margin: {settings['marginMm']:g}mm; }}
+    size = ('9in 6in' if settings.get('orientation') == 'landscape' else '6in 9in') if settings['pageSize'] == '6x9' else settings['pageSize'] + ' ' + settings.get('orientation', 'portrait')
+    return f"""@page {{ size: {size}; margin: {settings['marginMm']:g}mm; }}
 * {{ box-sizing: border-box; }}
 body {{ color: #202020; background: white; font-family: {settings['fontFamily']}, serif;
 font-size: {settings['fontSize']:g}pt; line-height: {settings['lineHeight']:g}; margin: 0; }}
@@ -663,7 +666,13 @@ def _docx(project, path, settings, warnings):
     document = Document()
     section = document.sections[0]
     sizes = {"A4": (210, 297), "A5": (148, 210), "Letter": (215.9, 279.4), "Legal": (215.9, 355.6), "6x9": (152.4, 228.6)}
-    section.page_width, section.page_height = [Mm(x) for x in sizes[settings["pageSize"]]]
+    dimensions = sizes[settings["pageSize"]]
+    if settings["orientation"] == "landscape":
+        dimensions = dimensions[::-1]
+    section.page_width, section.page_height = [Mm(x) for x in dimensions]
+    numbering = OxmlElement("w:pgNumType")
+    numbering.set(qn("w:start"), str(settings["firstPageNumber"]))
+    section._sectPr.append(numbering)
     section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Mm(settings["marginMm"])
     normal = document.styles["Normal"]
     normal.font.name = settings["fontFamily"]
@@ -705,7 +714,7 @@ def _docx(project, path, settings, warnings):
         elif kind == "image":
             image = resources.image(attrs)
             if image:
-                max_mm = sizes[settings["pageSize"]][0] - 2 * settings["marginMm"]
+                max_mm = dimensions[0] - 2 * settings["marginMm"]
                 width_mm = min(max_mm, _number(attrs.get("width"), image["width"], 10, 5000) * 25.4 / 96)
                 shape = paragraph.add_run().add_picture(io.BytesIO(image["data"]), width=Mm(width_mm))
                 shape._inline.docPr.set("descr", attrs.get("alt") or "")
@@ -893,6 +902,9 @@ def _pdf(project, path, settings, warnings):
     fonts_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
     family = settings["fontFamily"].lower()
     candidates = [("Georgia", "georgia", "georgiab", "georgiai", "georgiaz"), ("Arial", "arial", "arialbd", "ariali", "arialbi")]
+    if "sitka" in family:
+        fonts_dir = Path(__file__).parent / "fonts"
+        candidates = [("SitkaText", "SitkaText-Regular", "SitkaText-Bold", "SitkaText-Italic", "SitkaText-BoldItalic")]
     if "arial" in family or "sans" in family or "calibri" in family:
         candidates.reverse()
     for name, regular, bold, italic, both in candidates:
@@ -902,7 +914,7 @@ def _pdf(project, path, settings, warnings):
                     pdfmetrics.registerFont(TTFont("Alder"+name+suffix, str(fonts_dir / (stem+".ttf"))))
             font = "Alder"+name
             pdfmetrics.registerFontFamily(font, normal=font, bold=font+"-Bold", italic=font+"-Italic", boldItalic=font+"-BoldItalic")
-            if name.lower() not in family:
+            if name.lower().replace(" ", "") not in family.replace(" ", ""):
                 _warn(warnings, f"PDF substituted {name} for the requested font {settings['fontFamily']}.")
             break
     if font == "Times-Roman":
@@ -918,6 +930,8 @@ def _pdf(project, path, settings, warnings):
         else:
             _warn(warnings, "The bundled publication font is missing; PDF uses built-in Times with limited Unicode coverage.")
     pagesize = {"A4": A4, "A5": A5, "Letter": LETTER, "Legal": LEGAL, "6x9": (432, 648)}[settings["pageSize"]]
+    if settings["orientation"] == "landscape":
+        pagesize = pagesize[::-1]
     margin = settings["marginMm"] * mm
     width = pagesize[0] - 2 * margin
     document = SimpleDocTemplate(str(path), pagesize=pagesize, leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
@@ -1064,7 +1078,7 @@ def _pdf(project, path, settings, warnings):
                 header = header[:-2] + "…"
             canvas.drawString(margin, pagesize[1]-margin/2, header)
         if settings.get("footer"):
-            canvas.drawCentredString(pagesize[0]/2, margin/2, str(doc.page))
+            canvas.drawCentredString(pagesize[0]/2, margin/2, str(doc.page + settings["firstPageNumber"] - 1))
         canvas.restoreState()
     document.build(story, onFirstPage=page, onLaterPages=page)
 
@@ -1089,7 +1103,7 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
     if omitted:
         _warn(warnings, f"{omitted} draft clip(s) are outside the included collation and were not exported.")
     if len(ids) != len(set(ids)):
-        _warn(warnings, "The collation includes repeated clip placements; they are repeated in the output.")
+        _warn(warnings, "The collation includes repeated draft placements; they are repeated in the output.")
     validation = {"status": "passed", "format": format}
     try:
         if format == "html":

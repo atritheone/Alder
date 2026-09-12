@@ -1,3 +1,4 @@
+import { openSaved } from "./openSaved";
 import { test, expect } from "@playwright/test";
 
 test.use({
@@ -45,6 +46,7 @@ test("PDF proof renders real exported pages and reading controls preserve source
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
+  await openSaved(page);
   await expect(page.locator(".project-label strong")).toHaveText(project.name);
   const response = page.waitForResponse(
     (response) =>
@@ -131,6 +133,7 @@ test("failed PDF generation can be retried without losing the project", async ({
     }),
   );
   await page.goto("/");
+  await openSaved(page);
   await expect(page.locator(".project-label strong")).toHaveText(project.name);
   await page.getByRole("tab", { name: "Page Preview", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText(

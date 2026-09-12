@@ -66,7 +66,7 @@ MARK_TYPES = {"bold", "strong", "italic", "em", "underline", "strike", "s", "cod
 
 def validate_document(document: Any) -> dict:
     if not isinstance(document, dict) or document.get("type") != "doc":
-        raise ValidationError("A clip document must have a doc root.")
+        raise ValidationError("A draft document must have a doc root.")
     count = 0
 
     def walk(node: Any, depth: int) -> None:
@@ -201,30 +201,30 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     for clip in p["clips"]:
         clips.add(register(clip, "clip"))
         if clip.get("trackId") not in tracks:
-            raise ValidationError(f"Clip {clip['id']} refers to a missing track.")
+            raise ValidationError(f"Draft {clip['id']} refers to a missing collection.")
         slot = clip.setdefault("slot", 0)
         if not isinstance(slot, int) or isinstance(slot, bool) or not 0 <= slot <= 100_000:
-            raise ValidationError("Clip slot must be a nonnegative integer.")
+            raise ValidationError("Draft slot must be a nonnegative integer.")
         position = clip["trackId"], slot
         if position in slots:
-            raise ValidationError("Two clips cannot occupy the same track slot.")
+            raise ValidationError("Two drafts cannot occupy the same track slot.")
         slots.add(position)
         clip["document"] = validate_document(clip.get("document"))
         clip["text"] = document_text(clip["document"])
-        clip.setdefault("title", "Untitled clip")
+        clip.setdefault("title", "Untitled draft")
         clip.setdefault("tags", [])
         clip.setdefault("language", p["language"])
         clip.setdefault("voiceId", None)
         variants: set[str] = set()
         if not isinstance(clip.setdefault("variants", []), list):
-            raise ValidationError("Clip variants must be an array.")
+            raise ValidationError("Draft variants must be an array.")
         for variant in clip["variants"]:
             variants.add(register(variant, "variant"))
             variant["document"] = validate_document(variant.get("document"))
             variant["text"] = document_text(variant["document"])
             variant.setdefault("createdAt", now())
         if clip.setdefault("activeVariantId", None) is not None and clip["activeVariantId"] not in variants:
-            raise ValidationError("Active variant does not exist in this clip.")
+            raise ValidationError("Active variant does not exist in this draft.")
         old = old_clips.get(clip["id"])
         if old:
             changed = any(clip.get(k) != old.get(k) for k in ("document", "activeVariantId", "variants", "voiceId", "language"))
@@ -234,11 +234,11 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     for placement in p["placements"]:
         register(placement, "placement")
         if placement.get("clipId") not in clips or placement.get("sectionId") not in sections:
-            raise ValidationError("A placement refers to a missing clip or section.")
+            raise ValidationError("A placement refers to a missing draft or section.")
         if placement.get("variantId"):
             clip = next(c for c in p["clips"] if c["id"] == placement["clipId"])
             if placement["variantId"] not in {v["id"] for v in clip["variants"]}:
-                raise ValidationError("Placement variant does not belong to its clip.")
+                raise ValidationError("Placement variant does not belong to its draft.")
         placement.setdefault("include", True)
         if placement.get("frozenDocument") is not None:
             placement["frozenDocument"] = validate_document(placement["frozenDocument"])
@@ -256,7 +256,7 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     if not isinstance(p.setdefault("settings", {}), dict):
         raise ValidationError("Project settings must be an object.")
     defaults = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22,
-                "fontFamily": "Georgia", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True}
+                "fontFamily": "Sitka Text", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True}
     for k, v in defaults.items():
         p["settings"].setdefault(k, v)
     for prop, low, high in (("marginMm", 0, 100), ("fontSize", 6, 96), ("lineHeight", 0.8, 4)):
@@ -373,6 +373,6 @@ def create_project(name: str | None = None, template: str = "demo") -> dict:
                              "revision": 1, "schemaVersion": 1, "createdAt": now(), "updatedAt": now(), "language": "en",
                              "tracks": tracks, "clips": clips, "placements": placements, "sections": sections,
                              "ideas": [], "dictionary": [], "pronunciation": [], "assets": [],
-                             "styles": [{"id": uid("style_"), "name": "Body", "fontFamily": "Georgia", "fontSize": 12, "lineHeight": 1.6, "spaceAfter": 8},
-                                        {"id": uid("style_"), "name": "Heading", "fontFamily": "Georgia", "fontSize": 24, "lineHeight": 1.2, "spaceAfter": 14}],
+                             "styles": [{"id": uid("style_"), "name": "Body", "fontFamily": "Sitka Text", "fontSize": 12, "lineHeight": 1.6, "spaceAfter": 8},
+                                        {"id": uid("style_"), "name": "Heading", "fontFamily": "Sitka Text", "fontSize": 24, "lineHeight": 1.2, "spaceAfter": 14}],
                              "settings": {"description": "A language workstation for ideas, drafts, and finished work."}})

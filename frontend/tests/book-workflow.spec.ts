@@ -1,3 +1,4 @@
+import { openSaved } from "./openSaved";
 import { test, expect } from "@playwright/test";
 test.use({
   baseURL: "http://127.0.0.1:5173",
@@ -23,6 +24,7 @@ test("continuous chapter text flows, page moves preserve words, and edits surviv
     localStorage.setItem("alder.detailOpen", "false");
   }, created.id);
   await page.reload();
+  await openSaved(page);
   const editor = page.getByRole("textbox", {
     name: "Chapter text editor",
     exact: true,
@@ -53,6 +55,7 @@ test("continuous chapter text flows, page moves preserve words, and edits surviv
   expect(allWords).toEqual(text.split(" ").sort());
   await page.getByRole("tab", { name: "Write", exact: true }).click();
   await page.reload();
+  await openSaved(page);
   await expect(editor).toBeVisible();
   await expect(editor).toContainText("word749");
   await page.screenshot({ path: "work/book-writing.png", fullPage: true });
@@ -75,6 +78,7 @@ test("new chapters own prose and SAPI reading follows spoken words", async ({
     localStorage.setItem("alder.detailOpen", "false");
   }, created.id);
   await page.reload();
+  await openSaved(page);
   const editor = page.getByRole("textbox", {
     name: "Chapter text editor",
     exact: true,
@@ -139,6 +143,7 @@ test("Chatterbox timing follows the saved chapter and stops highlighting changed
     localStorage.setItem("alder.browserOpen", "false");
   }, created.id);
   await page.reload();
+  await openSaved(page);
   const editor = page.getByRole("textbox", {
     name: "Chapter text editor",
     exact: true,
@@ -181,6 +186,7 @@ test("opening a rich text file adds readable chapter text without replacing the 
     localStorage.setItem("alder.view", "Write");
   }, created.id);
   await page.reload();
+  await openSaved(page);
   const editor = page.getByRole("textbox", {
     name: "Chapter text editor",
     exact: true,

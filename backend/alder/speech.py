@@ -363,10 +363,10 @@ class SpeechService:
         if scope == "clip":
             clip = clips.get(request.get("clipId"))
             if clip is None:
-                raise ValueError("Select an existing clip to narrate.")
+                raise ValueError("Select an existing draft to narrate.")
             return [{"text": chosen_text(clip), "clipId": clip["id"], "voiceId": voice(clip)}]
         if scope != "collation":
-            raise ValueError("Speech scope must be clip, selection, or collation.")
+            raise ValueError("Speech scope must be draft, selection, or collation.")
         sections = {section["id"]: section.get("order", index) for index, section in enumerate(project.get("sections", []))}
         result = []
         for placement in sorted(project.get("placements", []), key=lambda p: (sections.get(p.get("sectionId"), 0), p.get("order", 0))):
@@ -374,7 +374,7 @@ class SpeechService:
                 continue
             clip = clips.get(placement.get("clipId"))
             if clip is None:
-                raise ValueError("A collation placement references a missing clip.")
+                raise ValueError("A collation placement references a missing draft.")
             result.append({"text": placement.get("frozenText") if placement.get("frozenText") is not None else chosen_text(clip, placement.get("variantId")), "clipId": clip["id"], "sectionId": placement.get("sectionId"), "placementId": placement["id"], "voiceId": voice(clip)})
         return result
 

@@ -83,32 +83,6 @@ export function useProject() {
     if (project && dirty.current) void flush().catch(() => {});
   }, [project?.id, flush]);
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await api<{ projects: { id: string }[] }>("/api/projects");
-        const last = localStorage.getItem("alder.project");
-        const id =
-          list.projects.find((p) => p.id === last)?.id || list.projects[0]?.id;
-        const p = id
-          ? await api<Project>(`/api/projects/${id}`)
-          : await api<Project>("/api/projects", "POST", {
-              name: "First light",
-              template: "demo",
-            });
-        if (!cancelled) load(p);
-      } catch (e) {
-        if (!cancelled) {
-          setError((e as Error).message);
-          setSaveState("Service unavailable");
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [load]);
-  useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
       if (dirty.current || flight.current) {
         e.preventDefault();

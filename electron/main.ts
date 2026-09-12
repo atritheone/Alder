@@ -178,6 +178,7 @@ async function registerProtocols() {
             "Content-Type":
               response.headers.get("content-type") ||
               "application/octet-stream",
+            "Access-Control-Allow-Origin": "alder://app",
             ...(response.headers.get("content-length")
               ? { "Content-Length": response.headers.get("content-length")! }
               : {}),
@@ -387,7 +388,7 @@ app.whenReady().then(async () => {
       height: 980,
       minWidth: 900,
       minHeight: 680,
-      backgroundColor: "#9c9f9a",
+      backgroundColor: "#e6e6e6",
       title: "Alder",
       show:
         !process.argv.includes("--smoke-test") &&
@@ -453,9 +454,9 @@ app.whenReady().then(async () => {
       );
       const result = {
         ok:
-          text.includes("Write") &&
-          text.includes("Pages") &&
-          text.includes("Book"),
+          text.includes("Alder") &&
+          text.includes("New") &&
+          text.includes("Open"),
         title: window.getTitle(),
         text: text.slice(0, 1000),
         resources,

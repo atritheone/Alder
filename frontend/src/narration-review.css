@@ -1,10 +1,10 @@
 .narration-review {
   width: 100%;
   margin-top: 9px;
-  border-top: 1px solid #a0ae91;
+  border-top: 1px solid #a9a9a9;
   font-size: 11px;
   text-align: left;
-  color: #34412e;
+  color: #3d3d3d;
 }
 .narration-review > summary {
   list-style: none;
@@ -22,13 +22,13 @@
   content: "▾";
 }
 .narration-review summary:focus-visible {
-  outline: 2px solid #346868;
+  outline: 2px solid #5d5d5d;
   outline-offset: 1px;
 }
 .narration-review > summary small {
   margin-left: auto;
   font-size: 10px;
-  color: #66745b;
+  color: #6f6f6f;
 }
 .narration-review-body {
   padding: 0 2px 7px;
@@ -36,13 +36,13 @@
 .narration-review-note {
   font-size: 10px;
   line-height: 1.5;
-  color: #66745b;
+  color: #6f6f6f;
   margin: 5px 0 9px;
   white-space: normal;
 }
 .narration-chunk-review {
-  border: 1px solid #a4af97;
-  background: #e0e5d8;
+  border: 1px solid #ababab;
+  background: #e3e3e3;
   margin-top: 5px;
 }
 .narration-chunk-review > summary {
@@ -52,7 +52,7 @@
   list-style: none;
   padding: 6px 7px;
   cursor: pointer;
-  background: #cfd8c3;
+  background: #d5d5d5;
   min-height: 26px;
 }
 .narration-chunk-review > summary:before {
@@ -66,19 +66,19 @@
 }
 .narration-chunk-review > summary > span {
   font-size: 9px;
-  color: #637056;
+  color: #6b6b6b;
 }
 .narration-chunk-review > summary .narration-check-state {
   margin-left: auto;
-  color: #465c34;
+  color: #545454;
 }
 .narration-chunk-review.qa-needs_review > summary,
 .narration-chunk-review.qa-error > summary {
-  background: #e7d9b5;
+  background: #d9d9d9;
 }
 .narration-chunk-review.qa-needs_review .narration-check-state,
 .narration-chunk-review.qa-error .narration-check-state {
-  color: #7b5429;
+  color: #595959;
 }
 .narration-chunk-content {
   padding: 7px 9px;
@@ -96,7 +96,7 @@
 }
 .narration-chunk-actions > span {
   font-size: 9px;
-  color: #6b785f;
+  color: #737373;
   margin-left: auto;
 }
 .narration-wording {
@@ -105,7 +105,7 @@
 .narration-wording > div {
   display: grid;
   grid-template-columns: 66px minmax(0, 1fr);
-  border-top: 1px solid #bec9b2;
+  border-top: 1px solid #c5c5c5;
   padding: 6px 0;
   gap: 8px;
 }
@@ -113,7 +113,7 @@
   text-transform: uppercase;
   letter-spacing: 0.6px;
   font-size: 9px;
-  color: #728165;
+  color: #7c7c7c;
   padding-top: 2px;
 }
 .narration-wording dd {
@@ -121,9 +121,9 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font:
-    12px/1.5 Georgia,
+    12px/1.5 "Sitka Text",
     serif;
-  color: #34412e;
+  color: #3d3d3d;
 }
 .narration-check-details table {
   width: 100%;
@@ -135,19 +135,19 @@
 .narration-check-details caption {
   text-align: left;
   font-size: 10px;
-  color: #6b785f;
+  color: #737373;
   margin-bottom: 4px;
 }
 .narration-check-details th,
 .narration-check-details td {
-  border: 1px solid #b5c1a7;
+  border: 1px solid #bdbdbd;
   padding: 5px 6px;
   vertical-align: top;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 .narration-check-details th {
-  background: #d0d9c4;
+  background: #d6d6d6;
   font-weight: 600;
 }
 .narration-check-details th:first-child {
@@ -158,15 +158,15 @@
   display: flex;
   gap: 9px;
   flex-wrap: wrap;
-  color: #465c34;
+  color: #545454;
   margin: 7px 0;
 }
 .narration-check-score span {
-  color: #77856b;
+  color: #808080;
 }
 .narration-check-model {
   font-size: 9px;
-  color: #7d8874;
+  color: #848484;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -174,28 +174,28 @@
   margin: 8px 0 2px;
 }
 .narration-review-error {
-  background: #ead9b3;
-  color: #7b5429;
-  border-left: 3px solid #bd9253;
+  background: #dadada;
+  color: #595959;
+  border-left: 3px solid #979797;
   padding: 7px;
   font-size: 10px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .narration-attempts {
-  border-top: 1px solid #b9c4ac;
+  border-top: 1px solid #c0c0c0;
   margin-top: 8px;
   padding-top: 5px;
 }
 .narration-attempts > summary {
   font-size: 10px;
-  color: #5d7050;
+  color: #6a6a6a;
   cursor: pointer;
   padding: 4px 0;
 }
 .narration-attempts article {
   padding: 7px;
-  background: #d6dfcc;
+  background: #dcdcdc;
   margin-top: 5px;
 }
 .narration-attempts article > header {
@@ -206,12 +206,12 @@
 }
 .narration-attempts article > header > span {
   font-size: 9px;
-  color: #748468;
+  color: #7f7f7f;
 }
 .narration-attempts article > p {
   white-space: pre-wrap;
   font:
-    11px/1.4 Georgia,
+    11px/1.4 "Sitka Text",
     serif;
 }
 .narration-waveform-toggle {
@@ -219,8 +219,8 @@
   margin-bottom: 5px;
 }
 .narration-waveform {
-  border: 1px solid #9ba78f;
-  background: #cbd3c1;
+  border: 1px solid #a3a3a3;
+  background: #d0d0d0;
   margin: 3px 0 9px;
 }
 .narration-waveform canvas {
@@ -247,24 +247,24 @@
   font-size: 9px;
   margin: 0;
   padding: 1px 6px 5px;
-  color: #748368;
+  color: #7e7e7e;
 }
 .narration-waveform-loading {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: #637557;
+  color: #6f6f6f;
   padding: 8px 0;
 }
 .narration-listening-decision {
-  border-top: 1px solid #b6c2a8;
+  border-top: 1px solid #bebebe;
   margin: 8px 0;
   padding: 7px 0;
   font-size: 10px;
 }
 .narration-manually-accepted {
-  color: #425c31;
+  color: #535353;
   font-size: 10px;
   line-height: 1.5;
 }
@@ -301,7 +301,7 @@
 }
 .speech-options {
   margin: 8px 0;
-  border-top: 1px solid #a3af95;
+  border-top: 1px solid #ababab;
   padding: 7px 0;
   font-size: 10px;
 }
@@ -326,11 +326,11 @@
 .speech-options p {
   font-size: 9px;
   line-height: 1.45;
-  color: #6a795d;
+  color: #747474;
   margin: 5px 0;
 }
 .speech-options details {
-  border-top: 1px solid #b6c2a8;
+  border-top: 1px solid #bebebe;
   margin-top: 7px;
   padding-top: 5px;
 }

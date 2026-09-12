@@ -37,6 +37,10 @@ type Props = {
   previewKey: number;
 };
 export default function BookWorkspace(p: Props) {
+  const isBook =
+    !p.project.settings.documentKind ||
+    p.project.settings.documentKind === "book" ||
+    (p.project.book?.chapters.length || 0) > 1;
   const chapters = p.project.book?.chapters || [];
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
   const [pages, setPages] = useState<FlowPage[]>([]);
@@ -55,7 +59,11 @@ export default function BookWorkspace(p: Props) {
       Legal: [215.9, 355.6],
       "6x9": [152.4, 228.6],
     };
-    const [w, h] = size[p.project.settings.pageSize] || size.A4;
+    const dimensions = size[p.project.settings.pageSize] || size.A4;
+    const [w, h] =
+      p.project.settings.orientation === "landscape"
+        ? [dimensions[1], dimensions[0]]
+        : dimensions;
     return {
       width: (w * 96) / 25.4,
       height: (h * 96) / 25.4,
@@ -64,6 +72,7 @@ export default function BookWorkspace(p: Props) {
       zoom,
     };
   }, [
+    p.project.settings.orientation,
     p.project.settings.pageSize,
     p.project.settings.marginMm,
     p.project.settings.lineHeight,
@@ -93,61 +102,69 @@ export default function BookWorkspace(p: Props) {
       className="workspace pane book-workspace"
       aria-label="Book workspace"
     >
-      <nav className="book-outline" aria-label="Book chapters">
-        <header>
-          <BookOpen size={15} />
-          <strong>Book</strong>
-          <button onClick={add} aria-label="Add chapter">
-            <Plus size={14} />
-          </button>
-        </header>
-        <div className="chapter-list">
-          {chapters.map((item, index) => (
-            <div
-              key={item.id}
-              className={`chapter-entry ${item.id === chapter.id ? "selected" : ""}`}
-            >
-              <button
-                className="chapter-select"
-                aria-label={`Open chapter ${item.title}`}
-                aria-current={item.id === chapter.id ? "page" : undefined}
-                onClick={() => {
-                  p.onChapter(item.id);
-                  setPages([]);
-                }}
+      {isBook && (
+        <nav className="book-outline" aria-label="Book chapters">
+          <header>
+            <BookOpen size={15} />
+            <strong>
+              {p.project.settings.documentKind &&
+              p.project.settings.documentKind !== "book"
+                ? "Document"
+                : "Book"}
+            </strong>
+            <button onClick={add} aria-label="Add chapter">
+              <Plus size={14} />
+            </button>
+          </header>
+          <div className="chapter-list">
+            {chapters.map((item, index) => (
+              <div
+                key={item.id}
+                className={`chapter-entry ${item.id === chapter.id ? "selected" : ""}`}
               >
-                <small>{String(index + 1).padStart(2, "0")}</small>
-                <span>
-                  {item.title}
-                  <small>
-                    {words(item.text)} words{!item.include ? " · excluded" : ""}
-                  </small>
-                </span>
-              </button>
-              <div className="chapter-actions">
                 <button
-                  aria-label={`Move ${item.title} earlier`}
-                  disabled={index === 0}
-                  onClick={() => moveChapter(item.id, -1)}
+                  className="chapter-select"
+                  aria-label={`Open chapter ${item.title}`}
+                  aria-current={item.id === chapter.id ? "page" : undefined}
+                  onClick={() => {
+                    p.onChapter(item.id);
+                    setPages([]);
+                  }}
                 >
-                  <ArrowUp size={11} />
+                  <small>{String(index + 1).padStart(2, "0")}</small>
+                  <span>
+                    {item.title || p.project.name}
+                    <small>
+                      {words(item.text)} words
+                      {!item.include ? " · excluded" : ""}
+                    </small>
+                  </span>
                 </button>
-                <button
-                  aria-label={`Move ${item.title} later`}
-                  disabled={index === chapters.length - 1}
-                  onClick={() => moveChapter(item.id, 1)}
-                >
-                  <ArrowDown size={11} />
-                </button>
+                <div className="chapter-actions">
+                  <button
+                    aria-label={`Move ${item.title} earlier`}
+                    disabled={index === 0}
+                    onClick={() => moveChapter(item.id, -1)}
+                  >
+                    <ArrowUp size={11} />
+                  </button>
+                  <button
+                    aria-label={`Move ${item.title} later`}
+                    disabled={index === chapters.length - 1}
+                    onClick={() => moveChapter(item.id, 1)}
+                  >
+                    <ArrowDown size={11} />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-        <button onClick={add}>
-          <FilePlus2 size={13} /> Add chapter
-        </button>
-        <p>Words → sentences → paragraphs → pages → chapters → book</p>
-      </nav>
+            ))}
+          </div>
+          <button onClick={add}>
+            <FilePlus2 size={13} /> Add chapter
+          </button>
+          <p>Words → sentences → paragraphs → pages → chapters → book</p>
+        </nav>
+      )}
       <div className="book-main">
         <DocumentReader
           project={p.project}
@@ -158,44 +175,46 @@ export default function BookWorkspace(p: Props) {
           onChapter={p.onChapter}
           onHighlight={setReadingRange}
         />
-        <header className="chapter-toolbar">
-          <input
-            aria-label="Chapter title"
-            value={chapter.title}
-            onChange={(e) =>
-              update((c) => {
-                c.title = e.target.value || "Untitled chapter";
-              })
-            }
-          />
-          <label>
+        {isBook && (
+          <header className="chapter-toolbar">
             <input
-              type="checkbox"
-              checked={chapter.include}
+              aria-label="Chapter title"
+              value={chapter.title}
               onChange={(e) =>
                 update((c) => {
-                  c.include = e.target.checked;
+                  c.title = e.target.value || "Untitled chapter";
                 })
               }
             />
-            Include in book
-          </label>
-          <button
-            aria-label="Delete chapter"
-            disabled={chapters.length === 1}
-            onClick={() => {
-              const next = chapters.find((c) => c.id !== chapter.id)!;
-              p.change((project) => {
-                project.book!.chapters = project.book!.chapters.filter(
-                  (c) => c.id !== chapter.id,
-                );
-              });
-              p.onChapter(next.id);
-            }}
-          >
-            <Trash2 size={13} />
-          </button>
-        </header>
+            <label>
+              <input
+                type="checkbox"
+                checked={chapter.include}
+                onChange={(e) =>
+                  update((c) => {
+                    c.include = e.target.checked;
+                  })
+                }
+              />
+              Include in book
+            </label>
+            <button
+              aria-label="Delete chapter"
+              disabled={chapters.length === 1}
+              onClick={() => {
+                const next = chapters.find((c) => c.id !== chapter.id)!;
+                p.change((project) => {
+                  project.book!.chapters = project.book!.chapters.filter(
+                    (c) => c.id !== chapter.id,
+                  );
+                });
+                p.onChapter(next.id);
+              }}
+            >
+              <Trash2 size={13} />
+            </button>
+          </header>
+        )}
         {p.view === "Page Preview" ? (
           <PublicationPreview
             project={p.project}

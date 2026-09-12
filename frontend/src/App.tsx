@@ -31,7 +31,7 @@ import {
   SlidersHorizontal,
   AudioLines,
   Leaf,
-  Info,
+  CircleHelp,
   LoaderCircle,
   AlertCircle,
   ArrowRight,
@@ -71,6 +71,12 @@ import RulesManager from "./RulesManager";
 import NarrationReview from "./NarrationReview";
 import StylesManager from "./StylesManager";
 import SpeechOptions, { DEFAULT_SPEECH_OPTIONS } from "./SpeechOptions";
+
+import StartScreen, { NewDocument } from "./StartScreen";
+import { openDocuments } from "./openDocuments";
+import { helpFor } from "./contextHelp";
+import { useNarrationGain } from "./audioPlayback";
+import PlaybackSpeed from "./PlaybackSpeed";
 
 type Field = {
   name: string;
@@ -203,6 +209,13 @@ function savedNumber(key: string, fallback: number, min: number, max: number) {
 export default function App() {
   const { project, change, load, flush, saveState, error, setError, history } =
     useProject();
+  const [newOpen, setNewOpen] = useState(false);
+  const [narrationVolume, setNarrationVolume] = useState(2);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpText, setHelpText] = useState(
+    "Hover over a control or focus it with the keyboard to learn what it does.",
+  );
+  const [dropping, setDropping] = useState(false);
   const [verifySpeech, setVerifySpeech] = useState(false),
     [audioFormat, setAudioFormat] = useState("wav");
   const [completion, setCompletion] = useState<string[]>([]);
@@ -220,10 +233,10 @@ export default function App() {
     [jobs, setJobs] = useState<Job[]>([]),
     [capabilities, setCapabilities] = useState<any>(null);
   const [browserOpen, setBrowserOpen] = useState(
-      () => localStorage.getItem("alder.browserOpen") !== "false",
+      () => localStorage.getItem("alder.browserOpen") === "true",
     ),
     [detailOpen, setDetailOpen] = useState(
-      () => localStorage.getItem("alder.detailOpen") !== "false",
+      () => localStorage.getItem("alder.detailOpen") === "true",
     ),
     [structure, setStructure] = useState(false),
     [loop, setLoop] = useState(false),
@@ -232,9 +245,7 @@ export default function App() {
     [time, setTime] = useState(0),
     [audioDuration, setAudioDuration] = useState(0),
     [activeJob, setActiveJob] = useState<Job | null>(null),
-    [hint, setHint] = useState(
-      "Write in the chapter above. Explore words and experiment in the sandbox below.",
-    ),
+    [hint, setHint] = useState(""),
     [word, setWord] = useState("I"),
     [selection, setSelection] = useState(""),
     [lexicon, setLexicon] = useState<Lexicon | null>(null),
@@ -278,6 +289,56 @@ export default function App() {
     voiceFile = useRef<HTMLInputElement>(null),
     lastPlayed = useRef(""),
     root = useRef<HTMLDivElement>(null);
+  const resumeAudio = useNarrationGain(audio, narrationVolume);
+  useEffect(() => {
+    document.title = project
+      ? `${project.name} — Alder · Organic Language Engine`
+      : "Alder · Organic Language Engine";
+  }, [project?.name]);
+  useEffect(() => {
+    const over = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setDropping(true);
+      }
+    };
+    const leave = (e: DragEvent) => {
+      if (!e.relatedTarget) setDropping(false);
+    };
+    const drop = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDropping(false);
+      const files = Array.from(e.dataTransfer.files);
+      void (async () => {
+        setBusy("Opening files…");
+        try {
+          await flush();
+          const opened = await openDocuments(files);
+          if (opened) {
+            load(opened);
+            setView("Write");
+            setPanel(null);
+            setNewOpen(false);
+          }
+        } catch (e) {
+          setError((e as Error).message);
+        } finally {
+          setBusy("");
+        }
+      })();
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("drop", drop, true);
+    return () => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("drop", drop, true);
+    };
+  }, [flush, load, setError]);
   const clip = project?.clips.find((c) => c.id === selected) || null,
     track = project?.tracks.find((t) => t.id === clip?.trackId) || null,
     content = clip ? chosenClip(clip) : null;
@@ -497,35 +558,12 @@ export default function App() {
     setWritingFocus(false);
     setTimeout(() => editor.current?.focus(), 50);
   };
-  const newProject = () =>
-    setForm({
-      title: "New Alder project",
-      fields: [
-        {
-          name: "name",
-          label: "Project name",
-          value: "Untitled",
-          required: true,
-        },
-        {
-          name: "template",
-          label: "Template",
-          value: "book",
-          options: [
-            { value: "blank", label: "Blank document" },
-            { value: "demo", label: "First light · a guided example" },
-            { value: "essay", label: "Essay" },
-            { value: "book", label: "Book" },
-          ],
-        },
-      ],
-      submit: "Create project",
-      action: async (v) => {
-        await flush();
-        load(await api("/api/projects", "POST", v));
-        setView("Write");
-      },
+  const newProject = () => {
+    void run(async () => {
+      await flush();
+      setNewOpen(true);
     });
+  };
   const collate = (id: string, sectionId?: string) => {
     const source = project?.clips.find((c) => c.id === id);
     if (!source) return;
@@ -578,7 +616,7 @@ export default function App() {
       if (!request.text) throw new Error("Select some text to read.");
     }
     if (scope === "clip" && !c)
-      throw new Error("Create or select a clip first.");
+      throw new Error("Create or select a draft first.");
     const job = await api<Job>(
       `/api/projects/${project.id}/speech`,
       "POST",
@@ -601,6 +639,16 @@ export default function App() {
   const saveProject = async () => {
     if (!project) return;
     await flush();
+    if (["txt", "docx"].includes(project.settings.documentKind)) {
+      const format =
+        project.settings.preferredFormat || project.settings.documentKind;
+      const result = await api(`/api/projects/${project.id}/export`, "POST", {
+        format,
+      });
+      await download(result.downloadUrl, `${project.name}.${format}`);
+      setHint(`Saved ${project.name}.${format}`);
+      return;
+    }
     const path = window.alder ? await window.alder.savePath() : undefined;
     if (window.alder && !path) return;
     const result = await api(`/api/projects/${project.id}/save`, "POST", {
@@ -610,6 +658,10 @@ export default function App() {
   };
   const openPanel = (name: string) => {
     setMenu(null);
+    if (!project && name === "projects") {
+      window.dispatchEvent(new Event("alder-open-start"));
+      return;
+    }
     if (name === "import") {
       importFile.current?.click();
       return;
@@ -692,7 +744,7 @@ export default function App() {
     setForm({
       title: "Split draft",
       description:
-        "Create two independent clips at a paragraph boundary. The source clip, its takes, and existing collation placements are retained.",
+        "Create two independent drafts at a paragraph boundary. The source draft, its takes, and existing collation placements are retained.",
       fields: [
         {
           name: "after",
@@ -701,11 +753,11 @@ export default function App() {
           type: "number",
         },
       ],
-      submit: "Create split clips",
+      submit: "Create split drafts",
       action: (v) => {
         const index = Number(v.after);
         if (index < 1 || index >= blocks.length)
-          throw new Error("Choose a paragraph boundary within this clip.");
+          throw new Error("Choose a paragraph boundary within this draft.");
         const firstId = uid();
         change((p) => {
           let slot =
@@ -734,7 +786,7 @@ export default function App() {
         });
         setSelected(firstId);
         setHint(
-          "Two independent clips created. Existing source and collation are unchanged.",
+          "Two independent drafts created. Existing source and collation are unchanged.",
         );
       },
     });
@@ -746,7 +798,7 @@ export default function App() {
       .sort((a, b) => a.slot - b.slot)[0];
     if (!next) {
       setHint(
-        "Place another clip below this one on the same track to consolidate.",
+        "Place another draft below this one on the same track to consolidate.",
       );
       return;
     }
@@ -780,7 +832,7 @@ export default function App() {
     });
     setSelected(id);
     setHint(
-      "Created a consolidated clip. The source clips, takes and collation placements are retained.",
+      "Created a combined draft. The source drafts, takes and collation placements are retained.",
     );
   };
   const findReplace = () =>
@@ -817,6 +869,16 @@ export default function App() {
     });
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        newProject();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        openPanel("projects");
+        return;
+      }
       const editable = (e.target as HTMLElement).closest(
         "input,textarea,select,[contenteditable=true]",
       );
@@ -930,28 +992,43 @@ export default function App() {
   };
   if (!project)
     return (
-      <div className="startup">
-        <Leaf size={38} />
-        <h1>Alder</h1>
-        <p>Organic Language Engine</p>
-        {error ? (
-          <>
-            <p role="alert">{error}</p>
-            <button onClick={() => location.reload()}>Reconnect</button>
-          </>
-        ) : (
-          <>
-            <LoaderCircle className="spin" />
-            <p>Opening your workspace…</p>
-          </>
+      <>
+        <StartScreen onOpen={load} />
+        {newOpen && (
+          <NewDocument
+            onCreate={(p) => {
+              load(p);
+              setNewOpen(false);
+            }}
+            onClose={() => setNewOpen(false)}
+          />
+        )}{" "}
+        {dropping && (
+          <div className="file-drop-overlay">Drop files to open in Alder</div>
         )}
-      </div>
+        {busy && (
+          <div className="open-progress" role="status">
+            {busy}
+          </div>
+        )}
+        {error && (
+          <div className="open-progress" role="alert">
+            {error}
+            <button onClick={() => setError("")}>Dismiss</button>
+          </div>
+        )}
+      </>
     );
   const menuItems: Record<string, { label: string; action: () => void }[]> = {
     File: [
       { label: "New project…", action: newProject },
       { label: "Open project…", action: () => openPanel("projects") },
-      { label: "Save project…", action: () => void run(saveProject) },
+      {
+        label: ["txt", "docx"].includes(project.settings.documentKind)
+          ? "Save document…"
+          : "Save project…",
+        action: () => void run(saveProject),
+      },
       { label: "Import document…", action: () => openPanel("import") },
       { label: "Export…", action: () => openPanel("export") },
     ],
@@ -1018,7 +1095,7 @@ export default function App() {
         action: () => setBrowserOpen((v) => !v),
       },
       {
-        label: detailOpen ? "Hide detail" : "Show detail",
+        label: detailOpen ? "Hide sandbox" : "Show sandbox",
         action: () => setDetailOpen((v) => !v),
       },
       {
@@ -1041,6 +1118,18 @@ export default function App() {
   return (
     <div
       className={"alder-app theme-neutral" + (contrast ? " high-contrast" : "")}
+      onMouseOver={(e) => {
+        if (helpOpen) {
+          const text = helpFor(e.target);
+          if (text) setHelpText(text);
+        }
+      }}
+      onFocusCapture={(e) => {
+        if (helpOpen) {
+          const text = helpFor(e.target);
+          if (text) setHelpText(text);
+        }
+      }}
       ref={root}
       style={
         {
@@ -1049,17 +1138,10 @@ export default function App() {
         } as React.CSSProperties
       }
     >
-      <div className="titlebar">
-        <div className="brand-icon">
-          <Leaf size={15} />
-        </div>
-        <span>{project.name} — Alder</span>
-        <span className="titlebar-subtitle">Organic Language Engine</span>
-        <span className="local-badge">
-          <span /> LOCAL
-        </span>
-      </div>
       <div className="menubar">
+        <strong className="window-brand" title="Organic Language Engine">
+          Alder
+        </strong>
         {Object.entries(menuItems).map(([name, items]) => (
           <div className="menu-wrap" key={name}>
             <button
@@ -1085,7 +1167,9 @@ export default function App() {
             )}
           </div>
         ))}
-        <span />
+        <span className="window-document">
+          {project.name} <small>· Organic Language Engine</small>
+        </span>
         <button
           title="Undo project change"
           aria-label="Undo project change"
@@ -1101,8 +1185,16 @@ export default function App() {
           <Redo2 size={13} />
         </button>
         <button
-          title="Save project"
-          aria-label="Save project"
+          title={
+            ["txt", "docx"].includes(project.settings.documentKind)
+              ? "Save document"
+              : "Save project"
+          }
+          aria-label={
+            ["txt", "docx"].includes(project.settings.documentKind)
+              ? "Save document"
+              : "Save project"
+          }
           onClick={() => void run(saveProject)}
         >
           <Save size={13} />
@@ -1158,7 +1250,9 @@ export default function App() {
         </span>
         <button onClick={() => openPanel("export")}>
           <Download size={14} />
-          Export book
+          {["txt", "docx"].includes(project.settings.documentKind)
+            ? "Export document"
+            : "Export book"}
         </button>
       </div>
       <div className="workspaces">
@@ -1304,10 +1398,7 @@ export default function App() {
       {detailOpen && (
         <section className="detail-pane pane">
           <div className="detail-heading">
-            <div
-              className="clip-name"
-              style={{ borderLeftColor: track?.color || "#bfce95" }}
-            >
+            <div className="clip-name" style={{ borderLeftColor: "#888888" }}>
               {clip ? (
                 <input
                   aria-label="Sandbox draft title"
@@ -1403,19 +1494,12 @@ export default function App() {
                 </button>
               </>
             )}
-            <button
-              title="Hide detail"
-              aria-label="Hide detail"
-              onClick={() => setDetailOpen(false)}
-            >
-              <ChevronDown size={15} />
-            </button>
           </div>
           {detail === "Clip" ? (
             clip && content ? (
               <div className="clip-detail">
                 <aside className="clip-properties">
-                  <div className="property-caption">CLIP</div>
+                  <div className="property-caption">DRAFT</div>
                   <div className="property-grid">
                     <label>
                       Words<output>{words(content.text)}</output>
@@ -1986,7 +2070,29 @@ export default function App() {
           ) : (
             <div className="narration-panel">
               <div className="narration-controls">
-                <strong>Local narration</strong>
+                <strong>Narration</strong>
+                <label>
+                  Speed{" "}
+                  <PlaybackSpeed
+                    value={speed}
+                    onChange={setSpeed}
+                    label="Narration speed"
+                  />
+                  ×
+                </label>
+                <label>
+                  Volume{" "}
+                  <input
+                    aria-label="Narration volume"
+                    title={`${Math.round(narrationVolume * 100)}%`}
+                    type="range"
+                    min="0"
+                    max="4"
+                    step="0.01"
+                    value={narrationVolume}
+                    onChange={(e) => setNarrationVolume(Number(e.target.value))}
+                  />
+                </label>
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -2212,9 +2318,21 @@ export default function App() {
           )}
         </section>
       )}
+      {helpOpen && (
+        <aside className="context-help" aria-label="Context help">
+          <strong>Help</strong>
+          <p>{helpText}</p>
+        </aside>
+      )}
       <footer className="statusbar">
-        <button aria-label="Help" onClick={() => openPanel("help")}>
-          <Info size={15} />
+        <button
+          aria-label="Toggle help area"
+          title="Show or hide help for the control under your pointer"
+          aria-expanded={helpOpen}
+          className={helpOpen ? "active" : ""}
+          onClick={() => setHelpOpen((v) => !v)}
+        >
+          <CircleHelp size={15} />
         </button>
         <span className="status-hint">{hint}</span>
         <span className="save-status">
@@ -2226,18 +2344,39 @@ export default function App() {
           {saveState}
         </span>
         <span className="status-project-count">
-          {words(bookText(project))} book words
+          {words(bookText(project))} words
         </span>
         <button
           className={detailOpen ? "active" : ""}
-          title="Toggle detail"
-          aria-label="Toggle detail"
+          title={
+            detailOpen
+              ? "Hide the sandbox, language tools, and narration panel"
+              : "Show the sandbox to try draft wording, explore language, and review narration"
+          }
+          data-help="Show or hide the sandbox: a separate area for draft wording, language tools, and narration. Your document remains unchanged until you insert a draft."
+          aria-label="Toggle sandbox"
+          aria-expanded={detailOpen}
           onClick={() => setDetailOpen((v) => !v)}
         >
           {detailOpen ? "▾" : "▴"}
         </button>
         <span>{clip?.title || "Alder"}</span>
       </footer>
+      {newOpen && (
+        <NewDocument
+          onCreate={(p) => {
+            load(p);
+            setNewOpen(false);
+            setView("Write");
+            setDetailOpen(false);
+            setBrowserOpen(false);
+          }}
+          onClose={() => setNewOpen(false)}
+        />
+      )}
+      {dropping && (
+        <div className="file-drop-overlay">Drop files to open in Alder</div>
+      )}
       {completion.length > 0 && (
         <div className="completion-popup">
           <header>
@@ -2257,8 +2396,12 @@ export default function App() {
         </div>
       )}
       <audio
+        crossOrigin="anonymous"
         ref={audio}
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          resumeAudio();
+          setPlaying(true);
+        }}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
         onTimeUpdate={() => setTime(audio.current?.currentTime || 0)}
@@ -2522,10 +2665,41 @@ export default function App() {
                         })
                       }
                     >
-                      {["A4", "A5", "Letter", "6x9"].map((s) => (
+                      {["A4", "A5", "Letter", "Legal", "6x9"].map((s) => (
                         <option key={s}>{s}</option>
                       ))}
                     </select>
+                  </label>
+                  <label>
+                    Orientation
+                    <select
+                      value={project.settings.orientation || "portrait"}
+                      onChange={(e) =>
+                        change((p) => {
+                          p.settings.orientation = e.target.value;
+                        })
+                      }
+                    >
+                      <option value="portrait">Portrait</option>
+                      <option value="landscape">Landscape</option>
+                    </select>
+                  </label>
+                  <label>
+                    Start page numbering at
+                    <input
+                      type="number"
+                      min="1"
+                      max="9999"
+                      step="1"
+                      value={project.settings.firstPageNumber || 1}
+                      onChange={(e) => {
+                        const n = e.target.valueAsNumber;
+                        if (Number.isInteger(n) && n >= 1 && n <= 9999)
+                          change((p) => {
+                            p.settings.firstPageNumber = n;
+                          });
+                      }}
+                    />
                   </label>
                   <label>
                     Margins (mm)
@@ -2551,11 +2725,15 @@ export default function App() {
                         })
                       }
                     >
-                      {["Georgia", "Arial", "Times New Roman", "Segoe UI"].map(
-                        (s) => (
-                          <option key={s}>{s}</option>
-                        ),
-                      )}
+                      {[
+                        "Sitka Text",
+                        "Georgia",
+                        "Arial",
+                        "Times New Roman",
+                        "Segoe UI",
+                      ].map((s) => (
+                        <option key={s}>{s}</option>
+                      ))}
                     </select>
                   </label>
                   <label>
@@ -2923,8 +3101,8 @@ export default function App() {
               {panel === "templates" && (
                 <>
                   <p>
-                    Start from a blank workspace, essay structure, book
-                    structure, or the original First light demonstration.
+                    Create a plain text document, a Word document, or a book
+                    with its own page and chapter settings.
                   </p>
                   <button
                     className="accent"

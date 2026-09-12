@@ -39,6 +39,9 @@ const app = await electron.launch({
 let closed = false;
 try {
   const page = await app.firstWindow();
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("button", { name: "Book Chapters & pages" }).click();
+  await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.locator(".save-status")).toHaveText("All changes saved");
   await page.getByRole("tab", { name: "Write", exact: true }).click();
   const projectId = await page.evaluate(() =>

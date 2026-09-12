@@ -1,3 +1,4 @@
+import { openSaved } from "./openSaved";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
@@ -31,20 +32,20 @@ async function menu(page: Page, name: string, item: string) {
 }
 
 async function createProject(page: Page, label: string) {
-  await page.goto("/");
-  await saved(page);
-  await menu(page, "File", "New project…");
   const name = `E2E ${label} ${Date.now()}`;
-  await page.getByLabel("Project name", { exact: true }).fill(name);
-  await page.getByLabel(/^Template/).selectOption("blank");
-  const response = page.waitForResponse(
-    (r) => r.url().endsWith("/api/projects") && r.request().method() === "POST",
-  );
-  await page
-    .getByRole("button", { name: "Create project", exact: true })
-    .click();
-  const project = await (await response).json();
-  await expect(page.locator(".project-label strong")).toHaveText(name);
+  const project = await (
+    await page.request.post("http://127.0.0.1:8765/api/projects", {
+      data: { name, template: "blank" },
+    })
+  ).json();
+  await page.goto("/");
+  await page.evaluate((id) => {
+    localStorage.setItem("alder.project", id);
+    localStorage.setItem("alder.browserOpen", "true");
+    localStorage.setItem("alder.detailOpen", "true");
+  }, project.id);
+  await page.reload();
+  await openSaved(page);
   await saved(page);
   return {
     id: project.id as string,
@@ -183,6 +184,7 @@ test("legacy frozen wording migrates into a chapter without changing archived dr
     localStorage.setItem("alder.view", "Write");
   }, p.id);
   await page.reload();
+  await openSaved(page);
   await expect(
     page.getByRole("textbox", { name: "Chapter text editor", exact: true }),
   ).toHaveText("The preserved quotation.");
@@ -408,6 +410,7 @@ test("local narration checks spoken content and displays a waveform from real au
   expect(reviewed.chunks[0].manualReview.audioHash).toMatch(/^[a-f0-9]{64}$/);
   expect(reviewed.chunks[0].qa).toEqual(rendered.chunks[0].qa);
   await page.reload();
+  await openSaved(page);
   await saved(page);
   await page.getByRole("tab", { name: "Narration", exact: true }).click();
   await job.getByText("Review chunks and wording", { exact: true }).click();

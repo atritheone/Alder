@@ -3,7 +3,7 @@
   line-height: 1.5;
 }
 .style-list {
-  border-top: 1px solid var(--border, #777);
+  border-top: 1px solid var(--border, #777777);
   margin: 10px 0;
 }
 .style-row {
@@ -11,7 +11,7 @@
   align-items: center;
   gap: 6px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--border, #777);
+  border-bottom: 1px solid var(--border, #777777);
 }
 .style-row > div {
   flex: 1;
@@ -27,7 +27,7 @@
 }
 .style-editor {
   padding: 12px;
-  border: 1px solid var(--border, #777);
+  border: 1px solid var(--border, #777777);
   margin-top: 12px;
   background: rgba(255, 255, 255, 0.07);
 }
@@ -52,15 +52,15 @@
 .style-preview {
   overflow: hidden;
   padding: 12px 16px;
-  background: #f1eee4;
-  color: #292c28;
-  border: 1px solid #868981;
+  background: #eeeeee;
+  color: #2b2b2b;
+  border: 1px solid #888888;
 }
 .style-preview small {
   font:
-    11px "Segoe UI",
+    11px "Sitka Text",
     sans-serif;
-  color: #555;
+  color: #555555;
 }
 .style-preview p {
   margin: 10px 0;
@@ -79,6 +79,6 @@
 }
 .style-warning {
   padding: 10px;
-  background: #eadca5;
-  color: #292d25;
+  background: #dbdbdb;
+  color: #2c2c2c;
 }

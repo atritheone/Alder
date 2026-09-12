@@ -173,6 +173,19 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             raise ValidationError("Select an Alder project file to open.")
         return await run_in_threadpool(store.open_archive, data["path"])
 
+    @app.post("/api/projects/open-file")
+    async def open_project_file(file: UploadFile = File(...)):
+        content = await uploaded(file)
+        scratch = store.data_dir / "imports"
+        scratch.mkdir(exist_ok=True)
+        fd, temporary = tempfile.mkstemp(suffix=".alder", dir=scratch)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(content)
+            return await run_in_threadpool(store.open_archive, temporary)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+
     @app.get("/api/projects/{project_id}")
     def project(project_id: str):
         return store.get(project_id)

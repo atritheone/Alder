@@ -15,7 +15,7 @@ def test_validates_all_relationships_and_derived_text():
     p["clips"][0]["text"] = "wrong derived field"
     assert validate_project(p)["clips"][0]["text"] == "I"
     p["placements"][0]["clipId"] = "missing"
-    with pytest.raises(ValidationError, match="missing clip"):
+    with pytest.raises(ValidationError, match="missing draft"):
         validate_project(p)
 
 
@@ -182,6 +182,11 @@ def test_api_end_to_end_and_auth(tmp_path):
         save = client.post(f"/api/projects/{p['id']}/save", json={"path": str(tmp_path / "api.alder")}, headers=headers)
         assert save.status_code == 200
         assert Path(save.json()["path"]).is_file()
+        with open(save.json()["path"], "rb") as archive:
+            opened = client.post("/api/projects/open-file", headers=headers, files={"file": ("dropped.alder", archive, "application/zip")})
+        assert opened.status_code == 200
+        assert opened.json()["id"] == p["id"]
+        assert opened.json()["clips"][0]["text"] == "A complete API authoring loop."
         assert client.get(f"/api/projects/{p['id']}?token=test-session").status_code == 200
 
 

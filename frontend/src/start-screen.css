@@ -1,0 +1,65 @@
+.start-screen {
+  min-height: 100dvh;
+  background: #e6e6e6;
+  color: #303030;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 18vh 24px 40px;
+}
+.start-brand {
+  text-align: center;
+}
+.start-brand h1 {
+  font-size: 48px;
+  font-weight: 400;
+  margin: 0;
+  letter-spacing: -2px;
+}
+.start-brand p {
+  color: #666666;
+  margin: 8px 0 32px;
+}
+.start-actions {
+  display: flex;
+  gap: 12px;
+}
+.start-actions button {
+  width: 150px;
+  height: 64px;
+  gap: 14px;
+  background: #f4f4f4;
+  border: 1px solid #aaaaaa;
+  font-size: 16px;
+}
+.start-open {
+  width: min(520px, 100%);
+  margin-top: 32px;
+  max-height: 42vh;
+  overflow: auto;
+}
+.new-document {
+  width: min(560px, 95vw);
+}
+.document-kinds {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.document-kinds button {
+  flex-direction: column;
+  padding: 15px 8px;
+}
+.document-kinds small {
+  font-size: 11px;
+  color: #555555;
+}
+.new-book-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.new-book-fields .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+}

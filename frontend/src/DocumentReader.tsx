@@ -4,6 +4,10 @@ import { api, download, duration, mediaUrl } from "./api";
 import type { Chapter, Job, Project, Voice } from "./types";
 import type { EditorHandle } from "./Editor";
 
+import { useNarrationGain } from "./audioPlayback";
+import { spokenWord } from "./wordFollowing";
+import PlaybackSpeed from "./PlaybackSpeed";
+
 type Props = {
   project: Project;
   chapter: Chapter;
@@ -28,7 +32,7 @@ export default function DocumentReader(p: Props) {
     [error, setError] = useState("");
   const [scope, setScope] = useState("chapter"),
     [speed, setSpeed] = useState(1),
-    [volume, setVolume] = useState(1);
+    [volume, setVolume] = useState(2);
   const [rate, setRate] = useState(0),
     [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);
@@ -50,6 +54,7 @@ export default function DocumentReader(p: Props) {
   const audio = useRef<HTMLAudioElement>(null),
     snapshot = useRef<Snapshot | null>(null),
     loaded = useRef("");
+  const resumeAudio = useNarrationGain(audio, volume);
   const [range, setRange] = useState<{ start: number; end: number } | null>(
     null,
   );
@@ -98,7 +103,6 @@ export default function DocumentReader(p: Props) {
       loaded.current = key;
       audio.current.src = mediaUrl(chunk.audioUrl);
       audio.current.playbackRate = speed;
-      audio.current.volume = volume;
       if (shouldPlay.current)
         audio.current
           .play()
@@ -108,9 +112,22 @@ export default function DocumentReader(p: Props) {
   useEffect(() => {
     if (audio.current) {
       audio.current.playbackRate = speed;
-      audio.current.volume = volume;
     }
   }, [speed, volume]);
+  useEffect(() => {
+    if (!playing) return;
+    let frame = 0;
+    const tick = () => {
+      if (audio.current)
+        setTime(
+          audio.current.currentTime +
+            (job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0),
+        );
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [playing, job, chunkIndex]);
   useEffect(() => {
     let next: { start: number; end: number } | null = null;
     if (active && follow && job && snapshot.current) {
@@ -134,24 +151,26 @@ export default function DocumentReader(p: Props) {
           (current.id === p.chapter.id || playing)
         ) {
           const relative = time - (chunk.startSeconds || 0);
-          const word = chunk.wordTimings?.find(
-            (w) => relative >= w.startSeconds && relative < w.endSeconds,
-          );
-          const base = (chunk.sourceStart || 0) - source.offset;
-          const start = word ? base + word.sourceStart : base;
-          const end = word
-            ? base + word.sourceEnd
-            : (chunk.sourceEnd || 0) - source.offset;
-          next = {
-            start: source.base + utf16(source.text.slice(source.base), start),
-            end: source.base + utf16(source.text.slice(source.base), end),
-          };
+          const word = spokenWord(chunk.wordTimings, relative);
+          if (word) {
+            const base = (chunk.sourceStart || 0) - source.offset;
+            next = {
+              start:
+                source.base +
+                utf16(source.text.slice(source.base), base + word.sourceStart),
+              end:
+                source.base +
+                utf16(source.text.slice(source.base), base + word.sourceEnd),
+            };
+          }
           if (current.id !== p.chapter.id) p.onChapter(current.id);
         }
       }
     }
-    setRange(next);
-    p.onHighlight(next);
+    if (range?.start !== next?.start || range?.end !== next?.end) {
+      setRange(next);
+      p.onHighlight(next);
+    }
   }, [time, job, follow, active, playing, p.chapter.id, p.chapter.text]);
   const read = async () => {
     try {
@@ -343,27 +362,17 @@ export default function DocumentReader(p: Props) {
           <Square size={12} />
         </button>
         <label>
-          Speed{" "}
-          <select
-            aria-label="Reading speed"
-            value={speed}
-            onChange={(e) => setSpeed(Number(e.target.value))}
-          >
-            {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((v) => (
-              <option key={v} value={v}>
-                {v}×
-              </option>
-            ))}
-          </select>
+          Speed <PlaybackSpeed value={speed} onChange={setSpeed} />×
         </label>
         <label>
           Volume{" "}
           <input
             aria-label="Reading volume"
+            title={`Narration volume: ${Math.round(volume * 100)}%`}
             type="range"
             min="0"
-            max="1"
-            step=".05"
+            max="4"
+            step=".01"
             value={volume}
             onChange={(e) => setVolume(Number(e.target.value))}
           />
@@ -537,8 +546,8 @@ export default function DocumentReader(p: Props) {
       {(error || job?.error) && <p role="alert">{error || job?.error}</p>}
       {job?.status === "ready" && job.chunks.some((c) => c.timingError) && (
         <p>
-          Word timing is unavailable for some passages; those passages follow at
-          paragraph/chunk level.
+          Word timing is unavailable for some passages. Highlighting pauses
+          there and resumes when word timing is available.
         </p>
       )}
       {snapshot.current &&
@@ -553,6 +562,7 @@ export default function DocumentReader(p: Props) {
           </p>
         )}
       <audio
+        crossOrigin="anonymous"
         ref={audio}
         onTimeUpdate={(e) =>
           setTime(
@@ -560,7 +570,10 @@ export default function DocumentReader(p: Props) {
               (job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0),
           )
         }
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          resumeAudio();
+          setPlaying(true);
+        }}
         onPause={() => setPlaying(false)}
         onEnded={() => {
           setPlaying(false);

@@ -1,7 +1,7 @@
 """Definition cards based on the author's Voyager reference.
 
-The same measured layout drives PNG, JPEG and vector PDF outputs. Fonts are
-shipped with Alder under the SIL Open Font License; no installed font is needed.
+The same measured layout drives PNG, JPEG and vector PDF outputs using Alder's
+supplied Sitka Text faces; no installed font is needed.
 """
 from __future__ import annotations
 
@@ -79,8 +79,12 @@ def _wrap(text, measure, width):
 def _layout(entry, width, height):
     from PIL import ImageFont
     from reportlab.pdfbase.ttfonts import TTFont
-    directory = font_directory()
-    fonts = {name: directory / f"LiberationSerif-{name}.ttf" for name in ("Regular", "Italic", "Bold")}
+    fallback = font_directory()
+    directory = Path(__file__).parent / "fonts"
+    fonts = {name: directory / f"SitkaText-{name}.ttf" for name in ("Regular", "Italic", "Bold")}
+    # The supplied Sitka faces lack IPA glyphs. Preserve pronunciation using
+    # the existing bundled phonetic fallback, while using Sitka for prose.
+    fonts["Phonetic"] = fallback / "LiberationSerif-Regular.ttf"
     metrics = {style: TTFont("AlderDefinitionAudit"+style, str(path)).face for style,path in fonts.items()}
     # All geometry is in the supplied reference's 800-unit coordinate system.
     # Non-square exports retain the proportions and centre the square design.
@@ -97,13 +101,13 @@ def _layout(entry, width, height):
         vector = sum(metrics[style].charWidths.get(ord(c), 0) for c in text) * size / 1000
         return max(raster, vector)
     # Missing glyphs are a validation failure, never silent square boxes.
-    glyphs = metrics["Regular"].charToGlyph
-    missing = sorted({c for value in entry.values() for c in value if not c.isspace() and ord(c) not in glyphs})
+    fields = {"word": "Regular", "ipa": "Phonetic", "partOfSpeech": "Italic", "definition": "Bold"}
+    missing = sorted({c for field, style in fields.items() for c in entry[field] if not c.isspace() and ord(c) not in metrics[style].charToGlyph})
     if missing:
         raise ValueError("The bundled definition font cannot display: " + ", ".join(f"{c} (U+{ord(c):04X})" for c in missing[:12]))
     warnings = []
     word_size, ipa_size, gap = 100.0, 46.0, 24.0
-    while measure(entry["word"], "Regular", word_size) + (gap + measure(entry["ipa"], "Regular", ipa_size) if entry["ipa"] else 0) > 590:
+    while measure(entry["word"], "Regular", word_size) + (gap + measure(entry["ipa"], "Phonetic", ipa_size) if entry["ipa"] else 0) > 590:
         word_size -= 1
         ipa_size = 46 * word_size / 100
         if word_size < 32:
@@ -128,7 +132,7 @@ def _layout(entry, width, height):
         warnings.append("Definition type was reduced to keep all text inside the card.")
     texts = [{"text": entry["word"], "x": 108, "baseline": 292, "style": "Regular", "size": word_size}]
     if entry["ipa"]:
-        texts.append({"text":entry["ipa"], "x":108+measure(entry["word"],"Regular",word_size)+gap, "baseline":292, "style":"Regular", "size":ipa_size})
+        texts.append({"text":entry["ipa"], "x":108+measure(entry["word"],"Regular",word_size)+gap, "baseline":292, "style":"Phonetic", "size":ipa_size})
     if entry["partOfSpeech"]:
         texts.append({"text":entry["partOfSpeech"], "x":108, "baseline":373, "style":"Italic", "size":pos_size})
     texts.extend({"text":line,"x":108,"baseline":460+i*line_height,"style":"Bold","size":body_size} for i,line in enumerate(lines))

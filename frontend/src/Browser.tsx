@@ -268,7 +268,7 @@ export default function Browser({
                   >
                     <Blocks size={13} />
                     <span>{c.title}</span>
-                    <small>clip</small>
+                    <small>draft</small>
                   </button>
                 ))
             ) : category === "Language tools" ? (
@@ -347,7 +347,7 @@ export default function Browser({
             <p>{selected.definition}</p>
             <div>
               <button onClick={() => onInsert(selected)}>Insert sample</button>
-              <span className="quiet">Drag into a clip</span>
+              <span className="quiet">Drag into a draft</span>
             </div>
           </>
         ) : (

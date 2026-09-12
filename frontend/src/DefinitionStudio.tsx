@@ -125,7 +125,7 @@ function LayoutPreview({ entry }: { entry: CardEntry }) {
     const context = canvas.getContext("2d");
     const measure = (text: string, size: number, bold = false) => {
       if (!context) return text.length * size * 0.56;
-      context.font = `${bold ? "bold " : ""}${size}px Georgia, serif`;
+      context.font = `${bold ? "bold " : ""}${size}px "Sitka Text", serif`;
       return context.measureText(text).width;
     };
     const word = entry.word || "Your word";
@@ -194,7 +194,7 @@ function LayoutPreview({ entry }: { entry: CardEntry }) {
         aria-label={`Live definition card for ${entry.word || "your word"}`}
       >
         <rect width="800" height="800" fill="#fff" />
-        <g fill="#050505" fontFamily="Georgia, serif">
+        <g fill="#050505" fontFamily="Sitka Text, serif">
           <text x="108" y="292" fontSize={layout.wordSize}>
             {layout.word}
           </text>

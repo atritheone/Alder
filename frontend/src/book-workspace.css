@@ -2,13 +2,13 @@
   display: flex;
   min-width: 0;
   overflow: hidden;
-  background: #969b96;
+  background: #9a9a9a;
 }
 .book-outline {
   width: 190px;
   flex: none;
-  background: #d7dad3;
-  border-right: 1px solid #939a90;
+  background: #d9d9d9;
+  border-right: 1px solid #989898;
   display: flex;
   flex-direction: column;
   padding: 12px 8px;
@@ -25,7 +25,7 @@
 }
 .book-outline p {
   font-size: 10px;
-  color: #60695e;
+  color: #666666;
   margin: 0 5px;
 }
 .chapter-list {
@@ -38,8 +38,8 @@
   margin: 4px 0;
 }
 .chapter-entry.selected {
-  background: #ecf0e5;
-  border-color: #8b9d7c;
+  background: #eeeeee;
+  border-color: #979797;
 }
 .chapter-select {
   width: 100%;
@@ -56,7 +56,7 @@
 }
 .chapter-select small {
   display: block;
-  color: #687261;
+  color: #6f6f6f;
   font-size: 10px;
   margin-top: 3px;
 }
@@ -84,8 +84,8 @@
   align-items: center;
   gap: 12px;
   padding: 7px 12px;
-  background: #c9cec4;
-  border-bottom: 1px solid #949b8e;
+  background: #cccccc;
+  border-bottom: 1px solid #999999;
   flex: none;
 }
 .chapter-toolbar input[aria-label="Chapter title"] {
@@ -101,8 +101,8 @@
 }
 .book-page-tools {
   font-size: 10px;
-  background: #dce0d7;
-  color: #5a6555;
+  background: #dedede;
+  color: #626262;
 }
 .book-page-tools label {
   margin-left: auto;
@@ -118,7 +118,7 @@
   min-width: 0;
 }
 .paginated-editor .editor-scroll {
-  background: #989e97;
+  background: #9c9c9c;
   padding: 22px;
 }
 .flow-canvas {
@@ -139,8 +139,8 @@
   flex: none;
   width: var(--page-width);
   height: var(--page-height);
-  background: #fffefb;
-  box-shadow: 0 2px 7px #47514255;
+  background: #fefefe;
+  box-shadow: 0 2px 7px #4e4e4e55;
 }
 .page-sheet > span {
   position: absolute;
@@ -148,8 +148,8 @@
   left: 0;
   right: 0;
   text-align: center;
-  font: 11px Georgia;
-  color: #64685f;
+  font: 11px "Sitka Text";
+  color: #666666;
 }
 .page-flow {
   position: relative;
@@ -167,7 +167,7 @@
   font-size: inherit;
   line-height: var(--page-leading);
   overflow: visible;
-  color: #272b26;
+  color: #2a2a2a;
 }
 .page-flow .ProseMirror p {
   line-height: inherit;
@@ -198,8 +198,8 @@
   font-size: 0;
 }
 .page-flow .ProseMirror .reading-word {
-  background: #e5d56e;
-  color: #1a2116;
+  background: #d1d1d1;
+  color: #1f1f1f;
   border-radius: 2px;
 }
 .page-navigation {
@@ -207,7 +207,7 @@
   gap: 5px;
   padding: 7px 12px;
   overflow: auto;
-  background: #c4cabd;
+  background: #c8c8c8;
   flex: none;
 }
 .page-navigation button {
@@ -217,7 +217,7 @@
   flex: 1;
   overflow: auto;
   padding: 16px;
-  background: #a9b0a3;
+  background: #aeaeae;
 }
 .page-arranger > p {
   margin: 0 0 14px;
@@ -230,24 +230,24 @@
   gap: 20px;
 }
 .page-card {
-  background: #fffefb;
+  background: #fefefe;
   min-height: 250px;
   max-height: 340px;
   display: flex;
   flex-direction: column;
   padding: 16px;
-  box-shadow: 0 2px 5px #36462f44;
+  box-shadow: 0 2px 5px #41414144;
   cursor: grab;
 }
 .page-card header {
-  color: #77806e;
+  color: #7d7d7d;
   font-size: 10px;
-  border-bottom: 1px solid #dde1d7;
+  border-bottom: 1px solid #dfdfdf;
   padding-bottom: 8px;
 }
 .page-card p {
   font:
-    11px/1.6 Georgia,
+    11px/1.6 "Sitka Text",
     serif;
   flex: 1;
   overflow: hidden;
@@ -283,19 +283,19 @@
   align-items: center;
   gap: 8px;
   padding: 9px 13px;
-  background: #bbc3b4;
-  border-bottom: 1px solid #929b8a;
+  background: #c0c0c0;
+  border-bottom: 1px solid #989898;
 }
 .writing-commandbar > span {
   flex: 1;
   text-align: right;
   padding-right: 12px;
-  color: #526048;
+  color: #5b5b5b;
   font-size: 11px;
 }
 .document-reader {
-  background: #dce3d3;
-  border-bottom: 1px solid #929e85;
+  background: #e0e0e0;
+  border-bottom: 1px solid #9a9a9a;
   padding: 7px 10px;
   flex: none;
 }
@@ -327,7 +327,7 @@
   align-items: center;
   gap: 8px;
   font-size: 10px;
-  color: #536348;
+  color: #5e5e5e;
   margin-top: 5px;
 }
 .reader-progress > input {
@@ -337,5 +337,5 @@
 .document-reader p {
   font-size: 11px;
   margin: 4px 0;
-  color: #705022;
+  color: #535353;
 }

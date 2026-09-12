@@ -115,3 +115,22 @@ def test_six_by_nine_book_page_dimensions(tmp_path):
     result = build_export(p,"pdf",tmp_path)
     page = PdfReader(result["path"]).pages[0]
     assert float(page.mediabox.width) == 432 and float(page.mediabox.height) == 648
+
+
+def test_simple_document_exports_only_authored_text_and_sitka_layout(tmp_path):
+    from pypdf import PdfReader
+    from docx import Document
+    p = book_project()
+    p["book"]["chapters"] = p["book"]["chapters"][:1]
+    p["settings"].update(documentKind="docx", includeTitle=False, pageSize="A5", orientation="landscape", firstPageNumber=7)
+    text = build_export(p, "txt", tmp_path)
+    assert Path(text["path"]).read_text(encoding="utf-8").strip() == "New manuscript 😀"
+    word = build_export(p, "docx", tmp_path)
+    doc = Document(word["path"])
+    assert doc.sections[0].page_width > doc.sections[0].page_height
+    assert doc.styles["Normal"].font.name == "Sitka Text"
+    pdf = build_export(p, "pdf", tmp_path)
+    page = PdfReader(pdf["path"]).pages[0]
+    assert page.mediabox.width > page.mediabox.height
+    assert not any("substituted" in warning for warning in pdf["warnings"])
+    assert "7" in page.extract_text()

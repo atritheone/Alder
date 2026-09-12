@@ -19,7 +19,8 @@ def publication_project(project: dict) -> dict:
         if not chapter.get("include", True):
             continue
         identifier = chapter["id"]
-        p["sections"].append({"id": identifier, "title": chapter["title"], "role": chapter.get("role", "chapter"), "order": order})
+        title = "" if project.get("settings", {}).get("documentKind") in {"txt", "docx"} else chapter["title"]
+        p["sections"].append({"id": identifier, "title": title, "role": chapter.get("role", "chapter"), "order": order})
         p["clips"].append({"id": identifier, "trackId": "book-output", "title": chapter["title"],
                            "document": deepcopy(chapter["document"]), "text": chapter["text"],
                            "variants": [], "voiceId": chapter.get("voiceId")})

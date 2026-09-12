@@ -342,7 +342,7 @@ export function parseEditorDocument(input: DocNode): {
     return {
       document: null,
       error:
-        "This clip contains a structure Alder cannot edit yet. The original source is preserved and can be exported.",
+        "This draft contains a structure Alder cannot edit yet. The original source is preserved and can be exported.",
     };
   }
 }
@@ -875,7 +875,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     if (props.readingRange)
       v.dom
         .querySelector(".reading-word")
-        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        ?.scrollIntoView({
+          block: "nearest",
+          inline: "nearest",
+          behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+        });
   }, [props.readingRange]);
   useLayoutEffect(() => {
     const v = view.current;
@@ -1014,14 +1020,18 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         </select>
         <select
           aria-label="Font family"
-          defaultValue="Georgia"
+          defaultValue="Sitka Text"
           onChange={(e) => setFont("fontFamily", e.target.value)}
         >
-          {["Georgia", "Segoe UI", "Arial", "Times New Roman", "Consolas"].map(
-            (f) => (
-              <option key={f}>{f}</option>
-            ),
-          )}
+          {[
+            "Sitka Text",
+            "Segoe UI",
+            "Arial",
+            "Times New Roman",
+            "Consolas",
+          ].map((f) => (
+            <option key={f}>{f}</option>
+          ))}
         </select>
         <select
           aria-label="Font size"
@@ -1176,7 +1186,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           "editor-scroll" + (props.showStructure ? " show-structure" : "")
         }
         style={{
-          fontFamily: props.fontFamily || "Georgia",
+          fontFamily: props.fontFamily || "Sitka Text",
           fontSize: `${props.fontSize || 15}px`,
         }}
       >
