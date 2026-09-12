@@ -1,3 +1,4 @@
+import AlderLogo from "./AlderLogo";
 import { useInstalledFonts } from "./useInstalledFonts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -34,7 +35,6 @@ import {
   Trash2,
   SlidersHorizontal,
   AudioLines,
-  Leaf,
   CircleHelp,
   LoaderCircle,
   AlertCircle,
@@ -1284,7 +1284,7 @@ export default function App() {
         }}
       >
         <strong className="window-brand" title="Organic Language Engine">
-          Alder
+          <AlderLogo /> Alder
         </strong>
         {Object.entries(menuItems).map(([name, items]) => (
           <div
@@ -2543,9 +2543,7 @@ export default function App() {
         <span className="status-hint">{hint}</span>
         <span className="save-status">
           <span
-            className={
-              saveState === "All changes saved" ? "saved-dot" : "unsaved-dot"
-            }
+            className={saveState === "Saved" ? "saved-dot" : "unsaved-dot"}
           />
           {saveState}
         </span>
@@ -3279,7 +3277,7 @@ export default function App() {
               )}
               {panel === "about" && (
                 <div className="about-panel">
-                  <Leaf size={40} />
+                  <AlderLogo />
                   <h1>Alder</h1>
                   <p>Organic Language Engine · 0.1.0</p>
                   <p>

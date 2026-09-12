@@ -1,3 +1,4 @@
+import AlderLogo from "./AlderLogo";
 import { useEffect, useRef, useState } from "react";
 import { FilePlus2, FolderOpen, X } from "lucide-react";
 import { api } from "./api";
@@ -253,6 +254,7 @@ export default function StartScreen({
   return (
     <main className="start-screen">
       <div className="start-brand">
+        <AlderLogo />
         <h1>Alder</h1>
         <p>Organic Language Engine</p>
       </div>

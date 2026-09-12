@@ -26,7 +26,7 @@ try {
     .fill(
       "Alder reads each word clearly. The voice follows the writing at a precise speed.",
     );
-  await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
   const families = await page.evaluate(
     async () => (await window.alder.request("GET", "/api/fonts")).families,
   );

@@ -14,7 +14,7 @@ test.use({
 test.describe.configure({ timeout: 60_000 });
 
 async function saved(page: Page) {
-  await expect(page.locator(".save-status")).toHaveText("All changes saved", {
+  await expect(page.locator(".save-status")).toHaveText("Saved", {
     timeout: 15_000,
   });
   await expect(page.getByRole("alert")).toHaveCount(0);

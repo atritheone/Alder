@@ -9,10 +9,11 @@
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build && node scripts/build-electron.mjs",
-    "desktop": "electron .",
+    "desktop": "node scripts/start-desktop.mjs",
     "test": "vitest run",
     "package": "npm run build && node scripts/prepare-javascript-notices.mjs && node scripts/verify-resources.mjs && electron-builder --win --dir",
-    "format": "prettier --write frontend electron scripts/*.mjs *.json *.ts"
+    "format": "prettier --write frontend electron scripts/*.mjs *.json *.ts",
+    "branding": "electron scripts/prepare-branding.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -83,7 +84,8 @@
     ],
     "win": {
       "target": "dir",
-      "signAndEditExecutable": false
+      "icon": "build/alder.ico",
+      "signExecutable": false
     },
     "copyright": "Copyright (c) 6AE slayer"
   },

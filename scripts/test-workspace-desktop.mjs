@@ -26,7 +26,7 @@ try {
     exact: true,
   });
   await expect(writing).toBeVisible();
-  await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
   const project = await page.evaluate(() =>
     window.alder.request(
       "GET",
@@ -159,7 +159,7 @@ try {
     await transfer.dispose();
   }
   await expect(sandbox).toHaveText("I want to write");
-  await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
   const saved = await page.evaluate(() =>
     window.alder.request(
       "GET",
@@ -171,7 +171,7 @@ try {
   const accent = await page
     .getByLabel("Reading speed slider", { exact: true })
     .evaluate((el) => getComputedStyle(el).accentColor);
-  expect(accent).toBe("rgb(119, 81, 168)");
+  expect(accent).toBe("rgb(61, 117, 187)");
   expect(errors).toEqual([]);
   fs.writeFileSync(
     "work/workspace-desktop-result.json",

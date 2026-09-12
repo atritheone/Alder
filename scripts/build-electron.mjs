@@ -10,3 +10,6 @@ await build({
   external: ["electron"],
   sourcemap: true,
 });
+
+const { brandDesktop } = await import("./brand-desktop.mjs");
+await brandDesktop();

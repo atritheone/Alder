@@ -50,7 +50,7 @@ This update builds the development application; no release package is replaced
 automatically.
 
 The writing workspace now centers each page, including page navigation in a
-longer document, and uses glyphs for Write, Pages, and Page Preview. Purple
+longer document, and uses glyphs for Write, Pages, and Page Preview. Blue
 marks active controls, sliders, and primary actions against grey surfaces.
 Library width can be dragged or adjusted with the separator's arrow keys; a
 small edge arrow hides or restores it. Menus switch on hover while open and
@@ -63,3 +63,15 @@ reference imports, auditions, and pronunciation editing live inside the Voices
 library panel. Interface labels use title case while authored text retains its
 case. `scripts/test-workspace-desktop.mjs` verifies these interactions in an
 isolated desktop profile, alongside 27 TypeScript checks.
+
+Alder branding uses the supplied transparent black tree on light UI surfaces
+and transparent white tree on dark surfaces. Fixed desktop icons use the
+supplied white tree on a black background; interface accents remain blue. The start screen, menu bar, About panel, favicon, window,
+tray, and Windows executable share these assets. `npm run branding` regenerates
+PNG and ICO assets from `frontend/public/branding/alder-icon-source.png`. Windows builds
+create a branded `Alder.exe` beside the development Electron runtime, used by
+`Start-Alder.cmd` and `npm run desktop`; the dependency executable is preserved.
+Release configuration enables icon/metadata resource editing while leaving
+code signing disabled. The saved status reads “Saved”. Branding verification
+checks executable icon resources, native Windows icon extraction, UI marks,
+blue accents, and the save status in the branded desktop application.

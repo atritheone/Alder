@@ -2846,10 +2846,10 @@ button.accent {
   font-variant-numeric: tabular-nums;
 }
 
-/* Workspace chrome: neutral surfaces with purple for active controls. */
+/* Workspace chrome: neutral surfaces with blue for active controls. */
 :root {
-  --accent: #7751a8;
-  --accent-light: #ddd0ee;
+  --accent: #3d75bb;
+  --accent-light: #d0e0f4;
 }
 .alder-app input[type="range"],
 .alder-app input[type="checkbox"],
@@ -2866,11 +2866,11 @@ button.accent {
 .theme-neutral .filter-chips button.active {
   background: var(--accent-light);
   border-color: var(--accent);
-  color: #452668;
+  color: #24558a;
 }
 .theme-neutral .browser-nav button.selected {
   background: var(--accent-light);
-  color: #452668;
+  color: #24558a;
   box-shadow: inset 3px 0 var(--accent);
 }
 .alder-app .view-tabs button,
@@ -2883,7 +2883,7 @@ button.accent {
   min-width: 30px;
 }
 .alder-app .view-tabs button.active {
-  color: #452668;
+  color: #24558a;
 }
 .alder-app .view-tabs button.active svg {
   stroke-width: 2.6;
@@ -3032,5 +3032,33 @@ button.accent {
 .new-document button.active {
   background: var(--accent-light);
   border-color: var(--accent);
-  color: #452668;
+  color: #24558a;
+}
+
+.alder-logo {
+  display: inline-flex;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border-radius: 0;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.alder-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.window-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.start-brand .alder-logo,
+.about-panel .alder-logo {
+  width: 80px;
+  height: 80px;
+  border-radius: 0;
 }

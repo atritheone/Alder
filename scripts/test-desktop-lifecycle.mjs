@@ -42,7 +42,7 @@ try {
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("button", { name: "Book Chapters & pages" }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
   await page.getByRole("tab", { name: "Write", exact: true }).click();
   const projectId = await page.evaluate(() =>
     localStorage.getItem("alder.project"),

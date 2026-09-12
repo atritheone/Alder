@@ -11,6 +11,7 @@ import {
   clipboard,
   globalShortcut,
   Tray,
+  nativeImage,
 } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
@@ -19,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+app.setAppUserModelId("org.alder.language");
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on("second-instance", () => {
   window?.restore();
@@ -48,10 +50,12 @@ const flushRequests = new Map<
   (value: { ok: boolean; message?: string }) => void
 >();
 const root = path.resolve(__dirname, "..");
-const resources = app.isPackaged
+// A branded development executable still loads through Electron's default app.
+const packaged = app.isPackaged && !process.defaultApp;
+const resources = packaged
   ? process.resourcesPath
   : path.join(root, "work", "bundle-resources");
-const backendRoot = app.isPackaged
+const backendRoot = packaged
   ? path.join(resources, "backend")
   : path.join(root, "backend");
 const appRoot = path.join(root, "dist");
@@ -367,7 +371,7 @@ function setMenu() {
           { role: "zoomIn" },
           { role: "zoomOut" },
           { role: "togglefullscreen" },
-          ...(!app.isPackaged ? [{ role: "toggleDevTools" as const }] : []),
+          ...(!packaged ? [{ role: "toggleDevTools" as const }] : []),
         ],
       },
     ]),
@@ -383,7 +387,15 @@ app.whenReady().then(async () => {
     );
     session.defaultSession.setPermissionCheckHandler(() => false);
     setMenu();
+    const appIcon = nativeImage.createFromPath(
+      path.join(appRoot, "branding", "alder-icon.png"),
+    );
+    if (appIcon.isEmpty())
+      throw new Error(
+        "The Alder application icon is missing. Rebuild the application.",
+      );
     window = new BrowserWindow({
+      icon: appIcon,
       width: 1550,
       height: 980,
       minWidth: 900,
@@ -417,7 +429,7 @@ app.whenReady().then(async () => {
       !process.argv.includes("--headless-test") &&
       !process.argv.includes("--smoke-test")
     ) {
-      readingTray = new Tray(await app.getFileIcon(process.execPath));
+      readingTray = new Tray(appIcon);
       readingTray.setToolTip("Alder · document reading");
       readingTray.setContextMenu(
         Menu.buildFromTemplate([

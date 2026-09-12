@@ -32,7 +32,7 @@ export function useProject() {
     dirty.current = converted;
     serial.current++;
     setProject(p);
-    setSaveState("All changes saved");
+    setSaveState("Saved");
     localStorage.setItem("alder.project", p.id);
   }, []);
   const flush = useCallback(async () => {
@@ -60,7 +60,7 @@ export function useProject() {
           } else if (current.current) {
             current.current = { ...current.current, revision: saved.revision };
           }
-          setSaveState(dirty.current ? "Saving…" : "All changes saved");
+          setSaveState(dirty.current ? "Saving…" : "Saved");
         } catch (e) {
           dirty.current = true;
           setSaveState("Changes need saving");

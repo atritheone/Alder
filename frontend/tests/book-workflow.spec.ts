@@ -47,7 +47,7 @@ test("continuous chapter text flows, page moves preserve words, and edits surviv
   await expect
     .poll(() => page.locator(".page-card").first().innerText())
     .not.toBe(before);
-  await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
   const saved = await (
     await request.get(`http://127.0.0.1:8765/api/projects/${created.id}`)
   ).json();
@@ -86,7 +86,7 @@ test("new chapters own prose and SAPI reading follows spoken words", async ({
   await editor.fill(
     "Alder is a place to write books. The words flow across pages while we read.",
   );
-  await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
   const choices = await page
     .locator(
       'select[aria-label="Reading voice"] optgroup[label="Windows SAPI"] option',
@@ -192,7 +192,7 @@ test("opening a rich text file adds readable chapter text without replacing the 
     exact: true,
   });
   await editor.fill("Keep the original chapter.");
-  await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
   const chooser = page.waitForEvent("filechooser");
   await page
     .getByRole("button", { name: "Open document", exact: true })

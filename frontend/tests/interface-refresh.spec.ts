@@ -27,7 +27,7 @@ test("clean startup, TXT creation, Aptos, help, and exact speed", async ({
   });
   await expect(editor).toBeVisible();
   await editor.fill("Only these words. No generated title.");
-  await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
   const id = await page.evaluate(() => localStorage.getItem("alder.project"));
   const output = await (
     await request.post(`/api/projects/${id}/export`, {
