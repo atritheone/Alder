@@ -41,7 +41,7 @@ const descriptions: Record<string, string> = {
     "Try wording independently of your document. Use Insert into chapter to copy the draft into your writing.",
   "Book chapters":
     "Select, rename, reorder, or add chapters. Only included chapters appear in the publication.",
-  "Language tools":
+  "Language Tools":
     "Check or transform the selected wording. Preview a change before applying it to your draft.",
   "Insert into chapter":
     "Insert a copy of this sandbox draft at the document cursor. The draft remains available for further experiments.",

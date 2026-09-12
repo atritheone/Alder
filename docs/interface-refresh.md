@@ -48,3 +48,18 @@ choices, precise numeric input, slider synchronization, nonzero audio samples,
 was also checked: Aptos interface, Cambria document text, and selected Consolas.
 This update builds the development application; no release package is replaced
 automatically.
+
+The writing workspace now centers each page, including page navigation in a
+longer document, and uses glyphs for Write, Pages, and Page Preview. Purple
+marks active controls, sliders, and primary actions against grey surfaces.
+Library width can be dragged or adjusted with the separator's arrow keys; a
+small edge arrow hides or restores it. Menus switch on hover while open and
+close when the pointer leaves them.
+
+Empty projects receive one starter sandbox draft on opening. Library word
+drops add appropriate spaces and resolve to a text position at paragraph
+boundaries. The help box docks at the bottom right beside the sandbox. Voices,
+reference imports, auditions, and pronunciation editing live inside the Voices
+library panel. Interface labels use title case while authored text retains its
+case. `scripts/test-workspace-desktop.mjs` verifies these interactions in an
+isolated desktop profile, alongside 27 TypeScript checks.

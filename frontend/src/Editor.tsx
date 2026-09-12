@@ -1,3 +1,4 @@
+import { spacedWord } from "./wordInsertion";
 import { useInstalledFonts } from "./useInstalledFonts";
 import {
   forwardRef,
@@ -450,6 +451,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     [rangeWarning, setRangeWarning] = useState("");
   const [version, tick] = useState(0);
   const [flowPages, setFlowPages] = useState<FlowPage[]>([]);
+  const [pageInset, setPageInset] = useState(0);
   const selectedTextStyle = (state: EditorState) => {
     let marks = state.storedMarks || state.selection.$from.marks();
     if (!state.selection.empty) {
@@ -848,7 +850,23 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           try {
             const idea: Idea = JSON.parse(raw),
               at = v.posAtCoords({ left: e.clientX, top: e.clientY });
-            if (at) v.dispatch(v.state.tr.insertText(idea.word, at.pos));
+            if (at) {
+              const position = TextSelection.near(
+                v.state.doc.resolve(at.pos),
+              ).$from;
+              const parent = position.parent;
+              const before = parent.textBetween(0, position.parentOffset);
+              const after = parent.textBetween(
+                position.parentOffset,
+                parent.content.size,
+              );
+              v.dispatch(
+                v.state.tr.insertText(
+                  spacedWord(idea.word, before, after),
+                  position.pos,
+                ),
+              );
+            }
             e.preventDefault();
             return true;
           } catch {
@@ -906,6 +924,23 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       });
   }, [props.readingRange]);
   useLayoutEffect(() => {
+    const layout = props.pageLayout;
+    const scroll = host.current?.closest<HTMLElement>(".editor-scroll");
+    if (!layout || !scroll) return;
+    const centrePage = () => {
+      const style = getComputedStyle(scroll);
+      const available =
+        scroll.clientWidth -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight);
+      setPageInset(Math.max(0, (available / layout.zoom - layout.width) / 2));
+    };
+    centrePage();
+    const observer = new ResizeObserver(centrePage);
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, [props.pageLayout?.width, props.pageLayout?.zoom]);
+  useLayoutEffect(() => {
     const v = view.current;
     if (!v || !props.pageLayout || blocked.current) return;
     let frame = 0;
@@ -913,7 +948,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         if (!view.current) return;
-        const pages = measurePages(v, latest.current.pageLayout!);
+        const layout = latest.current.pageLayout!;
+        const pages = measurePages(v, layout);
         setFlowPages((old) =>
           JSON.stringify(old) === JSON.stringify(pages) ? old : pages,
         );
@@ -923,6 +959,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(v.dom);
+    const viewport = v.dom.closest(".editor-scroll");
+    if (viewport) observer.observe(viewport);
     v.dom.addEventListener("load", measure, true);
     document.fonts.addEventListener("loadingdone", measure);
     return () => {
@@ -1218,6 +1256,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                     (props.pageLayout.width + PAGE_GAP) -
                   PAGE_GAP,
                 zoom: props.pageLayout.zoom,
+                marginInline: pageInset,
               } as React.CSSProperties
             }
           >

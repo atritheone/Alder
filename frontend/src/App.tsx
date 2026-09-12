@@ -6,6 +6,9 @@ import {
   Square,
   Plus,
   ChevronDown,
+  ChevronLeft,
+  FilePenLine,
+  ScanEye,
   PanelLeftClose,
   PanelLeftOpen,
   Columns3,
@@ -234,6 +237,7 @@ export default function App() {
     ]),
     [jobs, setJobs] = useState<Job[]>([]),
     [capabilities, setCapabilities] = useState<any>(null);
+  const [browserCategory, setBrowserCategory] = useState("Ideas");
   const [browserOpen, setBrowserOpen] = useState(
       () => localStorage.getItem("alder.browserOpen") === "true",
     ),
@@ -371,6 +375,24 @@ export default function App() {
       .then(setCapabilities)
       .catch(() => {});
   }, []);
+  useEffect(() => {
+    if (!project || project.clips.length) return;
+    change((p) => {
+      if (p.clips.length) return;
+      if (!p.tracks.length)
+        p.tracks.push({
+          id: uid(),
+          name: "Drafts",
+          color: "#999999",
+          role: "Writing",
+          voiceId: "default",
+          muted: false,
+          solo: false,
+          devices: [],
+        });
+      p.clips.push(newClip(p.tracks[0].id, 0, "", "Untitled Draft"));
+    });
+  }, [project?.id]);
   useEffect(() => {
     if (project && !project.clips.some((c) => c.id === selected))
       setSelected(project.clips[0]?.id || null);
@@ -664,6 +686,12 @@ export default function App() {
       window.dispatchEvent(new Event("alder-open-start"));
       return;
     }
+    if (name === "voices") {
+      setBrowserCategory("Voices");
+      setBrowserOpen(true);
+      setPanel(null);
+      return;
+    }
     if (name === "import") {
       importFile.current?.click();
       return;
@@ -954,6 +982,7 @@ export default function App() {
     e.preventDefault();
     const startX = e.clientX,
       startY = e.clientY,
+      scale = Number(uiScale),
       el = root.current!,
       rect = el.getBoundingClientRect();
     const initial =
@@ -964,12 +993,12 @@ export default function App() {
       const val =
         kind === "browser"
           ? Math.min(
-              rect.width * 0.45,
-              Math.max(240, initial + e.clientX - startX),
+              Math.min(800, (rect.width * 0.6) / scale),
+              Math.max(240, initial + (e.clientX - startX) / scale),
             )
           : Math.min(
               rect.height * 0.65,
-              Math.max(180, initial + startY - e.clientY),
+              Math.max(180, initial + (startY - e.clientY) / scale),
             );
       el.style.setProperty(
         kind === "browser" ? "--browser-width" : "--detail-height",
@@ -1021,6 +1050,113 @@ export default function App() {
         )}
       </>
     );
+  const voiceManager = (
+    <>
+      <p>
+        Reference voices are processed locally. Use a clean recording longer
+        than five seconds, ideally about ten seconds.
+      </p>
+      <div className="manager-actions">
+        <button className="accent" onClick={() => voiceFile.current?.click()}>
+          Add reference voice…
+        </button>
+      </div>
+      {voices.map((v) => (
+        <div className="voice-row" key={v.id}>
+          <AudioLines size={18} />
+          <strong>{v.name}</strong>
+          <span>
+            {v.id === "default"
+              ? "Included With Alder"
+              : v.id.startsWith("sapi-")
+                ? "Windows Voice"
+                : "Reference Voice"}
+          </span>
+          <button
+            onClick={() =>
+              void run(async () => {
+                const job = await api<Job>(
+                  `/api/projects/${project.id}/speech`,
+                  "POST",
+                  {
+                    scope: "selection",
+                    text: "I listen to the language and leave room for the words to breathe.",
+                    voiceId: v.id,
+                    seed,
+                  },
+                );
+                setActiveJob(job);
+                setDetailOpen(true);
+                setDetail("Narration");
+              })
+            }
+          >
+            Audition
+          </button>
+        </div>
+      ))}
+      <h3>Pronunciation dictionary</h3>
+      <p>Spoken substitutions leave the written text unchanged.</p>
+      {project.pronunciation.map((entry) => (
+        <div className="dictionary-row" key={entry.id}>
+          <strong>{entry.word}</strong>
+          <ArrowRight size={13} />
+          <span>{entry.spoken}</span>
+          <button
+            aria-label={`Remove Pronunciation For ${entry.word}`}
+            onClick={() =>
+              change((p) => {
+                p.pronunciation = p.pronunciation.filter(
+                  (x) => x.id !== entry.id,
+                );
+              })
+            }
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      ))}
+      <form
+        className="voice-pronunciation"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const fields = new FormData(form);
+          const word = String(fields.get("word") || "").trim();
+          const spoken = String(fields.get("spoken") || "").trim();
+          if (!word || !spoken) return;
+          change((p) =>
+            p.pronunciation.push({
+              id: uid(),
+              word,
+              spoken,
+              regex: fields.get("mode") === "regex",
+              caseSensitive: false,
+              voiceId: null,
+            }),
+          );
+          form.reset();
+        }}
+      >
+        <label>
+          Written Word Or Expression
+          <input name="word" required />
+        </label>
+        <label>
+          Speak As
+          <input name="spoken" required />
+        </label>
+        <label>
+          Match
+          <select name="mode">
+            <option value="literal">Literal Wording</option>
+            <option value="regex">Regular Expression</option>
+          </select>
+        </label>
+        <button type="submit">Add Pronunciation</button>
+      </form>
+    </>
+  );
   const menuItems: Record<string, { label: string; action: () => void }[]> = {
     File: [
       { label: "New project…", action: newProject },
@@ -1110,7 +1246,7 @@ export default function App() {
       { label: "Document setup…", action: () => openPanel("settings") },
       { label: "Styles…", action: () => openPanel("styles") },
       { label: "Language rules…", action: () => openPanel("rules") },
-      { label: "Project assets…", action: () => openPanel("assets") },
+      { label: "Project Assets…", action: () => openPanel("assets") },
     ],
     Help: [
       { label: "Getting started", action: () => openPanel("help") },
@@ -1140,22 +1276,37 @@ export default function App() {
         } as React.CSSProperties
       }
     >
-      <div className="menubar">
+      <div
+        className="menubar"
+        onMouseLeave={() => setMenu(null)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setMenu(null);
+        }}
+      >
         <strong className="window-brand" title="Organic Language Engine">
           Alder
         </strong>
         {Object.entries(menuItems).map(([name, items]) => (
-          <div className="menu-wrap" key={name}>
+          <div
+            className="menu-wrap"
+            key={name}
+            onMouseEnter={() => {
+              if (menu) setMenu(name);
+            }}
+          >
             <button
+              aria-haspopup="menu"
+              aria-expanded={menu === name}
               className={menu === name ? "open" : ""}
               onClick={() => setMenu(menu === name ? null : name)}
             >
               {name}
             </button>
             {menu === name && (
-              <div className="menu-popup">
+              <div className="menu-popup" role="menu">
                 {items.map((item) => (
                   <button
+                    role="menuitem"
                     key={item.label}
                     onClick={() => {
                       setMenu(null);
@@ -1288,12 +1439,13 @@ export default function App() {
           </div>
           <div className="view-tabs" role="tablist">
             {[
-              { name: "Write", icon: FileText },
+              { name: "Write", icon: FilePenLine },
               { name: "Pages", icon: Columns3 },
-              { name: "Page Preview", icon: FileText },
+              { name: "Page Preview", icon: ScanEye },
             ].map(({ name, icon: Icon }) => (
               <button
                 role="tab"
+                aria-label={name}
                 aria-selected={view === name}
                 key={name}
                 className={view === name ? "active" : ""}
@@ -1307,17 +1459,32 @@ export default function App() {
                   else setView(name);
                 }}
               >
-                <Icon size={13} />
-                {name}
+                <Icon size={16} />
               </button>
             ))}
           </div>
         </div>
         <div className="upper-workspace">
+          <button
+            className="browser-edge-toggle"
+            aria-label="Toggle Left Panel"
+            aria-expanded={browserOpen}
+            data-help="Show or hide the library panel. Drag its right edge to resize it; your chosen width is remembered."
+            onClick={() => setBrowserOpen((v) => !v)}
+          >
+            {browserOpen ? (
+              <ChevronLeft size={12} />
+            ) : (
+              <ChevronRight size={12} />
+            )}
+          </button>
           {browserOpen && (
             <>
               <Browser
                 project={project}
+                category={browserCategory}
+                onCategory={setBrowserCategory}
+                voiceManager={voiceManager}
                 ideas={ideas}
                 onInsert={insertIdea}
                 onSelectClip={selectClip}
@@ -1327,6 +1494,24 @@ export default function App() {
               />
               <div
                 className="vertical-resizer"
+                role="separator"
+                aria-label="Resize Left Panel"
+                aria-orientation="vertical"
+                aria-valuemin={240}
+                aria-valuemax={800}
+                aria-valuenow={Math.round(browserWidth)}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (["ArrowLeft", "ArrowRight"].includes(e.key)) {
+                    e.preventDefault();
+                    setBrowserWidth((v) =>
+                      Math.max(
+                        240,
+                        Math.min(800, v + (e.key === "ArrowRight" ? 20 : -20)),
+                      ),
+                    );
+                  }
+                }}
                 onMouseDown={(e) => resize(e, "browser")}
               />
             </>
@@ -1397,935 +1582,954 @@ export default function App() {
         className="horizontal-resizer"
         onMouseDown={(e) => resize(e, "detail")}
       />
-      {detailOpen && (
-        <section className="detail-pane pane">
-          <div className="detail-heading">
-            <div className="clip-name" style={{ borderLeftColor: "#888888" }}>
-              {clip ? (
-                <input
-                  aria-label="Sandbox draft title"
-                  value={clip.title}
-                  onChange={(e) =>
-                    change((p) => {
-                      p.clips.find((c) => c.id === clip.id)!.title =
-                        e.target.value;
-                    })
-                  }
-                />
-              ) : (
-                <span>No sandbox draft selected</span>
-              )}
-            </div>
-            <div className="detail-tabs" role="tablist">
-              {["Clip", "Devices", "Narration"].map((t) => (
-                <button
-                  role="tab"
-                  aria-selected={detail === t}
-                  className={detail === t ? "active" : ""}
-                  key={t}
-                  onClick={() => setDetail(t)}
-                >
-                  {t === "Clip" ? (
-                    <FileText size={12} />
-                  ) : t === "Devices" ? (
-                    <SlidersHorizontal size={12} />
-                  ) : (
-                    <AudioLines size={12} />
-                  )}{" "}
-                  {t === "Clip"
-                    ? "Sandbox"
-                    : t === "Devices"
-                      ? "Language tools"
-                      : t}
-                </button>
-              ))}
-            </div>
-            <span className="detail-spacer" />
-            {clip && (
-              <>
-                <select
-                  aria-label="Draft version"
-                  value={clip.activeVariantId || ""}
-                  onChange={(e) =>
-                    change((p) => {
-                      p.clips.find((c) => c.id === clip.id)!.activeVariantId =
-                        e.target.value || null;
-                    })
-                  }
-                >
-                  <option value="">Original</option>
-                  {clip.variants.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  title="Create draft version"
-                  aria-label="Create draft version"
-                  onClick={variant}
-                >
-                  <GitBranch size={13} />
-                </button>
-                <button
-                  title="Duplicate draft"
-                  aria-label="Duplicate draft"
-                  onClick={duplicate}
-                >
-                  <Copy size={13} />
-                </button>
-                <button
-                  title="Split draft"
-                  aria-label="Split draft"
-                  onClick={splitClip}
-                >
-                  <Scissors size={13} />
-                </button>
-                <button
-                  title="Combine with next draft"
-                  aria-label="Combine drafts"
-                  onClick={mergeClip}
-                >
-                  <Combine size={13} />
-                </button>
-                <button
-                  className="add-collation"
-                  onClick={() => collate(clip.id)}
-                >
-                  Insert into chapter <ArrowRight size={12} />
-                </button>
-              </>
-            )}
-          </div>
-          {detail === "Clip" ? (
-            clip && content ? (
-              <div className="clip-detail">
-                <aside className="clip-properties">
-                  <div className="property-caption">DRAFT</div>
-                  <div className="property-grid">
-                    <label>
-                      Words<output>{words(content.text)}</output>
-                    </label>
-                    <label>
-                      Sentences<output>{analysis?.sentences || 0}</output>
-                    </label>
-                  </div>
-                  <label>
-                    Collection
-                    <select
-                      value={clip.trackId}
-                      onChange={(e) =>
-                        change((p) => {
-                          const c = p.clips.find((c) => c.id === clip.id)!;
-                          c.trackId = e.target.value;
-                          while (
-                            p.clips.some(
-                              (o) =>
-                                o.id !== c.id &&
-                                o.trackId === c.trackId &&
-                                o.slot === c.slot,
-                            )
-                          )
-                            c.slot++;
-                        })
-                      }
-                    >
-                      {project.tracks.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Voice
-                    <select
-                      aria-label="Draft voice"
-                      value={clip.voiceId || ""}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.clips.find((c) => c.id === clip.id)!.voiceId =
-                            e.target.value || null;
-                        })
-                      }
-                    >
-                      <option value="">Default voice</option>
-                      {voices.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Variation seed
-                    <input
-                      type="number"
-                      value={seed}
-                      onChange={(e) => setSeed(Number(e.target.value))}
-                    />
-                  </label>
-                  <div className="clip-read-estimate">
-                    ≈{" "}
-                    {duration(
-                      analysis?.readingSeconds || words(content.text) / 3,
-                    )}
-                    <small>estimated reading</small>
-                  </div>
+      <div
+        className={
+          "bottom-workspace" +
+          (detailOpen ? " has-sandbox" : "") +
+          (!detailOpen && !helpOpen ? " is-empty" : "")
+        }
+      >
+        {detailOpen && (
+          <section className="detail-pane pane">
+            <div className="detail-heading">
+              <div className="clip-name" style={{ borderLeftColor: "#888888" }}>
+                {clip ? (
+                  <input
+                    aria-label="Sandbox draft title"
+                    value={clip.title}
+                    onChange={(e) =>
+                      change((p) => {
+                        p.clips.find((c) => c.id === clip.id)!.title =
+                          e.target.value;
+                      })
+                    }
+                  />
+                ) : (
+                  <span>No sandbox draft selected</span>
+                )}
+              </div>
+              <div className="detail-tabs" role="tablist">
+                {["Clip", "Devices", "Narration"].map((t) => (
                   <button
-                    className="wide amber"
-                    onClick={() => void run(() => startSpeech(clip.id))}
+                    role="tab"
+                    aria-selected={detail === t}
+                    className={detail === t ? "active" : ""}
+                    key={t}
+                    onClick={() => setDetail(t)}
                   >
-                    <Play size={12} />
-                    Read draft
+                    {t === "Clip" ? (
+                      <FileText size={12} />
+                    ) : t === "Devices" ? (
+                      <SlidersHorizontal size={12} />
+                    ) : (
+                      <AudioLines size={12} />
+                    )}{" "}
+                    {t === "Clip"
+                      ? "Sandbox"
+                      : t === "Devices"
+                        ? "Language Tools"
+                        : t}
                   </button>
-                  <button
-                    className="wide subtle"
-                    onClick={() =>
-                      setForm({
-                        title: "Delete draft",
-                        description:
-                          "This removes the sandbox draft. Text already copied into the book is retained. You can undo the change.",
-                        fields: [],
-                        submit: "Delete draft",
-                        action: () =>
-                          change((p) => {
-                            p.clips = p.clips.filter((c) => c.id !== clip.id);
-                            p.placements = p.placements.filter(
-                              (x) => x.clipId !== clip.id,
-                            );
-                          }),
+                ))}
+              </div>
+              <span className="detail-spacer" />
+              {clip && (
+                <>
+                  <select
+                    aria-label="Draft version"
+                    value={clip.activeVariantId || ""}
+                    onChange={(e) =>
+                      change((p) => {
+                        p.clips.find((c) => c.id === clip.id)!.activeVariantId =
+                          e.target.value || null;
                       })
                     }
                   >
-                    <Trash2 size={11} />
-                    Delete draft
+                    <option value="">Original</option>
+                    {clip.variants.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    title="Create draft version"
+                    aria-label="Create draft version"
+                    onClick={variant}
+                  >
+                    <GitBranch size={13} />
                   </button>
-                </aside>
-                <Editor
-                  ref={editor}
-                  onFocus={() => setWritingFocus(false)}
-                  document={content.document}
-                  identity={`${clip.id}:${clip.activeVariantId || "original"}`}
-                  onChange={updateContent}
-                  onSelection={(w, s) => {
-                    setWord(w);
-                    setSelection(s);
-                    setCandidate("");
-                  }}
-                  annotations={
-                    !writingFocus ? analysis?.annotations : undefined
-                  }
-                  showStructure={structure}
-                  onToggleStructure={() => setStructure((v) => !v)}
-                  onImage={() => imageFile.current?.click()}
-                  onComplete={() => {
-                    api<{ suggestions: string[] }>(
-                      `/api/complete?prefix=${encodeURIComponent(word)}&projectId=${project.id}`,
-                    )
-                      .then((r) => setCompletion(r.suggestions))
-                      .catch((e) => setError(e.message));
-                  }}
-                  onLink={() =>
-                    setForm({
-                      title: "Insert link",
-                      fields: [
-                        {
-                          name: "url",
-                          label: "URL",
-                          value: "https://",
-                          required: true,
-                        },
-                        {
-                          name: "label",
-                          label: "Link text",
-                          value: selection || word,
-                        },
-                      ],
-                      submit: "Insert",
-                      action: (v) => {
-                        if (!/^https?:\/\//i.test(v.url))
-                          throw new Error("Use an http or https link.");
-                        targetEditor()?.link(v.label, v.url);
-                      },
-                    })
-                  }
-                  styles={project.styles}
-                  fontFamily={project.settings.fontFamily}
-                />
-                <aside className="word-workbench">
-                  <div className="word-heading">
-                    <BookOpen size={13} />
-                    <input
-                      aria-label="Explore word"
-                      value={word}
-                      onChange={(e) => setWord(e.target.value)}
-                    />
-                    <button
-                      title="Add word to dictionary"
-                      aria-label="Add word to dictionary"
-                      onClick={() => {
-                        if (word)
+                  <button
+                    title="Duplicate draft"
+                    aria-label="Duplicate draft"
+                    onClick={duplicate}
+                  >
+                    <Copy size={13} />
+                  </button>
+                  <button
+                    title="Split draft"
+                    aria-label="Split draft"
+                    onClick={splitClip}
+                  >
+                    <Scissors size={13} />
+                  </button>
+                  <button
+                    title="Combine with next draft"
+                    aria-label="Combine drafts"
+                    onClick={mergeClip}
+                  >
+                    <Combine size={13} />
+                  </button>
+                  <button
+                    className="add-collation"
+                    onClick={() => collate(clip.id)}
+                  >
+                    Insert into chapter <ArrowRight size={12} />
+                  </button>
+                </>
+              )}
+            </div>
+            {detail === "Clip" ? (
+              clip && content ? (
+                <div className="clip-detail">
+                  <aside className="clip-properties">
+                    <div className="property-caption">DRAFT</div>
+                    <div className="property-grid">
+                      <label>
+                        Words<output>{words(content.text)}</output>
+                      </label>
+                      <label>
+                        Sentences<output>{analysis?.sentences || 0}</output>
+                      </label>
+                    </div>
+                    <label>
+                      Collection
+                      <select
+                        value={clip.trackId}
+                        onChange={(e) =>
                           change((p) => {
-                            if (!p.dictionary.some((d) => d.word === word))
-                              p.dictionary.push({
-                                word,
-                                definition: lexicon?.definitions[0] || "",
-                                preferred: null,
-                              });
-                          });
-                      }}
+                            const c = p.clips.find((c) => c.id === clip.id)!;
+                            c.trackId = e.target.value;
+                            while (
+                              p.clips.some(
+                                (o) =>
+                                  o.id !== c.id &&
+                                  o.trackId === c.trackId &&
+                                  o.slot === c.slot,
+                              )
+                            )
+                              c.slot++;
+                          })
+                        }
+                      >
+                        {project.tracks.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Voice
+                      <select
+                        aria-label="Draft voice"
+                        value={clip.voiceId || ""}
+                        onChange={(e) =>
+                          change((p) => {
+                            p.clips.find((c) => c.id === clip.id)!.voiceId =
+                              e.target.value || null;
+                          })
+                        }
+                      >
+                        <option value="">Default voice</option>
+                        {voices.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Variation seed
+                      <input
+                        type="number"
+                        value={seed}
+                        onChange={(e) => setSeed(Number(e.target.value))}
+                      />
+                    </label>
+                    <div className="clip-read-estimate">
+                      ≈{" "}
+                      {duration(
+                        analysis?.readingSeconds || words(content.text) / 3,
+                      )}
+                      <small>estimated reading</small>
+                    </div>
+                    <button
+                      className="wide amber"
+                      onClick={() => void run(() => startSpeech(clip.id))}
                     >
-                      <Plus size={13} />
+                      <Play size={12} />
+                      Read draft
                     </button>
-                  </div>
-                  <div className="word-tabs">
-                    {["Alternatives", "Forms", "Definition", "Checks"].map(
-                      (t) => (
-                        <button
-                          key={t}
-                          className={lexTab === t ? "active" : ""}
-                          onClick={() => setLexTab(t)}
-                        >
-                          {t === "Clip"
-                            ? "Sandbox"
-                            : t === "Devices"
-                              ? "Language tools"
-                              : t}
-                        </button>
-                      ),
-                    )}
-                  </div>
-                  <div className="word-results">
-                    {lexTab === "Checks" ? (
-                      analysis?.annotations.length ? (
-                        analysis.annotations.map((a) => (
-                          <div className="check-item" key={a.id}>
-                            <button
-                              onClick={() =>
-                                targetEditor()?.selectRange(a.start, a.end)
-                              }
-                            >
-                              <span className="check-type">{a.type}</span>
-                              {a.message}
-                            </button>
-                            {a.suggestion && (
+                    <button
+                      className="wide subtle"
+                      onClick={() =>
+                        setForm({
+                          title: "Delete draft",
+                          description:
+                            "This removes the sandbox draft. Text already copied into the book is retained. You can undo the change.",
+                          fields: [],
+                          submit: "Delete draft",
+                          action: () =>
+                            change((p) => {
+                              p.clips = p.clips.filter((c) => c.id !== clip.id);
+                              p.placements = p.placements.filter(
+                                (x) => x.clipId !== clip.id,
+                              );
+                            }),
+                        })
+                      }
+                    >
+                      <Trash2 size={11} />
+                      Delete draft
+                    </button>
+                  </aside>
+                  <Editor
+                    ref={editor}
+                    onFocus={() => setWritingFocus(false)}
+                    document={content.document}
+                    identity={`${clip.id}:${clip.activeVariantId || "original"}`}
+                    onChange={updateContent}
+                    onSelection={(w, s) => {
+                      setWord(w);
+                      setSelection(s);
+                      setCandidate("");
+                    }}
+                    annotations={
+                      !writingFocus ? analysis?.annotations : undefined
+                    }
+                    showStructure={structure}
+                    onToggleStructure={() => setStructure((v) => !v)}
+                    onImage={() => imageFile.current?.click()}
+                    onComplete={() => {
+                      api<{ suggestions: string[] }>(
+                        `/api/complete?prefix=${encodeURIComponent(word)}&projectId=${project.id}`,
+                      )
+                        .then((r) => setCompletion(r.suggestions))
+                        .catch((e) => setError(e.message));
+                    }}
+                    onLink={() =>
+                      setForm({
+                        title: "Insert link",
+                        fields: [
+                          {
+                            name: "url",
+                            label: "URL",
+                            value: "https://",
+                            required: true,
+                          },
+                          {
+                            name: "label",
+                            label: "Link text",
+                            value: selection || word,
+                          },
+                        ],
+                        submit: "Insert",
+                        action: (v) => {
+                          if (!/^https?:\/\//i.test(v.url))
+                            throw new Error("Use an http or https link.");
+                          targetEditor()?.link(v.label, v.url);
+                        },
+                      })
+                    }
+                    styles={project.styles}
+                    fontFamily={project.settings.fontFamily}
+                  />
+                  <aside className="word-workbench">
+                    <div className="word-heading">
+                      <BookOpen size={13} />
+                      <input
+                        aria-label="Explore word"
+                        value={word}
+                        onChange={(e) => setWord(e.target.value)}
+                      />
+                      <button
+                        title="Add word to dictionary"
+                        aria-label="Add word to dictionary"
+                        onClick={() => {
+                          if (word)
+                            change((p) => {
+                              if (!p.dictionary.some((d) => d.word === word))
+                                p.dictionary.push({
+                                  word,
+                                  definition: lexicon?.definitions[0] || "",
+                                  preferred: null,
+                                });
+                            });
+                        }}
+                      >
+                        <Plus size={13} />
+                      </button>
+                    </div>
+                    <div className="word-tabs">
+                      {["Alternatives", "Forms", "Definition", "Checks"].map(
+                        (t) => (
+                          <button
+                            key={t}
+                            className={lexTab === t ? "active" : ""}
+                            onClick={() => setLexTab(t)}
+                          >
+                            {t === "Clip"
+                              ? "Sandbox"
+                              : t === "Devices"
+                                ? "Language Tools"
+                                : t}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                    <div className="word-results">
+                      {lexTab === "Checks" ? (
+                        analysis?.annotations.length ? (
+                          analysis.annotations.map((a) => (
+                            <div className="check-item" key={a.id}>
                               <button
-                                className="suggestion-button"
                                 onClick={() =>
-                                  targetEditor()?.replaceRange(
-                                    a.start,
-                                    a.end,
-                                    a.suggestion!,
-                                  )
+                                  targetEditor()?.selectRange(a.start, a.end)
                                 }
                               >
-                                Use “{a.suggestion}”
+                                <span className="check-type">{a.type}</span>
+                                {a.message}
                               </button>
-                            )}
-                            <button
-                              className="ignore-rule"
-                              onClick={() =>
-                                setAnalysis((a0) =>
-                                  a0
-                                    ? {
-                                        ...a0,
-                                        annotations: a0.annotations.filter(
-                                          (x) => x.id !== a.id,
-                                        ),
-                                      }
-                                    : a0,
-                                )
-                              }
-                            >
-                              Ignore once
-                            </button>
-                            {a.ruleId && (
+                              {a.suggestion && (
+                                <button
+                                  className="suggestion-button"
+                                  onClick={() =>
+                                    targetEditor()?.replaceRange(
+                                      a.start,
+                                      a.end,
+                                      a.suggestion!,
+                                    )
+                                  }
+                                >
+                                  Use “{a.suggestion}”
+                                </button>
+                              )}
                               <button
                                 className="ignore-rule"
                                 onClick={() =>
-                                  change((p) => {
-                                    p.settings.ignoredRuleIds = [
-                                      ...(p.settings.ignoredRuleIds || []),
-                                      a.ruleId,
-                                    ];
-                                  })
+                                  setAnalysis((a0) =>
+                                    a0
+                                      ? {
+                                          ...a0,
+                                          annotations: a0.annotations.filter(
+                                            (x) => x.id !== a.id,
+                                          ),
+                                        }
+                                      : a0,
+                                  )
                                 }
                               >
-                                Ignore rule in project
+                                Ignore once
                               </button>
-                            )}
+                              {a.ruleId && (
+                                <button
+                                  className="ignore-rule"
+                                  onClick={() =>
+                                    change((p) => {
+                                      p.settings.ignoredRuleIds = [
+                                        ...(p.settings.ignoredRuleIds || []),
+                                        a.ruleId,
+                                      ];
+                                    })
+                                  }
+                                >
+                                  Ignore rule in project
+                                </button>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="no-findings">
+                            <Check size={20} />
+                            <p>No findings in this text.</p>
                           </div>
-                        ))
-                      ) : (
-                        <div className="no-findings">
-                          <Check size={20} />
-                          <p>No findings in this text.</p>
-                        </div>
-                      )
-                    ) : lexTab === "Definition" ? (
-                      <>
-                        {lexicon?.definitions.map((d, i) => (
-                          <p className="definition" key={i}>
-                            {i + 1}. {d}
-                          </p>
-                        ))}
-                        <button
-                          className="wide"
-                          onClick={() => openPanel("definitions")}
-                        >
-                          Create definition card…
-                        </button>
-                        {!lexicon?.definitions.length && (
-                          <p className="empty-small">
-                            No local definition. Add one to the project
-                            dictionary.
-                          </p>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <div className="word-result-label">
-                          {lexTab === "Forms" ? "Word forms" : "Synonyms"}
-                        </div>
-                        <div className="word-chips">
-                          {(lexTab === "Forms"
-                            ? lexicon?.forms
-                            : lexicon?.synonyms
-                          )?.map((s, i) => (
-                            <button
-                              key={s + i}
-                              className={candidate === s ? "chosen" : ""}
-                              onClick={() => setCandidate(s)}
-                            >
-                              {s}
-                            </button>
+                        )
+                      ) : lexTab === "Definition" ? (
+                        <>
+                          {lexicon?.definitions.map((d, i) => (
+                            <p className="definition" key={i}>
+                              {i + 1}. {d}
+                            </p>
                           ))}
-                        </div>
-                        {lexTab === "Alternatives" &&
-                          !!lexicon?.antonyms.length && (
-                            <>
-                              <div className="word-result-label">Antonyms</div>
-                              <div className="word-chips">
-                                {lexicon.antonyms.map((s) => (
-                                  <button
-                                    key={s}
-                                    className={candidate === s ? "chosen" : ""}
-                                    onClick={() => setCandidate(s)}
-                                  >
-                                    {s}
-                                  </button>
-                                ))}
-                              </div>
-                            </>
-                          )}
-                        {lexTab === "Alternatives" &&
-                          !!lexicon?.suggestions.length && (
-                            <>
-                              <div className="word-result-label">Spelling</div>
-                              <div className="word-chips">
-                                {lexicon.suggestions.map((s) => (
-                                  <button
-                                    key={s}
-                                    onClick={() => setCandidate(s)}
-                                  >
-                                    {s}
-                                  </button>
-                                ))}
-                              </div>
-                            </>
-                          )}
-                        {!lexicon?.synonyms.length &&
-                          !lexicon?.forms.length && (
+                          <button
+                            className="wide"
+                            onClick={() => openPanel("definitions")}
+                          >
+                            Create definition card…
+                          </button>
+                          {!lexicon?.definitions.length && (
                             <p className="empty-small">
-                              Select a word in the editor to explore its meaning
-                              and alternatives.
+                              No local definition. Add one to the project
+                              dictionary.
                             </p>
                           )}
-                      </>
-                    )}
-                  </div>
-                  {candidate && (
-                    <div className="candidate-preview">
-                      <div>
-                        <span>{word}</span>
-                        <ArrowRight size={12} />
-                        <strong>{candidate}</strong>
-                      </div>
-                      <button
-                        title="Audition in context"
-                        onClick={() =>
-                          void run(() =>
-                            startSpeech(
-                              undefined,
-                              "selection",
-                              (activeContent?.text || "").replace(
-                                word,
-                                candidate,
+                        </>
+                      ) : (
+                        <>
+                          <div className="word-result-label">
+                            {lexTab === "Forms" ? "Word forms" : "Synonyms"}
+                          </div>
+                          <div className="word-chips">
+                            {(lexTab === "Forms"
+                              ? lexicon?.forms
+                              : lexicon?.synonyms
+                            )?.map((s, i) => (
+                              <button
+                                key={s + i}
+                                className={candidate === s ? "chosen" : ""}
+                                onClick={() => setCandidate(s)}
+                              >
+                                {s}
+                              </button>
+                            ))}
+                          </div>
+                          {lexTab === "Alternatives" &&
+                            !!lexicon?.antonyms.length && (
+                              <>
+                                <div className="word-result-label">
+                                  Antonyms
+                                </div>
+                                <div className="word-chips">
+                                  {lexicon.antonyms.map((s) => (
+                                    <button
+                                      key={s}
+                                      className={
+                                        candidate === s ? "chosen" : ""
+                                      }
+                                      onClick={() => setCandidate(s)}
+                                    >
+                                      {s}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          {lexTab === "Alternatives" &&
+                            !!lexicon?.suggestions.length && (
+                              <>
+                                <div className="word-result-label">
+                                  Spelling
+                                </div>
+                                <div className="word-chips">
+                                  {lexicon.suggestions.map((s) => (
+                                    <button
+                                      key={s}
+                                      onClick={() => setCandidate(s)}
+                                    >
+                                      {s}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          {!lexicon?.synonyms.length &&
+                            !lexicon?.forms.length && (
+                              <p className="empty-small">
+                                Select a word in the editor to explore its
+                                meaning and alternatives.
+                              </p>
+                            )}
+                        </>
+                      )}
+                    </div>
+                    {candidate && (
+                      <div className="candidate-preview">
+                        <div>
+                          <span>{word}</span>
+                          <ArrowRight size={12} />
+                          <strong>{candidate}</strong>
+                        </div>
+                        <button
+                          title="Audition in context"
+                          onClick={() =>
+                            void run(() =>
+                              startSpeech(
+                                undefined,
+                                "selection",
+                                (activeContent?.text || "").replace(
+                                  word,
+                                  candidate,
+                                ),
                               ),
-                            ),
-                          )
+                            )
+                          }
+                        >
+                          <Volume2 size={12} />
+                        </button>
+                        <button
+                          className="accent"
+                          onClick={() => {
+                            targetEditor()?.replace(candidate);
+                            setCandidate("");
+                          }}
+                        >
+                          Replace
+                        </button>
+                      </div>
+                    )}
+                  </aside>
+                </div>
+              ) : (
+                <div className="detail-empty">
+                  <FileText size={28} />
+                  <p>Create a sandbox draft to experiment with wording.</p>
+                  <button
+                    onClick={() => createClip(project.tracks[0]?.id || "", 0)}
+                  >
+                    New sandbox draft
+                  </button>
+                </div>
+              )
+            ) : detail === "Devices" ? (
+              <div
+                className="devices-rack"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const type = e.dataTransfer.getData(
+                    "application/x-alder-device",
+                  );
+                  if (type) addDevice(type);
+                }}
+              >
+                {(track || project.tracks[0])?.devices.map((device, index) => (
+                  <article
+                    className={
+                      "device-card " + (!device.enabled ? "bypassed" : "")
+                    }
+                    key={device.id}
+                  >
+                    <header>
+                      <button
+                        aria-label={`Toggle ${device.type}`}
+                        className={device.enabled ? "device-on" : ""}
+                        onClick={() =>
+                          change((p) => {
+                            const d = p.tracks
+                              .find(
+                                (t) => t.id === (track || project.tracks[0]).id,
+                              )!
+                              .devices.find((d) => d.id === device.id)!;
+                            d.enabled = !d.enabled;
+                          })
                         }
                       >
-                        <Volume2 size={12} />
+                        ●
+                      </button>
+                      <strong>
+                        {deviceCatalog.find((d) => d.id === device.type)
+                          ?.name || device.type}
+                      </strong>
+                      <button
+                        title="Remove device"
+                        onClick={() =>
+                          change((p) => {
+                            const t = p.tracks.find(
+                              (t) => t.id === (track || project.tracks[0]).id,
+                            )!;
+                            t.devices = t.devices.filter(
+                              (d) => d.id !== device.id,
+                            );
+                          })
+                        }
+                      >
+                        <X size={11} />
+                      </button>
+                    </header>
+                    <p>
+                      {
+                        deviceCatalog.find((d) => d.id === device.type)
+                          ?.description
+                      }
+                    </p>
+                    <label>
+                      Scope
+                      <output>{track?.name || project.tracks[0]?.name}</output>
+                    </label>
+                    <div className="device-state">
+                      <span className={device.enabled ? "on" : ""} />
+                      {device.enabled ? "Enabled" : "Bypassed"}
+                    </div>
+                    <footer>
+                      <button
+                        disabled={index === 0}
+                        title="Move device left"
+                        onClick={() =>
+                          change((p) => {
+                            const d = p.tracks.find(
+                              (t) => t.id === (track || project.tracks[0]).id,
+                            )!.devices;
+                            [d[index - 1], d[index]] = [d[index], d[index - 1]];
+                          })
+                        }
+                      >
+                        ←
+                      </button>
+                      <button
+                        disabled={!clip || !device.enabled}
+                        onClick={() => {
+                          if (device.type === "tts")
+                            void run(() => startSpeech(clip?.id));
+                          else if (
+                            [
+                              "spelling",
+                              "repetition",
+                              "verbosity",
+                              "sentence_length",
+                              "terminology",
+                            ].includes(device.type)
+                          ) {
+                            setDetail("Clip");
+                            setLexTab("Checks");
+                          } else
+                            void run(async () => {
+                              if (!content) return;
+                              const r = await api("/api/transform", "POST", {
+                                text: content.text,
+                                type: device.type,
+                                settings: device.settings,
+                              });
+                              setDevicePreview({
+                                type: device.type,
+                                text: r.text,
+                                original: content.text,
+                              });
+                            });
+                        }}
+                      >
+                        Preview
+                      </button>
+                    </footer>
+                  </article>
+                ))}
+                <div className="device-drop">
+                  <SlidersHorizontal size={24} />
+                  <p>Drop language devices here</p>
+                  <select
+                    aria-label="Add language device"
+                    value=""
+                    onChange={(e) => addDevice(e.target.value)}
+                  >
+                    <option value="">Add a device…</option>
+                    {deviceCatalog.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {devicePreview && (
+                  <div className="device-preview">
+                    <strong>Transformation preview</strong>
+                    <textarea readOnly value={devicePreview.text} />
+                    <div>
+                      <button onClick={() => setDevicePreview(null)}>
+                        Discard
                       </button>
                       <button
                         className="accent"
                         onClick={() => {
-                          targetEditor()?.replace(candidate);
-                          setCandidate("");
+                          if (clip) {
+                            const id = uid();
+                            change((p) => {
+                              const c = p.clips.find((c) => c.id === clip.id)!;
+                              c.variants.push({
+                                id,
+                                name:
+                                  deviceCatalog.find(
+                                    (d) => d.id === devicePreview.type,
+                                  )?.name || "Device take",
+                                text: devicePreview.text,
+                                document: textDoc(devicePreview.text),
+                                createdAt: new Date().toISOString(),
+                              });
+                              c.activeVariantId = id;
+                            });
+                            setDevicePreview(null);
+                            setDetail("Clip");
+                          }
                         }}
                       >
-                        Replace
+                        Keep as a take
                       </button>
                     </div>
-                  )}
-                </aside>
-              </div>
-            ) : (
-              <div className="detail-empty">
-                <FileText size={28} />
-                <p>Create a sandbox draft to experiment with wording.</p>
-                <button
-                  onClick={() => createClip(project.tracks[0]?.id || "", 0)}
-                >
-                  New sandbox draft
-                </button>
-              </div>
-            )
-          ) : detail === "Devices" ? (
-            <div
-              className="devices-rack"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const type = e.dataTransfer.getData(
-                  "application/x-alder-device",
-                );
-                if (type) addDevice(type);
-              }}
-            >
-              {(track || project.tracks[0])?.devices.map((device, index) => (
-                <article
-                  className={
-                    "device-card " + (!device.enabled ? "bypassed" : "")
-                  }
-                  key={device.id}
-                >
-                  <header>
-                    <button
-                      aria-label={`Toggle ${device.type}`}
-                      className={device.enabled ? "device-on" : ""}
-                      onClick={() =>
-                        change((p) => {
-                          const d = p.tracks
-                            .find(
-                              (t) => t.id === (track || project.tracks[0]).id,
-                            )!
-                            .devices.find((d) => d.id === device.id)!;
-                          d.enabled = !d.enabled;
-                        })
-                      }
-                    >
-                      ●
-                    </button>
-                    <strong>
-                      {deviceCatalog.find((d) => d.id === device.type)?.name ||
-                        device.type}
-                    </strong>
-                    <button
-                      title="Remove device"
-                      onClick={() =>
-                        change((p) => {
-                          const t = p.tracks.find(
-                            (t) => t.id === (track || project.tracks[0]).id,
-                          )!;
-                          t.devices = t.devices.filter(
-                            (d) => d.id !== device.id,
-                          );
-                        })
-                      }
-                    >
-                      <X size={11} />
-                    </button>
-                  </header>
-                  <p>
-                    {
-                      deviceCatalog.find((d) => d.id === device.type)
-                        ?.description
-                    }
-                  </p>
-                  <label>
-                    Scope
-                    <output>{track?.name || project.tracks[0]?.name}</output>
-                  </label>
-                  <div className="device-state">
-                    <span className={device.enabled ? "on" : ""} />
-                    {device.enabled ? "Enabled" : "Bypassed"}
-                  </div>
-                  <footer>
-                    <button
-                      disabled={index === 0}
-                      title="Move device left"
-                      onClick={() =>
-                        change((p) => {
-                          const d = p.tracks.find(
-                            (t) => t.id === (track || project.tracks[0]).id,
-                          )!.devices;
-                          [d[index - 1], d[index]] = [d[index], d[index - 1]];
-                        })
-                      }
-                    >
-                      ←
-                    </button>
-                    <button
-                      disabled={!clip || !device.enabled}
-                      onClick={() => {
-                        if (device.type === "tts")
-                          void run(() => startSpeech(clip?.id));
-                        else if (
-                          [
-                            "spelling",
-                            "repetition",
-                            "verbosity",
-                            "sentence_length",
-                            "terminology",
-                          ].includes(device.type)
-                        ) {
-                          setDetail("Clip");
-                          setLexTab("Checks");
-                        } else
-                          void run(async () => {
-                            if (!content) return;
-                            const r = await api("/api/transform", "POST", {
-                              text: content.text,
-                              type: device.type,
-                              settings: device.settings,
-                            });
-                            setDevicePreview({
-                              type: device.type,
-                              text: r.text,
-                              original: content.text,
-                            });
-                          });
-                      }}
-                    >
-                      Preview
-                    </button>
-                  </footer>
-                </article>
-              ))}
-              <div className="device-drop">
-                <SlidersHorizontal size={24} />
-                <p>Drop language devices here</p>
-                <select
-                  aria-label="Add language device"
-                  value=""
-                  onChange={(e) => addDevice(e.target.value)}
-                >
-                  <option value="">Add a device…</option>
-                  {deviceCatalog.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {devicePreview && (
-                <div className="device-preview">
-                  <strong>Transformation preview</strong>
-                  <textarea readOnly value={devicePreview.text} />
-                  <div>
-                    <button onClick={() => setDevicePreview(null)}>
-                      Discard
-                    </button>
-                    <button
-                      className="accent"
-                      onClick={() => {
-                        if (clip) {
-                          const id = uid();
-                          change((p) => {
-                            const c = p.clips.find((c) => c.id === clip.id)!;
-                            c.variants.push({
-                              id,
-                              name:
-                                deviceCatalog.find(
-                                  (d) => d.id === devicePreview.type,
-                                )?.name || "Device take",
-                              text: devicePreview.text,
-                              document: textDoc(devicePreview.text),
-                              createdAt: new Date().toISOString(),
-                            });
-                            c.activeVariantId = id;
-                          });
-                          setDevicePreview(null);
-                          setDetail("Clip");
-                        }
-                      }}
-                    >
-                      Keep as a take
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="narration-panel">
-              <div className="narration-controls">
-                <strong>Narration</strong>
-                <span className="speed-control">
-                  Speed{" "}
-                  <PlaybackSpeed
-                    value={speed}
-                    onChange={setSpeed}
-                    label="Narration speed"
-                  />
-                  ×
-                </span>
-                <label>
-                  Volume{" "}
-                  <input
-                    aria-label="Narration volume"
-                    title={`${Math.round(narrationVolume * 100)}%`}
-                    type="range"
-                    min="0"
-                    max="4"
-                    step="0.01"
-                    value={narrationVolume}
-                    onChange={(e) => setNarrationVolume(Number(e.target.value))}
-                  />
-                </label>
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={verifySpeech}
-                    onChange={(e) => setVerifySpeech(e.target.checked)}
-                  />
-                  Check spoken words locally
-                </label>
-                <label>
-                  Audio format
-                  <select
-                    aria-label="Narration format"
-                    value={audioFormat}
-                    onChange={(e) => setAudioFormat(e.target.value)}
-                  >
-                    {["wav", "mp3", "flac"].map((f) => (
-                      <option key={f} value={f}>
-                        {f.toUpperCase()}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <SpeechOptions
-                  options={{
-                    ...DEFAULT_SPEECH_OPTIONS,
-                    ...(project.settings.speechOptions || {}),
-                  }}
-                  onChange={(options) =>
-                    change((p) => {
-                      p.settings.speechOptions = options;
-                    })
-                  }
-                />
-                <p>
-                  Audio follows a saved text revision. Completed chunks are
-                  retained for resuming.
-                </p>
-                <button
-                  className="accent"
-                  onClick={() =>
-                    void run(() => startSpeech(undefined, "collation"))
-                  }
-                >
-                  <Play size={13} />
-                  Render book
-                </button>
-                <button onClick={() => openPanel("voices")}>
-                  Manage voices
-                </button>
-                <p className="quiet">
-                  {capabilities?.device ||
-                    capabilities?.engine ||
-                    "Chatterbox Turbo"}{" "}
-                  ·{" "}
-                  {capabilities?.available === false
-                    ? "Resource unavailable"
-                    : "Local synthesis"}
-                </p>
-              </div>
-              <div className="job-list">
-                {!jobs.length && (
-                  <div className="empty-small">
-                    No narration jobs yet. Choose a chapter or draft to read.
                   </div>
                 )}
-                {jobs.map((job) => (
-                  <div
-                    className={
-                      "job " + (activeJob?.id === job.id ? "selected" : "")
-                    }
-                    key={job.id}
-                  >
-                    <div>
-                      <strong>{job.text.slice(0, 100) || "Narration"}</strong>
-                      <span className="job-status">{job.status}</span>
-                      {job.reviewStatus && (
-                        <span className="job-status">
-                          {job.reviewStatus.replaceAll("_", " ")}
-                        </span>
-                      )}
-                      <span>
-                        Revision {job.sourceRevision}
-                        {job.sourceRevision !== project.revision
-                          ? " · earlier project revision"
-                          : ""}
-                      </span>
-                    </div>
-                    <progress
-                      max={1}
-                      value={
-                        job.progress > 1 ? job.progress / 100 : job.progress
+              </div>
+            ) : (
+              <div className="narration-panel">
+                <div className="narration-controls">
+                  <strong>Narration</strong>
+                  <span className="speed-control">
+                    Speed{" "}
+                    <PlaybackSpeed
+                      value={speed}
+                      onChange={setSpeed}
+                      label="Narration speed"
+                    />
+                    ×
+                  </span>
+                  <label>
+                    Volume{" "}
+                    <input
+                      aria-label="Narration volume"
+                      title={`${Math.round(narrationVolume * 100)}%`}
+                      type="range"
+                      min="0"
+                      max="4"
+                      step="0.01"
+                      value={narrationVolume}
+                      onChange={(e) =>
+                        setNarrationVolume(Number(e.target.value))
                       }
                     />
-                    <p>{job.error || job.message}</p>
-                    <div className="job-actions">
-                      <span>
-                        {
-                          job.chunks.filter(
-                            (c) =>
-                              c.status === "ready" || c.status === "completed",
-                          ).length
+                  </label>
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={verifySpeech}
+                      onChange={(e) => setVerifySpeech(e.target.checked)}
+                    />
+                    Check spoken words locally
+                  </label>
+                  <label>
+                    Audio format
+                    <select
+                      aria-label="Narration format"
+                      value={audioFormat}
+                      onChange={(e) => setAudioFormat(e.target.value)}
+                    >
+                      {["wav", "mp3", "flac"].map((f) => (
+                        <option key={f} value={f}>
+                          {f.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <SpeechOptions
+                    options={{
+                      ...DEFAULT_SPEECH_OPTIONS,
+                      ...(project.settings.speechOptions || {}),
+                    }}
+                    onChange={(options) =>
+                      change((p) => {
+                        p.settings.speechOptions = options;
+                      })
+                    }
+                  />
+                  <p>
+                    Audio follows a saved text revision. Completed chunks are
+                    retained for resuming.
+                  </p>
+                  <button
+                    className="accent"
+                    onClick={() =>
+                      void run(() => startSpeech(undefined, "collation"))
+                    }
+                  >
+                    <Play size={13} />
+                    Render book
+                  </button>
+                  <button onClick={() => openPanel("voices")}>
+                    Manage voices
+                  </button>
+                  <p className="quiet">
+                    {capabilities?.device ||
+                      capabilities?.engine ||
+                      "Chatterbox Turbo"}{" "}
+                    ·{" "}
+                    {capabilities?.available === false
+                      ? "Resource unavailable"
+                      : "Local synthesis"}
+                  </p>
+                </div>
+                <div className="job-list">
+                  {!jobs.length && (
+                    <div className="empty-small">
+                      No narration jobs yet. Choose a chapter or draft to read.
+                    </div>
+                  )}
+                  {jobs.map((job) => (
+                    <div
+                      className={
+                        "job " + (activeJob?.id === job.id ? "selected" : "")
+                      }
+                      key={job.id}
+                    >
+                      <div>
+                        <strong>{job.text.slice(0, 100) || "Narration"}</strong>
+                        <span className="job-status">{job.status}</span>
+                        {job.reviewStatus && (
+                          <span className="job-status">
+                            {job.reviewStatus.replaceAll("_", " ")}
+                          </span>
+                        )}
+                        <span>
+                          Revision {job.sourceRevision}
+                          {job.sourceRevision !== project.revision
+                            ? " · earlier project revision"
+                            : ""}
+                        </span>
+                      </div>
+                      <progress
+                        max={1}
+                        value={
+                          job.progress > 1 ? job.progress / 100 : job.progress
                         }
-                        /{job.chunks.length} chunks
-                      </span>
-                      {job.audioUrl && (
-                        <>
-                          <button
-                            onClick={() => {
-                              lastPlayed.current = "";
-                              setActiveJob(job);
-                            }}
-                          >
-                            Listen
-                          </button>
+                      />
+                      <p>{job.error || job.message}</p>
+                      <div className="job-actions">
+                        <span>
+                          {
+                            job.chunks.filter(
+                              (c) =>
+                                c.status === "ready" ||
+                                c.status === "completed",
+                            ).length
+                          }
+                          /{job.chunks.length} chunks
+                        </span>
+                        {job.audioUrl && (
+                          <>
+                            <button
+                              onClick={() => {
+                                lastPlayed.current = "";
+                                setActiveJob(job);
+                              }}
+                            >
+                              Listen
+                            </button>
+                            <button
+                              onClick={() =>
+                                void download(
+                                  job.audioUrl!,
+                                  `${project.name}-narration.${job.format || "wav"}`,
+                                )
+                              }
+                            >
+                              Save {(job.format || "wav").toUpperCase()}
+                            </button>
+                          </>
+                        )}
+                        {[
+                          "failed",
+                          "cancelled",
+                          "interrupted",
+                          "canceled",
+                        ].includes(job.status) && (
                           <button
                             onClick={() =>
-                              void download(
-                                job.audioUrl!,
-                                `${project.name}-narration.${job.format || "wav"}`,
-                              )
+                              void run(async () => {
+                                setActiveJob(
+                                  await api(
+                                    `/api/speech/jobs/${job.id}/resume`,
+                                    "POST",
+                                  ),
+                                );
+                              })
                             }
                           >
-                            Save {(job.format || "wav").toUpperCase()}
+                            Resume
                           </button>
-                        </>
-                      )}
-                      {[
-                        "failed",
-                        "cancelled",
-                        "interrupted",
-                        "canceled",
-                      ].includes(job.status) && (
-                        <button
-                          onClick={() =>
-                            void run(async () => {
-                              setActiveJob(
+                        )}
+                        {[
+                          "queued",
+                          "preparing",
+                          "generating",
+                          "checking",
+                          "running",
+                        ].includes(job.status) && (
+                          <button
+                            onClick={() =>
+                              void run(async () => {
                                 await api(
-                                  `/api/speech/jobs/${job.id}/resume`,
+                                  `/api/speech/jobs/${job.id}/cancel`,
                                   "POST",
-                                ),
-                              );
-                            })
-                          }
-                        >
-                          Resume
-                        </button>
-                      )}
-                      {[
-                        "queued",
-                        "preparing",
-                        "generating",
-                        "checking",
-                        "running",
-                      ].includes(job.status) && (
-                        <button
-                          onClick={() =>
-                            void run(async () => {
-                              await api(
-                                `/api/speech/jobs/${job.id}/cancel`,
-                                "POST",
-                              );
-                            })
-                          }
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                    <NarrationReview
-                      job={job}
-                      onReview={async (request) => {
-                        const updated = await api<Job>(
-                          `/api/speech/jobs/${job.id}/review`,
-                          "POST",
-                          request,
-                        );
-                        setJobs((current) =>
-                          current.map((item) =>
-                            item.id === updated.id ? updated : item,
-                          ),
-                        );
-                        setActiveJob((current) =>
-                          current?.id === updated.id ? updated : current,
-                        );
-                      }}
-                      currentTime={activeJob?.id === job.id ? time : undefined}
-                      onPlayChunk={(url) => {
-                        lastPlayed.current = job.id;
-                        setActiveJob(job);
-                        if (audio.current) {
-                          audio.current.src = mediaUrl(url);
-                          void audio.current
-                            .play()
-                            .catch((e) => setError(e.message));
-                        }
-                      }}
-                      onSeek={(seconds) => {
-                        if (!job.audioUrl || !audio.current) return;
-                        lastPlayed.current = job.id;
-                        setActiveJob(job);
-                        const a = audio.current;
-                        const url = mediaUrl(job.audioUrl);
-                        if (a.getAttribute("src") !== url) {
-                          a.addEventListener(
-                            "loadedmetadata",
-                            () => {
-                              a.currentTime = seconds;
-                              void a.play();
-                            },
-                            { once: true },
+                                );
+                              })
+                            }
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                      <NarrationReview
+                        job={job}
+                        onReview={async (request) => {
+                          const updated = await api<Job>(
+                            `/api/speech/jobs/${job.id}/review`,
+                            "POST",
+                            request,
                           );
-                          a.src = url;
-                        } else {
-                          a.currentTime = seconds;
-                          void a.play();
+                          setJobs((current) =>
+                            current.map((item) =>
+                              item.id === updated.id ? updated : item,
+                            ),
+                          );
+                          setActiveJob((current) =>
+                            current?.id === updated.id ? updated : current,
+                          );
+                        }}
+                        currentTime={
+                          activeJob?.id === job.id ? time : undefined
                         }
-                      }}
-                    />
-                  </div>
-                ))}
+                        onPlayChunk={(url) => {
+                          lastPlayed.current = job.id;
+                          setActiveJob(job);
+                          if (audio.current) {
+                            audio.current.src = mediaUrl(url);
+                            void audio.current
+                              .play()
+                              .catch((e) => setError(e.message));
+                          }
+                        }}
+                        onSeek={(seconds) => {
+                          if (!job.audioUrl || !audio.current) return;
+                          lastPlayed.current = job.id;
+                          setActiveJob(job);
+                          const a = audio.current;
+                          const url = mediaUrl(job.audioUrl);
+                          if (a.getAttribute("src") !== url) {
+                            a.addEventListener(
+                              "loadedmetadata",
+                              () => {
+                                a.currentTime = seconds;
+                                void a.play();
+                              },
+                              { once: true },
+                            );
+                            a.src = url;
+                          } else {
+                            a.currentTime = seconds;
+                            void a.play();
+                          }
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </section>
-      )}
-      {helpOpen && (
-        <aside className="context-help" aria-label="Context help">
-          <strong>Help</strong>
-          <p>{helpText}</p>
-        </aside>
-      )}
+            )}
+          </section>
+        )}
+        {helpOpen && (
+          <aside className="context-help" aria-label="Context help">
+            <strong>Help</strong>
+            <p>{helpText}</p>
+          </aside>
+        )}
+      </div>
       <footer className="statusbar">
         <button
           aria-label="Toggle help area"
@@ -2504,7 +2708,7 @@ export default function App() {
                     projects: "Projects",
                     dictionary: "Project dictionary",
                     styles: "Styles",
-                    assets: "Project assets",
+                    assets: "Project Assets",
                     export: "Export book",
                     help: "Getting started",
                     about: "About Alder",
@@ -2633,7 +2837,7 @@ export default function App() {
                           </option>
                         ))}
                     </select>
-                    <small>Choose an image collected in Project assets.</small>
+                    <small>Choose an image collected in Project Assets.</small>
                   </label>
                   <label>
                     Author
@@ -2785,113 +2989,6 @@ export default function App() {
                     Page numbers in footer
                   </label>
                 </div>
-              )}
-              {panel === "voices" && (
-                <>
-                  <p>
-                    Reference voices are processed locally. Use a clean
-                    recording longer than five seconds, ideally about ten
-                    seconds.
-                  </p>
-                  <div className="manager-actions">
-                    <button
-                      className="accent"
-                      onClick={() => voiceFile.current?.click()}
-                    >
-                      Add reference voice…
-                    </button>
-                  </div>
-                  {voices.map((v) => (
-                    <div className="voice-row" key={v.id}>
-                      <AudioLines size={18} />
-                      <strong>{v.name}</strong>
-                      <span>
-                        {v.id === "default"
-                          ? "Included with Alder"
-                          : "Reference voice"}
-                      </span>
-                      <button
-                        onClick={() =>
-                          void run(async () => {
-                            const job = await api<Job>(
-                              `/api/projects/${project.id}/speech`,
-                              "POST",
-                              {
-                                scope: "selection",
-                                text: "I listen to the language and leave room for the words to breathe.",
-                                voiceId: v.id,
-                                seed,
-                              },
-                            );
-                            setActiveJob(job);
-                            setPanel(null);
-                            setDetail("Narration");
-                          })
-                        }
-                      >
-                        Audition
-                      </button>
-                    </div>
-                  ))}
-                  <h3>Pronunciation dictionary</h3>
-                  <p>Spoken substitutions leave the written text unchanged.</p>
-                  {project.pronunciation.map((entry) => (
-                    <div className="dictionary-row" key={entry.id}>
-                      <strong>{entry.word}</strong>
-                      <ArrowRight size={13} />
-                      <span>{entry.spoken}</span>
-                      <button
-                        onClick={() =>
-                          change((p) => {
-                            p.pronunciation = p.pronunciation.filter(
-                              (x) => x.id !== entry.id,
-                            );
-                          })
-                        }
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    onClick={() =>
-                      setForm({
-                        title: "Add pronunciation",
-                        fields: [
-                          {
-                            name: "word",
-                            label: "Written word or expression",
-                            required: true,
-                          },
-                          { name: "spoken", label: "Speak as", required: true },
-                          {
-                            name: "mode",
-                            label: "Match",
-                            value: "literal",
-                            options: [
-                              { value: "literal", label: "Literal wording" },
-                              { value: "regex", label: "Regular expression" },
-                            ],
-                          },
-                        ],
-                        submit: "Add pronunciation",
-                        action: (v) =>
-                          change((p) =>
-                            p.pronunciation.push({
-                              id: uid(),
-                              word: v.word,
-                              spoken: v.spoken,
-                              regex: v.mode === "regex",
-                              caseSensitive: false,
-                              voiceId: null,
-                            }),
-                          ),
-                      })
-                    }
-                  >
-                    Add pronunciation…
-                  </button>
-                </>
               )}
               {panel === "dictionary" && (
                 <>

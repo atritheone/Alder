@@ -343,3 +343,7 @@
   margin: 4px 0;
   color: #535353;
 }
+
+.paginated-editor .editor-scroll {
+  scrollbar-gutter: stable both-edges;
+}
