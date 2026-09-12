@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
 const require = createRequire(import.meta.url);
 
 // Keep the dependency executable intact; launch a branded development copy.
@@ -9,6 +10,34 @@ export async function brandDesktop() {
   if (process.platform !== "win32") return;
   const directory = path.dirname(require.resolve("electron/package.json"));
   const source = path.join(directory, "dist/electron.exe");
+  // Electron 44 no longer downloads its runtime during npm ci.
+  try {
+    await fs.access(source);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    console.log("Installing Electron runtime for the Alder desktop build...");
+    await new Promise((resolve, reject) => {
+      const installer = spawn(
+        process.execPath,
+        [path.join(directory, "install.js")],
+        {
+          stdio: "inherit",
+          windowsHide: true,
+        },
+      );
+      installer.once("error", reject);
+      installer.once("exit", (code, signal) => {
+        if (code === 0) resolve();
+        else
+          reject(
+            new Error(
+              `Electron runtime installation failed (${signal ?? code}).`,
+            ),
+          );
+      });
+    });
+    await fs.access(source);
+  }
   const target = path.join(directory, "dist/Alder.exe");
   const iconPath = path.resolve("build/alder.ico");
   const pkg = JSON.parse(await fs.readFile("package.json", "utf8"));
