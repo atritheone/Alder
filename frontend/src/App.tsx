@@ -1,3 +1,4 @@
+import { useInstalledFonts } from "./useInstalledFonts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Play,
@@ -209,6 +210,7 @@ function savedNumber(key: string, fallback: number, min: number, max: number) {
 export default function App() {
   const { project, change, load, flush, saveState, error, setError, history } =
     useProject();
+  const installedFonts = useInstalledFonts(project?.settings.fontFamily);
   const [newOpen, setNewOpen] = useState(false);
   const [narrationVolume, setNarrationVolume] = useState(2);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -2071,7 +2073,7 @@ export default function App() {
             <div className="narration-panel">
               <div className="narration-controls">
                 <strong>Narration</strong>
-                <label>
+                <span className="speed-control">
                   Speed{" "}
                   <PlaybackSpeed
                     value={speed}
@@ -2079,7 +2081,7 @@ export default function App() {
                     label="Narration speed"
                   />
                   ×
-                </label>
+                </span>
                 <label>
                   Volume{" "}
                   <input
@@ -2725,13 +2727,7 @@ export default function App() {
                         })
                       }
                     >
-                      {[
-                        "Sitka Text",
-                        "Georgia",
-                        "Arial",
-                        "Times New Roman",
-                        "Segoe UI",
-                      ].map((s) => (
+                      {installedFonts.map((s) => (
                         <option key={s}>{s}</option>
                       ))}
                     </select>

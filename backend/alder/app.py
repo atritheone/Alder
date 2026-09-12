@@ -157,6 +157,11 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         # process. SQLite remains available throughout worker cleanup.
         return {"status": "stopping", "alreadyStopped": already_stopped}
 
+    @app.get("/api/fonts")
+    def fonts():
+        from .fonts import installed_families
+        return {"families": installed_families()}
+
     @app.get("/api/projects")
     def projects():
         return {"projects": store.list_projects()}

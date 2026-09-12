@@ -1,7 +1,7 @@
 """Definition cards based on the author's Voyager reference.
 
 The same measured layout drives PNG, JPEG and vector PDF outputs using Alder's
-supplied Sitka Text faces; no installed font is needed.
+installed Aptos faces and bundled fallback fonts.
 """
 from __future__ import annotations
 
@@ -80,10 +80,12 @@ def _layout(entry, width, height):
     from PIL import ImageFont
     from reportlab.pdfbase.ttfonts import TTFont
     fallback = font_directory()
-    directory = Path(__file__).parent / "fonts"
-    fonts = {name: directory / f"SitkaText-{name}.ttf" for name in ("Regular", "Italic", "Bold")}
-    # The supplied Sitka faces lack IPA glyphs. Preserve pronunciation using
-    # the existing bundled phonetic fallback, while using Sitka for prose.
+    from .fonts import aptos_directory
+    directory = aptos_directory()
+    fonts = {style: directory / filename for style, filename in
+             (("Regular", "Aptos.ttf"), ("Italic", "Aptos-Italic.ttf"), ("Bold", "Aptos-Bold.ttf"))} if directory else {
+                 style: fallback / f"LiberationSerif-{style}.ttf" for style in ("Regular", "Italic", "Bold")}
+    # Preserve IPA coverage independently of the user's installed prose font.
     fonts["Phonetic"] = fallback / "LiberationSerif-Regular.ttf"
     metrics = {style: TTFont("AlderDefinitionAudit"+style, str(path)).face for style,path in fonts.items()}
     # All geometry is in the supplied reference's 800-unit coordinate system.
@@ -173,14 +175,14 @@ def build_definition_export(entry: dict, format: str, output_dir: Path, options:
             pdf.setAuthor("Alder")
             pdf.setSubject(entry["definition"])
             for style, font_path in layout["fonts"].items():
-                name = "AlderDefinition" + style
+                name = "AlderDefinition" + ("Aptos" if layout["fonts"]["Regular"].stem == "Aptos" else "Fallback") + style
                 if name not in pdfmetrics.getRegisteredFontNames():
                     pdfmetrics.registerFont(TTFont(name, str(font_path)))
             pdf.setFillColorRGB(1,1,1)
             pdf.rect(0,0,width*unit,height*unit,fill=1,stroke=0)
             pdf.setFillColorRGB(0,0,0)
             for text in layout["texts"]:
-                pdf.setFont("AlderDefinition"+text["style"], text["size"]*scale*unit)
+                pdf.setFont("AlderDefinition"+("Aptos" if layout["fonts"]["Regular"].stem == "Aptos" else "Fallback")+text["style"], text["size"]*scale*unit)
                 pdf.drawString((dx+text["x"]*scale)*unit, (height-dy-text["baseline"]*scale)*unit, text["text"])
             x1,y1,x2,y2 = layout["line"]
             pdf.setLineWidth(layout["lineWidth"]*scale*unit)

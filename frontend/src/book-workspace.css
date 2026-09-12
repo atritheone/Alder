@@ -148,7 +148,10 @@
   left: 0;
   right: 0;
   text-align: center;
-  font: 11px "Sitka Text";
+  font:
+    11px "Aptos",
+    Arial,
+    sans-serif;
   color: #666666;
 }
 .page-flow {
@@ -247,8 +250,9 @@
 }
 .page-card p {
   font:
-    11px/1.6 "Sitka Text",
-    serif;
+    11px/1.6 "Aptos",
+    Arial,
+    sans-serif;
   flex: 1;
   overflow: hidden;
   white-space: pre-wrap;

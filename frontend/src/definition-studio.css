@@ -70,7 +70,7 @@
   resize: vertical;
 }
 .definition-form input[name="definition-word"] {
-  font-family: "Sitka Text", serif;
+  font-family: "Aptos", sans-serif;
   font-size: 23px;
   padding: 7px 8px;
   min-height: 43px;

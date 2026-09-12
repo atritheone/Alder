@@ -256,7 +256,7 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     if not isinstance(p.setdefault("settings", {}), dict):
         raise ValidationError("Project settings must be an object.")
     defaults = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22,
-                "fontFamily": "Sitka Text", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True}
+                "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True}
     for k, v in defaults.items():
         p["settings"].setdefault(k, v)
     for prop, low, high in (("marginMm", 0, 100), ("fontSize", 6, 96), ("lineHeight", 0.8, 4)):
@@ -373,6 +373,6 @@ def create_project(name: str | None = None, template: str = "demo") -> dict:
                              "revision": 1, "schemaVersion": 1, "createdAt": now(), "updatedAt": now(), "language": "en",
                              "tracks": tracks, "clips": clips, "placements": placements, "sections": sections,
                              "ideas": [], "dictionary": [], "pronunciation": [], "assets": [],
-                             "styles": [{"id": uid("style_"), "name": "Body", "fontFamily": "Sitka Text", "fontSize": 12, "lineHeight": 1.6, "spaceAfter": 8},
-                                        {"id": uid("style_"), "name": "Heading", "fontFamily": "Sitka Text", "fontSize": 24, "lineHeight": 1.2, "spaceAfter": 14}],
+                             "styles": [{"id": uid("style_"), "name": "Body", "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "spaceAfter": 8},
+                                        {"id": uid("style_"), "name": "Heading", "fontFamily": "Cambria", "fontSize": 24, "lineHeight": 1.2, "spaceAfter": 14}],
                              "settings": {"description": "A language workstation for ideas, drafts, and finished work."}})

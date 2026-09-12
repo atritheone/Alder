@@ -28,8 +28,50 @@
   font-style: italic;
   font-display: swap;
 }
+@font-face {
+  font-family: "Aptos";
+  src: local("Aptos");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Aptos";
+  src: local("Aptos SemiBold");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Aptos";
+  src: local("Aptos Bold");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Aptos";
+  src: local("Aptos Italic");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Aptos";
+  src: local("Aptos SemiBold Italic");
+  font-weight: 600;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Aptos";
+  src: local("Aptos Bold Italic");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
 :root {
-  font-family: "Sitka Text", Arial, sans-serif;
+  font-family: "Aptos", Arial, sans-serif;
   color: #272727;
   background: #888888;
   font-size: 12px;
@@ -1207,12 +1249,18 @@ button.danger {
   justify-content: center;
   border-top: 1px dashed #9e9e9e;
   color: #7d7d7d;
-  font: 9px "Sitka Text";
+  font:
+    9px "Aptos",
+    Arial,
+    sans-serif;
   margin: 15px 0;
 }
 .show-structure .ProseMirror p:after {
   content: " Â¶";
-  font: 11px "Sitka Text";
+  font:
+    11px "Aptos",
+    Arial,
+    sans-serif;
   color: #ababab;
 }
 .show-structure .ProseMirror {
@@ -1298,7 +1346,7 @@ button.danger {
   margin-bottom: 12px;
 }
 .word-chips button {
-  font-family: "Sitka Text", serif;
+  font-family: "Aptos", sans-serif;
   font-size: 12px;
   min-height: 24px;
   padding: 2px 7px;
@@ -1310,7 +1358,7 @@ button.danger {
   border-color: #939393;
 }
 .definition {
-  font-family: "Sitka Text", serif;
+  font-family: "Aptos", sans-serif;
   font-size: 13px;
   margin: 5px 0 12px;
   line-height: 1.55;
@@ -1524,7 +1572,10 @@ button.danger {
 }
 .device-preview textarea {
   flex: 1;
-  font: 13px "Sitka Text";
+  font:
+    13px "Aptos",
+    Arial,
+    sans-serif;
   min-height: 90px;
 }
 .device-preview > div {
@@ -1806,7 +1857,7 @@ button.danger {
   font-size: 8px;
 }
 .arrangement-clip p {
-  font-family: "Sitka Text", serif;
+  font-family: "Aptos", sans-serif;
   font-size: 10px;
   margin: 4px 6px;
   line-height: 1.4;
@@ -1937,7 +1988,10 @@ button.danger {
   box-shadow: 0 2px 8px #46464620;
 }
 .manuscript-title small {
-  font: 9px "Sitka Text";
+  font:
+    9px "Aptos",
+    Arial,
+    sans-serif;
   letter-spacing: 1.8px;
   color: #9c9c9c;
 }
@@ -2194,7 +2248,10 @@ button.danger {
   margin-bottom: 14px;
 }
 .export-summary h2 {
-  font: 22px "Sitka Text";
+  font:
+    22px "Aptos",
+    Arial,
+    sans-serif;
   margin: 0 0 6px;
 }
 .export-summary p {
@@ -2268,7 +2325,10 @@ button.danger {
   color: #808080;
 }
 .help-content h2 {
-  font: 24px "Sitka Text";
+  font:
+    24px "Aptos",
+    Arial,
+    sans-serif;
   margin: 5px 0 22px;
 }
 .help-content ol {
@@ -2295,7 +2355,10 @@ button.danger {
   color: #7e7e7e;
 }
 .about-panel h1 {
-  font: 38px "Sitka Text";
+  font:
+    38px "Aptos",
+    Arial,
+    sans-serif;
   margin: 10px 0;
 }
 .about-panel p {
@@ -2341,7 +2404,10 @@ button.danger {
   color: #5e5e5e;
 }
 .startup h1 {
-  font: 44px "Sitka Text";
+  font:
+    44px "Aptos",
+    Arial,
+    sans-serif;
   margin: 10px;
 }
 .startup p {
@@ -2589,7 +2655,10 @@ button.danger {
   background: none;
   border: 0;
   padding: 6px 10px;
-  font: 13px "Sitka Text";
+  font:
+    13px "Aptos",
+    Arial,
+    sans-serif;
 }
 .completion-popup > button:hover {
   background: #e0e0e0;
@@ -2765,4 +2834,19 @@ button.accent {
   .reading-word {
     scroll-behavior: auto;
   }
+}
+
+.speed-control,
+.playback-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.playback-speed input[type="range"] {
+  width: 160px;
+  accent-color: #666;
+}
+.playback-speed input[type="number"] {
+  width: 68px;
+  font-variant-numeric: tabular-nums;
 }

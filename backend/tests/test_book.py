@@ -117,7 +117,7 @@ def test_six_by_nine_book_page_dimensions(tmp_path):
     assert float(page.mediabox.width) == 432 and float(page.mediabox.height) == 648
 
 
-def test_simple_document_exports_only_authored_text_and_sitka_layout(tmp_path):
+def test_simple_document_exports_only_authored_text_and_cambria_layout(tmp_path):
     from pypdf import PdfReader
     from docx import Document
     p = book_project()
@@ -128,9 +128,11 @@ def test_simple_document_exports_only_authored_text_and_sitka_layout(tmp_path):
     word = build_export(p, "docx", tmp_path)
     doc = Document(word["path"])
     assert doc.sections[0].page_width > doc.sections[0].page_height
-    assert doc.styles["Normal"].font.name == "Sitka Text"
+    assert doc.styles["Normal"].font.name == "Cambria"
     pdf = build_export(p, "pdf", tmp_path)
     page = PdfReader(pdf["path"]).pages[0]
     assert page.mediabox.width > page.mediabox.height
-    assert not any("substituted" in warning for warning in pdf["warnings"])
+    from alder.fonts import installed_families
+    if "Cambria" in installed_families():
+        assert not any("substituted" in warning for warning in pdf["warnings"])
     assert "7" in page.extract_text()

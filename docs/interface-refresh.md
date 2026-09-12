@@ -12,11 +12,20 @@ the last file is displayed and the others remain accessible under Open.
 
 The duplicate dark title strip and LOCAL badge are removed. Identity is shown
 in the menu row and native window title. Chrome uses neutral greys. The supplied
-Sitka Text regular, bold, italic, and bold italic faces are included as WOFF2
-for the interface and TTF for PDF/card output. `scripts/prepare-sitka.py`
-reproduces these assets from the four supplied TTC collections with FontTools
-and Brotli. IPA in definition-card exports uses the existing bundled phonetic
-fallback because those characters are absent from the supplied Sitka faces.
+Aptos is the interface preference, with Arial and the system sans-serif fallback
+when it is unavailable. Cambria is the default for new documents and books.
+The font menus discover the current computer's system and per-user fonts at
+runtime, using Windows font enumeration (including named variable instances),
+registry locations, and TTC collections, and refresh when
+Alder regains focus. They do not use a saved list from the developer's computer.
+Document, inline, and style font choices are retained in DOCX/HTML; PDF embeds
+supported installed TrueType faces, with a reported fallback for unavailable
+or non-embeddable fonts. The earlier Sitka default migrates to Cambria; other
+selected document fonts remain unchanged.
+
+Aptos is installed locally, not distributed in the app. Legacy Sitka assets
+remain available for older authored content. Definition cards prefer installed
+Aptos and use the bundled phonetic fallback for IPA.
 
 The bottom question-mark button toggles context help for hover and keyboard
 focus. The bottom sandbox toggle explains that it opens independent drafts,
@@ -24,16 +33,18 @@ language tools, and narration; the duplicate close arrow and positional hint
 are removed. User-facing writing terminology uses “draft” in place of “clip.”
 
 Reading and sandbox narration default to 200% playback gain, adjustable up to
-400%, with compression for peaks. Playback speeds accept 0.001 increments from
-0.250× to 3.000×. Highlights sample the audio clock on animation frames and
+400%, with compression for peaks. Playback speeds have a notched slider with 0.01 increments from
+0.25× to 3.00× and a synchronized field for two-decimal input. Highlights sample the audio clock on animation frames and
 never expand to a sentence. Very short alignment gaps retain the preceding
 word; silence and missing timing clear the highlight. Multiword pronunciation
 spans are not falsely highlighted as a single word. Saved audio files retain
 their source levels; amplification is a playback setting.
 
-Verification includes all 15 browser workflows, 25 TypeScript unit checks,
-83 backend archive/export/layout checks, and `scripts/test-interface-desktop.mjs`.
-The desktop test measures nonzero audio samples through the real media graph,
-verifies 2× gain and 0.937× speed, and samples highlights to verify one word at
-a time. This update builds the development application; no release package is
-replaced automatically.
+Font and speed verification covers the production build, 25 TypeScript unit
+checks, 59 backend font/book/publication/card checks, and
+`scripts/test-interface-desktop.mjs`. The desktop test checks installed font
+choices, precise numeric input, slider synchronization, nonzero audio samples,
+2× gain, 0.93× playback, and one-word highlighting. Actual desktop font rendering
+was also checked: Aptos interface, Cambria document text, and selected Consolas.
+This update builds the development application; no release package is replaced
+automatically.

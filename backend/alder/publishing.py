@@ -220,14 +220,14 @@ def _prepare_publication(project, options=None, warnings=None):
 
 
 def _settings(project, options=None):
-    values = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22, "fontFamily": "Sitka Text",
+    values = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22, "fontFamily": "Cambria",
               "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True, "includeTitle": True, "includeToc": False}
     values.update(project.get("settings", {}))
     values.update(options or {})
     values["fontSize"] = _number(values.get("fontSize"), 12, 6, 72)
     values["lineHeight"] = _number(values.get("lineHeight"), 1.6, 1, 3)
     values["marginMm"] = _number(values.get("marginMm"), 22, 5, 65)
-    values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Sitka Text")))[:100] or "Sitka Text"
+    values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Cambria")))[:100] or "Cambria"
     values["pageSize"] = values.get("pageSize") if values.get("pageSize") in ("A4", "A5", "Letter", "Legal", "6x9") else "A4"
     values["orientation"] = "landscape" if values.get("orientation") == "landscape" else "portrait"
     values["firstPageNumber"] = int(_number(values.get("firstPageNumber"), 1, 1, 9999))
@@ -898,25 +898,14 @@ def _pdf(project, path, settings, warnings):
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle, Image, HRFlowable
-    font = "Times-Roman"
-    fonts_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
-    family = settings["fontFamily"].lower()
-    candidates = [("Georgia", "georgia", "georgiab", "georgiai", "georgiaz"), ("Arial", "arial", "arialbd", "ariali", "arialbi")]
-    if "sitka" in family:
-        fonts_dir = Path(__file__).parent / "fonts"
-        candidates = [("SitkaText", "SitkaText-Regular", "SitkaText-Bold", "SitkaText-Italic", "SitkaText-BoldItalic")]
-    if "arial" in family or "sans" in family or "calibri" in family:
-        candidates.reverse()
-    for name, regular, bold, italic, both in candidates:
-        if all((fonts_dir / (stem + ".ttf")).exists() for stem in (regular, bold, italic, both)):
-            for suffix, stem in (("", regular), ("-Bold", bold), ("-Italic", italic), ("-BoldItalic", both)):
-                if "Alder"+name+suffix not in pdfmetrics.getRegisteredFontNames():
-                    pdfmetrics.registerFont(TTFont("Alder"+name+suffix, str(fonts_dir / (stem+".ttf"))))
-            font = "Alder"+name
-            pdfmetrics.registerFontFamily(font, normal=font, bold=font+"-Bold", italic=font+"-Italic", boldItalic=font+"-BoldItalic")
-            if name.lower().replace(" ", "") not in family.replace(" ", ""):
-                _warn(warnings, f"PDF substituted {name} for the requested font {settings['fontFamily']}.")
-            break
+    from .fonts import installed_faces, register_pdf_font
+    faces = installed_faces()
+    font_cache = {}
+    def installed_font(family):
+        if family not in font_cache:
+            font_cache[family] = register_pdf_font(family, faces)
+        return font_cache[family]
+    font = installed_font(settings["fontFamily"]) or "Times-Roman"
     if font == "Times-Roman":
         configured = os.environ.get("ALDER_RESOURCES_DIR")
         bundled_fonts = (Path(configured) if configured else Path(__file__).resolve().parents[2] / "work/bundle-resources") / "fonts"
@@ -929,6 +918,14 @@ def _pdf(project, path, settings, warnings):
             _warn(warnings, f"PDF substituted bundled Liberation Serif for the requested font {settings['fontFamily']}.")
         else:
             _warn(warnings, "The bundled publication font is missing; PDF uses built-in Times with limited Unicode coverage.")
+    def publication_font(family):
+        if family == settings["fontFamily"]:
+            return font
+        requested = installed_font(family)
+        if requested:
+            return requested
+        _warn(warnings, f"PDF substituted the publication font for {family}, which is unavailable or cannot be embedded.")
+        return font
     pagesize = {"A4": A4, "A5": A5, "Letter": LETTER, "Legal": LEGAL, "6x9": (432, 648)}[settings["pageSize"]]
     if settings["orientation"] == "landscape":
         pagesize = pagesize[::-1]
@@ -972,7 +969,7 @@ def _pdf(project, path, settings, warnings):
                 if re.fullmatch(r"#[\da-fA-F]{6}", attrs.get("color") or ""):
                     attributes.append('color="'+attrs["color"]+'"')
                 if attrs.get("fontFamily"):
-                    _warn(warnings, "PDF uses the publication font for inline font-family overrides.")
+                    attributes.append('name="' + publication_font(attrs["fontFamily"]) + '"')
                 if attributes:
                     text = "<font " + " ".join(attributes) + ">" + text + "</font>"
             else:
@@ -1023,8 +1020,7 @@ def _pdf(project, path, settings, warnings):
         if kind in ("paragraph", "heading", "code_block"):
             named = next((s for s in project.get("styles", []) if s.get("id") == attrs.get("styleId")), {})
             merged = {**named, **{k:v for k,v in attrs.items() if v is not None}}
-            if merged.get("fontFamily") and merged["fontFamily"] != settings["fontFamily"]:
-                _warn(warnings, "PDF uses the publication font for paragraph font-family overrides.")
+            block_font = publication_font(merged.get("fontFamily") or settings["fontFamily"])
             size = _number(merged.get("fontSize"), base.fontSize, 6, 72)
             level = int(_number(attrs.get("level"), 2, 1, 6))
             if kind == "heading":
@@ -1032,7 +1028,7 @@ def _pdf(project, path, settings, warnings):
             style = ParagraphStyle("Block", parent=base, leftIndent=indent+_number(merged.get("leftIndent"), 0, -144, 144), firstLineIndent=_number(merged.get("firstLineIndent", merged.get("indent")), 0, -144, 144), fontSize=size,
                                    leading=size*_number(merged.get("lineHeight"), 1.25 if kind == "heading" else settings["lineHeight"], 1, 3),
                                    spaceBefore=_number(merged.get("spaceBefore"), 12 if kind == "heading" else 0, 0, 144), spaceAfter=_number(merged.get("spaceAfter"), 8, 0, 144),
-                                   keepWithNext=kind == "heading" or bool(merged.get("keepWithNext")), fontName=font+"-Bold" if kind == "heading" and font.startswith("Alder") else font,
+                                   keepWithNext=kind == "heading" or bool(merged.get("keepWithNext")), fontName=block_font+"-Bold" if kind == "heading" and block_font.startswith("Alder") else block_font,
                                    alignment={"left":TA_LEFT,"center":TA_CENTER,"right":TA_RIGHT,"justify":TA_JUSTIFY}.get(merged.get("align") or merged.get("textAlign"), TA_LEFT),
                                    textColor=colors.HexColor(merged["color"]) if re.fullmatch(r"#[\da-fA-F]{6}", str(merged.get("color") or "")) else base.textColor)
             if kind == "code_block":

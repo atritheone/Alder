@@ -121,8 +121,9 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font:
-    12px/1.5 "Sitka Text",
-    serif;
+    12px/1.5 "Aptos",
+    Arial,
+    sans-serif;
   color: #3d3d3d;
 }
 .narration-check-details table {
@@ -211,8 +212,9 @@
 .narration-attempts article > p {
   white-space: pre-wrap;
   font:
-    11px/1.4 "Sitka Text",
-    serif;
+    11px/1.4 "Aptos",
+    Arial,
+    sans-serif;
 }
 .narration-waveform-toggle {
   font-size: 10px;

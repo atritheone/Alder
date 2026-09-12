@@ -361,9 +361,9 @@ export default function DocumentReader(p: Props) {
         <button aria-label="Stop reading" onClick={stop}>
           <Square size={12} />
         </button>
-        <label>
+        <span className="speed-control">
           Speed <PlaybackSpeed value={speed} onChange={setSpeed} />×
-        </label>
+        </span>
         <label>
           Volume{" "}
           <input

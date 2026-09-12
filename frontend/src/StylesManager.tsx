@@ -1,3 +1,4 @@
+import { useInstalledFonts } from "./useInstalledFonts";
 import { useState, type CSSProperties } from "react";
 import { Plus, Trash2, Edit3, Copy } from "lucide-react";
 import type { NamedStyle, Project, StyleKind, StyleProperties } from "./types";
@@ -61,6 +62,9 @@ export default function StylesManager({
   onError,
 }: Props) {
   const [editing, setEditing] = useState<NamedStyle | null>(null);
+  const installedFonts = useInstalledFonts(
+    editing?.fontFamily || project.settings.fontFamily,
+  );
   const styles = project.styles;
   const save = () => {
     if (!editing) return;
@@ -296,13 +300,7 @@ export default function StylesManager({
                 }
               />
               <datalist id="alder-style-fonts">
-                {[
-                  "Georgia",
-                  "Segoe UI",
-                  "Arial",
-                  "Times New Roman",
-                  "Consolas",
-                ].map((font) => (
+                {installedFonts.map((font) => (
                   <option key={font} value={font} />
                 ))}
               </datalist>

@@ -27,6 +27,31 @@ try {
       "Alder reads each word clearly. The voice follows the writing at a precise speed.",
     );
   await expect(page.locator(".save-status")).toHaveText("All changes saved");
+  const families = await page.evaluate(
+    async () => (await window.alder.request("GET", "/api/fonts")).families,
+  );
+  const fontMenu = page.getByLabel("Font family", { exact: true }).first();
+  const listed = await fontMenu.locator("option").allTextContents();
+  expect(families.every((family) => listed.includes(family))).toBe(true);
+  expect(families.length).toBeGreaterThan(10);
+  await expect(fontMenu).toHaveValue("Cambria");
+  const speedInput = page.getByLabel("Reading speed", { exact: true });
+  const speedSlider = page.getByRole("slider", {
+    name: "Reading speed slider",
+    exact: true,
+  });
+  await speedInput.fill("1.37");
+  await speedInput.press("Tab");
+  await expect(speedSlider).toHaveValue("1.37");
+  await speedSlider.focus();
+  await speedSlider.press("ArrowRight");
+  await expect(speedInput).toHaveValue("1.38");
+  await speedInput.fill("1.376");
+  await speedInput.press("Enter");
+  await expect(speedInput).toHaveValue("1.38");
+  await speedInput.fill("9");
+  await speedInput.press("Tab");
+  await expect(speedInput).toHaveValue("3.00");
   // Observe the actual playback graph, including the cross-origin media source.
   await page.evaluate(() => {
     const original = AudioContext.prototype.createGain;
@@ -46,7 +71,7 @@ try {
   if (!voices.length)
     throw new Error("Desktop verification requires an installed SAPI voice");
   await page.getByLabel("Reading voice").selectOption(voices[0]);
-  await page.getByLabel("Reading speed", { exact: true }).fill("0.937");
+  await page.getByLabel("Reading speed", { exact: true }).fill("0.93");
   await page
     .locator(".document-reader")
     .getByRole("button", { name: "Read", exact: true })
@@ -102,7 +127,7 @@ try {
   expect(observed.maximumWords).toBe(1);
   expect(observed.highlights).toBeGreaterThan(10);
   expect(observed.gain).toBeCloseTo(2);
-  expect(observed.speed).toBeCloseTo(0.937);
+  expect(observed.speed).toBeCloseTo(0.93);
   expect(errors).toEqual([]);
   fs.writeFileSync(
     "work/interface-desktop-result.json",

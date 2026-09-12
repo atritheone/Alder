@@ -54,7 +54,7 @@ export function NewDocument({
             Object.assign(project.settings, {
               documentKind: kind,
               preferredFormat: kind === "book" ? "pdf" : kind,
-              fontFamily: "Sitka Text",
+              fontFamily: "Cambria",
               pageSize: values.pageSize || "A4",
               orientation: values.orientation || "portrait",
               marginMm: Number(values.marginMm || 22),

@@ -32,7 +32,7 @@ const descriptions: Record<string, string> = {
   "Toggle sandbox":
     "Show or hide the sandbox, a separate space for draft wording, language tools, and narration. Inserting a draft copies it into the chapter; editing the draft afterwards leaves the chapter unchanged.",
   "Reading speed":
-    "Set playback speed precisely from 0.250× to 3.000× in steps of 0.001. Pitch stays the same. Type a value or use the arrows.",
+    "Set playback speed from 0.25× to 3.00× in 0.01 steps. Drag the slider or type a value to two decimal places. Pitch stays the same.",
   "Reading volume":
     "Adjust narration loudness from silent to 400%. Playback starts at 200%, with compression to control peaks.",
   "Chapter text editor":

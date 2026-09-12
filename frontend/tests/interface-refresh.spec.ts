@@ -6,7 +6,7 @@ test.use({
 });
 test.setTimeout(60_000);
 
-test("clean startup, TXT creation, Sitka, help, and exact speed", async ({
+test("clean startup, TXT creation, Aptos, help, and exact speed", async ({
   page,
   request,
 }) => {
@@ -41,23 +41,48 @@ test("clean startup, TXT creation, Sitka, help, and exact speed", async ({
     ),
   ).toBe("Only these words. No generated title.\n");
   await page.evaluate(() => document.fonts.ready);
-  expect(
-    await page.evaluate(() => document.fonts.check('12px "Sitka Text"')),
-  ).toBe(true);
+  expect(await page.evaluate(() => document.fonts.check('12px "Aptos"'))).toBe(
+    true,
+  );
   await expect(page.locator(".titlebar, .local-badge")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Hide detail", exact: true }),
   ).toHaveCount(0);
-  await page.getByLabel("Reading speed", { exact: true }).fill("1.037");
+  await page.getByLabel("Reading speed", { exact: true }).fill("1.03");
   await expect(page.getByLabel("Reading speed", { exact: true })).toHaveValue(
-    "1.037",
+    "1.03",
   );
+  const slider = page.getByRole("slider", {
+    name: "Reading speed slider",
+    exact: true,
+  });
+  await expect(slider).toHaveValue("1.03");
+  await slider.focus();
+  await slider.press("ArrowRight");
+  await expect(page.getByLabel("Reading speed", { exact: true })).toHaveValue(
+    "1.04",
+  );
+  const families = (await (await request.get("/api/fonts")).json()).families;
+  expect(families.length).toBeGreaterThan(5);
+  const menu = page.getByLabel("Font family", { exact: true }).first();
+  for (const family of families)
+    await expect(
+      menu
+        .locator("option")
+        .filter({
+          hasText: new RegExp(
+            `^${family.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+          ),
+        }),
+    ).toHaveCount(1);
+  await expect(menu).toHaveValue("Cambria");
+  await expect(editor).toHaveCSS("font-family", /Cambria/);
   await expect(page.getByLabel("Reading volume", { exact: true })).toHaveValue(
     "2",
   );
   await page.getByRole("button", { name: "Toggle help area" }).click();
   await page.getByLabel("Reading speed", { exact: true }).hover();
-  await expect(page.getByLabel("Context help")).toContainText("0.001");
+  await expect(page.getByLabel("Context help")).toContainText("0.01");
   await page.getByRole("button", { name: "Toggle sandbox" }).hover();
   await expect(page.getByLabel("Context help")).toContainText("separate area");
   await page.screenshot({ path: "work/alder-grey-workspace.png" });
@@ -75,7 +100,7 @@ test("clean startup, TXT creation, Sitka, help, and exact speed", async ({
   await expect(editor).toHaveText("Only these words. No generated title.");
 });
 
-test("book setup persists layout and exports Sitka PDF and DOCX", async ({
+test("book setup persists layout and exports Cambria PDF and DOCX", async ({
   page,
   request,
 }) => {

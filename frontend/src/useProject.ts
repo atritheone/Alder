@@ -13,8 +13,20 @@ export function useProject() {
     timer = useRef<ReturnType<typeof setTimeout> | null>(null),
     flight = useRef<Promise<void> | null>(null);
   const load = useCallback((p: Project) => {
-    const converted = !p.book;
+    let converted = !p.book;
     p = migrateBook(p);
+    // Replace Alder's previous default, preserving deliberately chosen fonts.
+    if (p.settings.fontFamily === "Sitka Text") {
+      p = structuredClone(p);
+      p.settings.fontFamily = "Cambria";
+      for (const style of p.styles)
+        if (
+          ["Body", "Heading"].includes(style.name) &&
+          style.fontFamily === "Sitka Text"
+        )
+          style.fontFamily = "Cambria";
+      converted = true;
+    }
     current.current = p;
     revision.current = p.revision;
     dirty.current = converted;

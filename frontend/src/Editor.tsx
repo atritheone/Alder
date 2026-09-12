@@ -1,3 +1,4 @@
+import { useInstalledFonts } from "./useInstalledFonts";
 import {
   forwardRef,
   useEffect,
@@ -449,6 +450,29 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     [rangeWarning, setRangeWarning] = useState("");
   const [version, tick] = useState(0);
   const [flowPages, setFlowPages] = useState<FlowPage[]>([]);
+  const selectedTextStyle = (state: EditorState) => {
+    let marks = state.storedMarks || state.selection.$from.marks();
+    if (!state.selection.empty) {
+      let found = false;
+      state.doc.nodesBetween(
+        state.selection.from,
+        state.selection.to,
+        (node) => {
+          if (found) return false;
+          if (node.isText) {
+            marks = node.marks;
+            found = true;
+          }
+        },
+      );
+    }
+    return schema.marks.text_style.isInSet(marks)?.attrs || {};
+  };
+  const currentFont =
+    (view.current && selectedTextStyle(view.current.state).fontFamily) ||
+    props.fontFamily ||
+    "Cambria";
+  const installedFonts = useInstalledFonts(currentFont);
   latest.current = props;
   decos.current = props.annotations || [];
   const command = (cmd: any) => {
@@ -873,15 +897,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     if (!v) return;
     v.updateState(v.state);
     if (props.readingRange)
-      v.dom
-        .querySelector(".reading-word")
-        ?.scrollIntoView({
-          block: "nearest",
-          inline: "nearest",
-          behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-            ? "auto"
-            : "smooth",
-        });
+      v.dom.querySelector(".reading-word")?.scrollIntoView({
+        block: "nearest",
+        inline: "nearest",
+        behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
   }, [props.readingRange]);
   useLayoutEffect(() => {
     const v = view.current;
@@ -929,10 +951,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const setFont = (name: string, value: any) => {
     const v = editableView();
     if (!v) return;
-    const previous =
-      schema.marks.text_style.isInSet(
-        v.state.storedMarks || v.state.selection.$from.marks(),
-      )?.attrs || {};
+    const previous = selectedTextStyle(v.state);
     const m = schema.marks.text_style.create({ ...previous, [name]: value });
     const tr = v.state.tr;
     if (v.state.selection.empty) tr.addStoredMark(m);
@@ -1020,16 +1039,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         </select>
         <select
           aria-label="Font family"
-          defaultValue="Sitka Text"
+          value={currentFont}
           onChange={(e) => setFont("fontFamily", e.target.value)}
         >
-          {[
-            "Sitka Text",
-            "Segoe UI",
-            "Arial",
-            "Times New Roman",
-            "Consolas",
-          ].map((f) => (
+          {installedFonts.map((f) => (
             <option key={f}>{f}</option>
           ))}
         </select>
@@ -1186,7 +1199,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           "editor-scroll" + (props.showStructure ? " show-structure" : "")
         }
         style={{
-          fontFamily: props.fontFamily || "Sitka Text",
+          fontFamily: props.fontFamily || "Cambria",
           fontSize: `${props.fontSize || 15}px`,
         }}
       >
