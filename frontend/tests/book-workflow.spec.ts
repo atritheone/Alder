@@ -96,16 +96,16 @@ test("new chapters own prose and SAPI reading follows spoken words", async ({
   await page.getByLabel("Reading voice").selectOption(choices[0]);
   await page
     .locator(".document-reader")
-    .getByRole("button", { name: "Read", exact: true })
+    .getByRole("button", { name: "Play Reading", exact: true })
     .click();
   await expect(page.locator(".reading-word").first()).toBeVisible({
     timeout: 45_000,
   });
   await page
-    .getByRole("button", { name: "Pause reading", exact: true })
+    .getByRole("button", { name: "Pause Reading", exact: true })
     .click();
   await expect(
-    page.getByRole("button", { name: "Resume reading", exact: true }),
+    page.getByRole("button", { name: "Play Reading", exact: true }),
   ).toBeVisible();
   const jobs = await (
     await request.get(`http://127.0.0.1:8765/api/projects/${created.id}/speech`)
@@ -151,13 +151,13 @@ test("Chatterbox timing follows the saved chapter and stops highlighting changed
   await editor.fill("The words on this page tell a story.");
   await page
     .locator(".document-reader")
-    .getByRole("button", { name: "Read", exact: true })
+    .getByRole("button", { name: "Play Reading", exact: true })
     .click();
   await expect(page.locator(".reading-word").first()).toBeVisible({
     timeout: 120_000,
   });
   await page
-    .getByRole("button", { name: "Pause reading", exact: true })
+    .getByRole("button", { name: "Pause Reading", exact: true })
     .click();
   const jobs = await (
     await request.get(`http://127.0.0.1:8765/api/projects/${created.id}/speech`)

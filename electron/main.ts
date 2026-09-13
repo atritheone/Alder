@@ -10,7 +10,6 @@ import {
   session,
   clipboard,
   globalShortcut,
-  Tray,
   nativeImage,
 } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -98,7 +97,6 @@ async function request(method: string, p: string, body?: unknown) {
 }
 const command = (name: string) =>
   window?.webContents.send("alder:command", name);
-let readingTray: Tray | null = null;
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -221,6 +219,66 @@ async function registerProtocols() {
   });
 }
 function registerIPC() {
+  ipcMain.handle("alder:set-menu", (event, menus: unknown) => {
+    trusted(event);
+    if (menus === null) {
+      setMenu();
+      return;
+    }
+    if (!Array.isArray(menus) || menus.length > 12)
+      throw new Error("Invalid menu");
+    const template: Electron.MenuItemConstructorOptions[] = menus.map(
+      (group) => {
+        if (
+          typeof group.label !== "string" ||
+          group.label.length > 50 ||
+          !Array.isArray(group.items) ||
+          group.items.length > 60
+        )
+          throw new Error("Invalid menu group");
+        const submenu: Electron.MenuItemConstructorOptions[] = group.items.map(
+          (item: { id: string; label: string }) => {
+            if (
+              typeof item.label !== "string" ||
+              item.label.length > 120 ||
+              typeof item.id !== "string" ||
+              !/^native:[A-Za-z]+:\d+$/.test(item.id)
+            )
+              throw new Error("Invalid menu item");
+            const accelerator = item.label.startsWith("New Project")
+              ? "CmdOrCtrl+N"
+              : item.label.startsWith("Open Document")
+                ? "CmdOrCtrl+O"
+                : item.label.startsWith("Save ")
+                  ? "CmdOrCtrl+S"
+                  : item.label.startsWith("Find And Replace")
+                    ? "CmdOrCtrl+F"
+                    : undefined;
+            return {
+              label: item.label,
+              accelerator,
+              click: () => command(item.id),
+            };
+          },
+        );
+        if (group.label === "File")
+          submenu.push({ type: "separator" }, { role: "quit" });
+        if (group.label === "Edit")
+          submenu.push(
+            { type: "separator" },
+            { role: "cut" },
+            { role: "copy" },
+            { role: "paste" },
+            { role: "selectAll" },
+          );
+        if (group.label === "View")
+          submenu.push({ type: "separator" }, { role: "togglefullscreen" });
+        return { label: group.label, submenu };
+      },
+    );
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+    window?.setMenuBarVisibility(true);
+  });
   ipcMain.handle("alder:clipboard-text", async (e) => {
     trusted(e);
     const text = await clipboard.readText();
@@ -405,7 +463,7 @@ app.whenReady().then(async () => {
       show:
         !process.argv.includes("--smoke-test") &&
         !process.argv.includes("--headless-test"),
-      autoHideMenuBar: true,
+      autoHideMenuBar: false,
       webPreferences: {
         preload: path.join(__dirname, "preload.cjs"),
         contextIsolation: true,
@@ -429,28 +487,6 @@ app.whenReady().then(async () => {
       !process.argv.includes("--headless-test") &&
       !process.argv.includes("--smoke-test")
     ) {
-      readingTray = new Tray(appIcon);
-      readingTray.setToolTip("Alder · document reading");
-      readingTray.setContextMenu(
-        Menu.buildFromTemplate([
-          {
-            label: "Show Alder",
-            click: () => {
-              window?.restore();
-              window?.show();
-              window?.focus();
-            },
-          },
-          { label: "Read document", click: () => command("reading-read") },
-          {
-            label: "Pause / resume reading",
-            click: () => command("reading-toggle"),
-          },
-          { label: "Stop reading", click: () => command("reading-stop") },
-          { type: "separator" },
-          { label: "Quit Alder", click: () => window?.close() },
-        ]),
-      );
       for (const [key, action] of [
         ["CommandOrControl+Alt+Space", "reading-toggle"],
         ["CommandOrControl+Alt+R", "reading-read"],
@@ -494,7 +530,6 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => app.quit());
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
-  readingTray?.destroy();
 });
 app.on("before-quit", (event) => {
   if (!closeAllowed) {

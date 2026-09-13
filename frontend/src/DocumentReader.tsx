@@ -172,7 +172,34 @@ export default function DocumentReader(p: Props) {
       p.onHighlight(next);
     }
   }, [time, job, follow, active, playing, p.chapter.id, p.chapter.text]);
+  const requestInFlight = useRef(false);
+  const [requesting, setRequesting] = useState(false);
+  const lastConfiguration = useRef("");
+  const configuration = JSON.stringify([
+    voice,
+    rate,
+    pitch,
+    format,
+    scope,
+    p.project.settings.speechOptions,
+    scope === "book" ? null : p.chapter.id,
+    scope === "book"
+      ? p.project.book?.chapters.map((c) => [c.id, c.text, c.include])
+      : p.chapter.text,
+    scope === "selection" ? p.editorRef.current?.getSelection() : null,
+  ]);
+  const rendering =
+    !!job &&
+    !["ready", "failed", "cancelled", "interrupted"].includes(job.status);
+  const reusable =
+    playable &&
+    lastConfiguration.current === configuration &&
+    !!job &&
+    !["failed", "cancelled", "interrupted"].includes(job.status);
   const read = async () => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    setRequesting(true);
     try {
       setError("");
       setActive(false);
@@ -205,6 +232,8 @@ export default function DocumentReader(p: Props) {
           : scope === "cursor"
             ? p.chapter.text.slice(span.start)
             : undefined;
+      if (rendering && job)
+        await api(`/api/speech/jobs/${job.id}/cancel`, "POST");
       const next = await api<Job>(
         `/api/projects/${p.project.id}/speech`,
         "POST",
@@ -222,6 +251,7 @@ export default function DocumentReader(p: Props) {
           verify: false,
         },
       );
+      lastConfiguration.current = configuration;
       setJob(next);
       setTime(0);
       setChunkIndex(0);
@@ -231,7 +261,26 @@ export default function DocumentReader(p: Props) {
       setActive(true);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      requestInFlight.current = false;
+      setRequesting(false);
     }
+  };
+  const togglePlayback = () => {
+    if (playing) {
+      shouldPlay.current = false;
+      audio.current?.pause();
+    } else if (reusable) {
+      shouldPlay.current = true;
+      setActive(true);
+      if (audio.current?.ended && !active) {
+        setTime(0);
+        setChunkIndex(0);
+        fullAudio.current = false;
+        loaded.current = "";
+      } else void audio.current?.play().catch((e) => setError(e.message));
+    } else if (!rendering || lastConfiguration.current !== configuration)
+      void read();
   };
   const stop = () => {
     setActive(false);
@@ -254,16 +303,8 @@ export default function DocumentReader(p: Props) {
   useEffect(() => {
     const execute = (command: string) => {
       if (command === "reading-stop" || command === "stop") stop();
-      if (command === "reading-toggle" || command === "toggle") {
-        if (playing) {
-          shouldPlay.current = false;
-          audio.current?.pause();
-        } else if (playable) {
-          shouldPlay.current = true;
-          setActive(true);
-          void audio.current?.play().catch((e) => setError(e.message));
-        } else void read();
-      }
+      if (command === "reading-toggle" || command === "toggle")
+        togglePlayback();
       if (command === "reading-read") void read();
     };
     const local = (event: Event) =>
@@ -331,30 +372,16 @@ export default function DocumentReader(p: Props) {
           <option value="flac">FLAC</option>
         </select>
         <button
-          onClick={() => void read()}
+          aria-label={playing ? "Pause Reading" : "Play Reading"}
+          data-help="Start reading the chosen text. Press again to pause or resume. Changed text or voice settings start a fresh reading."
+          aria-busy={requesting || (rendering && !playable)}
           disabled={
-            !!job &&
-            !["ready", "failed", "cancelled", "interrupted"].includes(
-              job.status,
-            )
+            requesting ||
+            (rendering &&
+              !playable &&
+              lastConfiguration.current === configuration)
           }
-        >
-          <Play size={12} />
-          Read
-        </button>
-        <button
-          aria-label={playing ? "Pause reading" : "Resume reading"}
-          disabled={!playable}
-          onClick={() => {
-            if (playing) {
-              shouldPlay.current = false;
-              audio.current?.pause();
-            } else {
-              shouldPlay.current = true;
-              setActive(true);
-              void audio.current?.play().catch((e) => setError(e.message));
-            }
-          }}
+          onClick={togglePlayback}
         >
           {playing ? <Pause size={12} /> : <Play size={12} />}
         </button>
@@ -362,7 +389,7 @@ export default function DocumentReader(p: Props) {
           <Square size={12} />
         </button>
         <span className="speed-control">
-          Speed <PlaybackSpeed value={speed} onChange={setSpeed} />×
+          Speed <PlaybackSpeed value={speed} onChange={setSpeed} />
         </span>
         <label>
           Volume{" "}
@@ -477,72 +504,71 @@ export default function DocumentReader(p: Props) {
           </button>
         )}
       </div>
-      <div className="reader-progress">
-        <span>
-          {job?.status === "ready"
-            ? duration(time)
-            : job?.message ||
-              "Read your document with Chatterbox or an installed Windows voice."}
-        </span>
-        {job?.status === "ready" && (
-          <input
-            aria-label="Reading position"
-            type="range"
-            min="0"
-            max={job.seconds || 0}
-            step=".05"
-            value={time}
-            onChange={(e) => {
-              if (audio.current && job.audioUrl) {
-                const element = audio.current,
-                  position = Number(e.target.value),
-                  resume = playing;
-                if (!fullAudio.current) {
-                  fullAudio.current = true;
-                  element.onloadedmetadata = () => {
-                    element.currentTime = position;
-                    if (resume) void element.play();
-                    element.onloadedmetadata = null;
-                  };
-                  element.src = mediaUrl(job.audioUrl);
-                } else element.currentTime = position;
-                setActive(true);
-                setTime(position);
-              }
-            }}
-          />
-        )}
-        <span>{job?.seconds ? duration(job.seconds) : ""}</span>
-        {bookmarks.length > 0 && (
-          <select
-            aria-label="Reading bookmarks"
-            value=""
-            onChange={(e) => {
-              const b = bookmarks[Number(e.target.value)],
-                c = p.project.book!.chapters.find((c) => c.id === b.chapterId);
-              if (!c || c.text.slice(b.offset, b.offset + 60) !== b.context) {
-                setError(
-                  "This bookmark's wording has changed. Create a new bookmark at the desired position.",
+      {(job?.status === "ready" || bookmarks.length > 0) && (
+        <div className="reader-progress">
+          {job?.status === "ready" && <span>{duration(time)}</span>}
+          {job?.status === "ready" && (
+            <input
+              aria-label="Reading position"
+              type="range"
+              min="0"
+              max={job.seconds || 0}
+              step=".05"
+              value={time}
+              onChange={(e) => {
+                if (audio.current && job.audioUrl) {
+                  const element = audio.current,
+                    position = Number(e.target.value),
+                    resume = playing;
+                  if (!fullAudio.current) {
+                    fullAudio.current = true;
+                    element.onloadedmetadata = () => {
+                      element.currentTime = position;
+                      if (resume) void element.play();
+                      element.onloadedmetadata = null;
+                    };
+                    element.src = mediaUrl(job.audioUrl);
+                  } else element.currentTime = position;
+                  setActive(true);
+                  setTime(position);
+                }
+              }}
+            />
+          )}
+          <span>{job?.seconds ? duration(job.seconds) : ""}</span>
+          {bookmarks.length > 0 && (
+            <select
+              aria-label="Reading bookmarks"
+              value=""
+              onChange={(e) => {
+                const b = bookmarks[Number(e.target.value)],
+                  c = p.project.book!.chapters.find(
+                    (c) => c.id === b.chapterId,
+                  );
+                if (!c || c.text.slice(b.offset, b.offset + 60) !== b.context) {
+                  setError(
+                    "This bookmark's wording has changed. Create a new bookmark at the desired position.",
+                  );
+                  return;
+                }
+                p.onChapter(c.id);
+                setTimeout(
+                  () => p.editorRef.current?.selectRange(b.offset, b.offset),
+                  50,
                 );
-                return;
-              }
-              p.onChapter(c.id);
-              setTimeout(
-                () => p.editorRef.current?.selectRange(b.offset, b.offset),
-                50,
-              );
-              setScope("cursor");
-            }}
-          >
-            <option value="">Bookmarks</option>
-            {bookmarks.map((b, i) => (
-              <option key={i} value={i}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+                setScope("cursor");
+              }}
+            >
+              <option value="">Bookmarks</option>
+              {bookmarks.map((b, i) => (
+                <option key={i} value={i}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
       {(error || job?.error) && <p role="alert">{error || job?.error}</p>}
       {job?.status === "ready" && job.chunks.some((c) => c.timingError) && (
         <p>
@@ -557,7 +583,7 @@ export default function DocumentReader(p: Props) {
             s.text,
         ) && (
           <p>
-            The text changed after rendering. Read again to update the audio and
+            The text changed after rendering. Press Play to update the audio and
             highlighting.
           </p>
         )}

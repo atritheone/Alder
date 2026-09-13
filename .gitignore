@@ -23,5 +23,5 @@ playwright-report/
 # Project documents and reference images excluded from source control.
 /Alder-development-plan.md
 /THIRD-PARTY-NOTICES.md
-/Images/
+/images/
 /hardware.txt

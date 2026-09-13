@@ -61,10 +61,8 @@ try {
   await expect
     .poll(() => page.locator(".page-sheet").count())
     .toBeGreaterThan(1);
-  await page
-    .getByRole("navigation", { name: "Chapter pages" })
-    .getByRole("button", { name: "Page 2", exact: true })
-    .click();
+  await page.getByRole("spinbutton", { name: "Go To Page" }).fill("2");
+  await page.getByRole("spinbutton", { name: "Go To Page" }).press("Enter");
   await expect
     .poll(() =>
       page.locator(".paginated-editor .editor-scroll").evaluate((el) => {
@@ -91,17 +89,21 @@ try {
     root = await page.locator(".alder-app").boundingBox();
   expect(helpBox.x + helpBox.width).toBeGreaterThan(root.x + root.width - 20);
   expect(helpBox.width).toBeLessThan(root.width / 2);
-  await page.getByRole("button", { name: "File", exact: true }).click();
-  await expect(page.getByRole("menu")).toBeVisible();
-  await page.getByRole("button", { name: "Edit", exact: true }).hover();
-  await expect(
-    page.getByRole("button", { name: "Edit", exact: true }),
-  ).toHaveAttribute("aria-expanded", "true");
-  await expect(
-    page.getByRole("button", { name: "File", exact: true }),
-  ).toHaveAttribute("aria-expanded", "false");
-  await writing.hover();
-  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(page.locator(".menubar")).toHaveCount(0);
+  const nativeMenus = await app.evaluate(({ Menu, BrowserWindow }) => ({
+    visible: BrowserWindow.getAllWindows()[0].isMenuBarVisible(),
+    labels: Menu.getApplicationMenu().items.map((item) => item.label),
+  }));
+  expect(nativeMenus.visible).toBe(true);
+  expect(nativeMenus.labels).toEqual([
+    "File",
+    "Edit",
+    "Create",
+    "Read",
+    "View",
+    "Options",
+    "Help",
+  ]);
   await left.click();
   const browser = page.getByRole("complementary", { name: "Language browser" });
   const old = await browser.boundingBox();
@@ -112,6 +114,71 @@ try {
   await page.mouse.move(box.x + box.width / 2 + 120, box.y + 30, { steps: 8 });
   await page.mouse.up();
   expect((await browser.boundingBox()).width).toBeGreaterThan(old.width + 70);
+  await expect(page.locator(".window-brand, .writing-commandbar")).toHaveCount(
+    0,
+  );
+  await expect(page.locator(".window-document")).not.toContainText(
+    "Organic Language Engine",
+  );
+  await expect(page.locator(".reader-progress")).toHaveCount(0);
+  await expect(
+    browser
+      .locator(".browser-search")
+      .getByRole("button", { name: "Toggle Left Panel" }),
+  ).toBeVisible();
+  expect(
+    await app.evaluate(({ Menu }) =>
+      Menu.getApplicationMenu()
+        .items.find((item) => item.label === "Create")
+        .submenu.items.some((item) => item.label === "Chapter"),
+    ),
+  ).toBe(false);
+  await writing.fill("Three simple words");
+  await expect(page.locator(".book-page-tools")).toContainText("3 Words");
+  await expect(page.locator(".book-page-tools")).not.toContainText("Chapters");
+  await writing.fill("");
+  const nav = browser.getByRole("navigation", {
+    name: "Collections And Library",
+  });
+  const navBefore = await nav.boundingBox();
+  const divider = await browser
+    .getByRole("separator", { name: "Resize Collections And Content" })
+    .boundingBox();
+  await page.mouse.move(divider.x + divider.width / 2, divider.y + 35);
+  await page.mouse.down();
+  await page.mouse.move(divider.x + 64, divider.y + 35, { steps: 8 });
+  await page.mouse.up();
+  expect((await nav.boundingBox()).width).toBeGreaterThan(navBefore.width + 40);
+  const filters = browser.getByRole("region", { name: "Library Filters" });
+  const filterBefore = await filters.boundingBox();
+  const filterDivider = await browser
+    .getByRole("separator", { name: "Resize Filters And Content" })
+    .boundingBox();
+  await page.mouse.move(filterDivider.x + 30, filterDivider.y + 3);
+  await page.mouse.down();
+  await page.mouse.move(filterDivider.x + 30, filterDivider.y + 53, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  expect((await filters.boundingBox()).height).toBeGreaterThan(
+    filterBefore.height + 30,
+  );
+  // Make room for the inline managers after verifying both dividers.
+  const collectionsDivider = browser.getByRole("separator", {
+    name: "Resize Collections And Content",
+  });
+  await collectionsDivider.focus();
+  for (let i = 0; i < 7; i++) await collectionsDivider.press("ArrowLeft");
+  for (const name of ["Styles", "Templates", "Projects", "Project Assets"]) {
+    await browser.getByRole("button", { name, exact: true }).click();
+    await expect(
+      browser.getByRole("region", { name, exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(filters).toHaveCount(0);
+  }
+  await browser.getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(browser.locator(".project-list-item")).not.toHaveCount(0);
   await browser.getByRole("button", { name: "Voices", exact: true }).click();
   await expect(
     browser.getByRole("region", { name: "Voice Management" }),
@@ -171,7 +238,7 @@ try {
   const accent = await page
     .getByLabel("Reading speed slider", { exact: true })
     .evaluate((el) => getComputedStyle(el).accentColor);
-  expect(accent).toBe("rgb(61, 117, 187)");
+  expect(accent).toBe("rgb(41, 63, 94)");
   expect(errors).toEqual([]);
   fs.writeFileSync(
     "work/workspace-desktop-result.json",

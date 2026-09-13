@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function PlaybackSpeed({
   value,
@@ -9,7 +9,6 @@ export default function PlaybackSpeed({
   onChange: (value: number) => void;
   label?: string;
 }) {
-  const ticks = useId();
   const [text, setText] = useState(value.toFixed(2));
   const [editing, setEditing] = useState(false);
   useEffect(() => {
@@ -35,18 +34,10 @@ export default function PlaybackSpeed({
         min="0.25"
         max="3"
         step="0.01"
-        list={ticks}
         value={value}
         aria-valuetext={`${value.toFixed(2)} times normal speed`}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      <datalist id={ticks}>
-        {Array.from({ length: 56 }, (_, i) => (0.25 + i * 0.05).toFixed(2)).map(
-          (tick) => (
-            <option key={tick} value={tick} />
-          ),
-        )}
-      </datalist>
       <input
         aria-label={label}
         title="Type an exact speed (0.25–3.00×), to two decimal places"
@@ -54,6 +45,7 @@ export default function PlaybackSpeed({
         min="0.25"
         max="3"
         step="0.01"
+        style={{ width: `${Math.max(4, text.length)}ch` }}
         value={text}
         onFocus={() => setEditing(true)}
         onChange={(e) => {

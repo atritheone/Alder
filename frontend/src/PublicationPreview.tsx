@@ -100,7 +100,7 @@ export default function PublicationPreview({
       return { source: "", sections: [] as { id: string; title: string }[] };
     const document = new DOMParser().parseFromString(readerHtml, "text/html");
     const style = document.createElement("style");
-    style.textContent = `body{font-size:${Number(readerFont)}px!important}main{max-width:none;padding:1.4em}main p,main li,main td,main th,main span{font-size:inherit!important}html{scroll-behavior:smooth}`;
+    style.textContent = `body{font-size:${Number(readerFont)}px!important}main{max-width:none;padding:1.4em}main p,main li,main td,main th,main span{font-size:inherit!important}html{scroll-behavior:smooth}*{scrollbar-width:none}*::-webkit-scrollbar{display:none}`;
     document.head.append(style);
     const sections = [...document.querySelectorAll("main section")].map(
       (section, index) => {

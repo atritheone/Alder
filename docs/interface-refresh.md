@@ -53,7 +53,7 @@ The writing workspace now centers each page, including page navigation in a
 longer document, and uses glyphs for Write, Pages, and Page Preview. Blue
 marks active controls, sliders, and primary actions against grey surfaces.
 Library width can be dragged or adjusted with the separator's arrow keys; a
-small edge arrow hides or restores it. Menus switch on hover while open and
+small arrow at the end of Search Library hides it; an edge arrow restores it. Menus switch on hover while open and
 close when the pointer leaves them.
 
 Empty projects receive one starter sandbox draft on opening. Library word
@@ -66,7 +66,7 @@ isolated desktop profile, alongside 27 TypeScript checks.
 
 Alder branding uses the supplied transparent black tree on light UI surfaces
 and transparent white tree on dark surfaces. Fixed desktop icons use the
-supplied white tree on a black background; interface accents remain blue. The start screen, menu bar, About panel, favicon, window,
+supplied white tree with a transparent background; interface accents use dark slate blue (#293f5e). The start screen, About panel, favicon, window,
 tray, and Windows executable share these assets. `npm run branding` regenerates
 PNG and ICO assets from `frontend/public/branding/alder-icon-source.png`. Windows builds
 create a branded `Alder.exe` beside the development Electron runtime, used by
@@ -75,3 +75,42 @@ Release configuration enables icon/metadata resource editing while leaving
 code signing disabled. The saved status reads “Saved”. Branding verification
 checks executable icon resources, native Windows icon extraction, UI marks,
 blue accents, and the save status in the branded desktop application.
+
+The menu bar displays the project name without the brand mark or tagline. The
+extra command bar is removed: File contains Open Document and Export, Edit
+contains Paste From Clipboard, and Options contains Styles and Document Setup.
+Create offers Chapter only for books. Page tools show total words and, for
+books, chapter count. Idle reading controls no longer show introductory text.
+
+Collections and Content have a draggable vertical divider; Filters and Content
+have a horizontal divider. Both support arrow keys and remember their sizes.
+Styles, Templates, Projects, and Project Assets render directly in the library
+content pane, including style editing and applying styles to the current text.
+The desktop workspace check covers inline managers, both internal dividers,
+the outer divider, search toggle placement, document counts, and TXT menus.
+
+Write now stacks pages vertically using measured layout decorations in one
+continuous editor. Page navigation uses a number field and Enter; the field
+also follows scrolling. Scrollbars are hidden throughout the app and reading
+preview while native vertical and horizontal scrolling remain available.
+Controls and panels use square corners. Sliders have square thumbs and straight
+tracks; the reading-speed slider is 80px wide with fine steps and tick marks.
+Generic narration status messages no longer create a strip under the controls;
+ready-audio seeking, bookmarks, and actionable errors remain available.
+
+`scripts/test-vertical-desktop.mjs` checks long-paragraph margins, vertical page
+geometry, Enter navigation, edits, explicit breaks, stable pagination at two
+zoom levels, HTML import with 90 table rows, and both scrolling directions in
+a narrow window. Layout decorations leave the authored text unchanged.
+
+The Windows desktop uses a visible native application menu bar with the full
+File/Edit/Create/Read/View/Options/Help actions. The duplicate renderer menu bar
+is removed in desktop builds; browser development retains its menu fallback.
+Undo, Redo, and Save sit beside the project/view controls. The background tray
+icon is removed, while the ordinary window taskbar button remains available.
+
+The speed slider has no tick marks or multiplier suffix, and its numeric field
+fits its value. Play starts a new reading, pauses/resumes existing audio, and
+refreshes it after wording or voice settings change. Desktop checks exercise
+native menu visibility and action routing, inline Styles, the compact speed
+field, Play/Pause, reading revised text, and actual one-word speech highlights.

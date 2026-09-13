@@ -1,3 +1,4 @@
+import NativeMenu from "./NativeMenu";
 import AlderLogo from "./AlderLogo";
 import { useInstalledFonts } from "./useInstalledFonts";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -297,9 +298,7 @@ export default function App() {
     root = useRef<HTMLDivElement>(null);
   const resumeAudio = useNarrationGain(audio, narrationVolume);
   useEffect(() => {
-    document.title = project
-      ? `${project.name} — Alder · Organic Language Engine`
-      : "Alder · Organic Language Engine";
+    document.title = project ? `${project.name} — Alder` : "Alder";
   }, [project?.name]);
   useEffect(() => {
     const over = (e: DragEvent) => {
@@ -686,8 +685,21 @@ export default function App() {
       window.dispatchEvent(new Event("alder-open-start"));
       return;
     }
-    if (name === "voices") {
-      setBrowserCategory("Voices");
+    const libraryCategories: Record<string, string> = {
+      voices: "Voices",
+      styles: "Styles",
+      templates: "Templates",
+      projects: "Projects",
+      assets: "Project Assets",
+    };
+    if (libraryCategories[name]) {
+      if (name === "projects")
+        void run(async () =>
+          setProjectList(
+            (await api<{ projects: any[] }>("/api/projects")).projects,
+          ),
+        );
+      setBrowserCategory(libraryCategories[name]);
       setBrowserOpen(true);
       setPanel(null);
       return;
@@ -696,10 +708,6 @@ export default function App() {
       importFile.current?.click();
       return;
     }
-    if (name === "projects")
-      void api<{ projects: any[] }>("/api/projects").then((r) =>
-        setProjectList(r.projects),
-      );
     if (name === "ideas") {
       setForm({
         title: "Add an idea sample",
@@ -1157,9 +1165,145 @@ export default function App() {
       </form>
     </>
   );
+  const libraryManager = (
+    <>
+      {browserCategory === "Projects" && (
+        <>
+          <div className="manager-actions">
+            <button
+              className="accent"
+              onClick={() => {
+                setPanel(null);
+                newProject();
+              }}
+            >
+              New project
+            </button>
+            <button
+              onClick={() => {
+                if (window.alder)
+                  void run(async () => {
+                    const path = await window.alder!.openPath();
+                    if (path) {
+                      await flush();
+                      load(
+                        await api("/api/projects/open", "POST", {
+                          path,
+                        }),
+                      );
+                      setPanel(null);
+                    }
+                  });
+                else
+                  setForm({
+                    title: "Open Alder archive",
+                    fields: [
+                      {
+                        name: "path",
+                        label: "Full path to .alder project",
+                        required: true,
+                      },
+                    ],
+                    submit: "Open",
+                    action: async (v) => {
+                      await flush();
+                      load(await api("/api/projects/open", "POST", v));
+                      setPanel(null);
+                    },
+                  });
+              }}
+            >
+              Open .alder file…
+            </button>
+          </div>
+          {projectList.map((p) => (
+            <button
+              className="project-list-item"
+              key={p.id}
+              onClick={() =>
+                void run(async () => {
+                  await flush();
+                  load(await api(`/api/projects/${p.id}`));
+                  setPanel(null);
+                })
+              }
+            >
+              <FolderOpen size={18} />
+              <strong>{p.name}</strong>
+              <span>{new Date(p.updatedAt).toLocaleDateString()}</span>
+              {p.id === project.id && <Check size={15} />}
+            </button>
+          ))}
+        </>
+      )}
+      {browserCategory === "Styles" && (
+        <StylesManager
+          project={project}
+          onChange={change}
+          onError={setError}
+          onApply={(id, kind) => {
+            targetEditor()?.style(id, kind);
+            setPanel(null);
+          }}
+        />
+      )}
+      {browserCategory === "Project Assets" && (
+        <>
+          {project.assets.length ? (
+            project.assets.map((a) => (
+              <div className="dictionary-row" key={a.id}>
+                <FileText size={15} />
+                <strong>{a.name}</strong>
+                <span>{a.mime}</span>
+              </div>
+            ))
+          ) : (
+            <p>
+              No project assets yet. Insert an image in a chapter or sandbox
+              draft to collect it with the project.
+            </p>
+          )}
+          <button onClick={() => imageFile.current?.click()}>
+            Insert image…
+          </button>
+        </>
+      )}
+      {browserCategory === "Templates" && (
+        <>
+          <p>
+            Create a plain text document, a Word document, or a book with its
+            own page and chapter settings.
+          </p>
+          <button
+            className="accent"
+            onClick={() => {
+              setPanel(null);
+              newProject();
+            }}
+          >
+            Create from template…
+          </button>
+        </>
+      )}
+    </>
+  );
+  const pasteClipboard = () =>
+    void run(async () => {
+      const text = window.alder?.readClipboard
+        ? await window.alder.readClipboard()
+        : await navigator.clipboard.readText();
+      if (!text.trim()) throw new Error("The clipboard contains no text.");
+      setView("Write");
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      bookEditor.current?.insert(text);
+    });
+  const isBook = !["txt", "docx"].includes(project.settings.documentKind);
   const menuItems: Record<string, { label: string; action: () => void }[]> = {
     File: [
       { label: "New project…", action: newProject },
+      { label: "Open Document…", action: () => importFile.current?.click() },
       { label: "Open project…", action: () => openPanel("projects") },
       {
         label: ["txt", "docx"].includes(project.settings.documentKind)
@@ -1171,6 +1315,7 @@ export default function App() {
       { label: "Export…", action: () => openPanel("export") },
     ],
     Edit: [
+      { label: "Paste From Clipboard", action: pasteClipboard },
       {
         label: "Undo project change",
         action: () => void run(() => history("undo")),
@@ -1191,17 +1336,21 @@ export default function App() {
             clip ? clip.slot + 1 : 0,
           ),
       },
-      {
-        label: "Chapter",
-        action: () => {
-          const c = newChapter(
-            `Chapter ${(project.book?.chapters.length || 0) + 1}`,
-          );
-          change((p) => p.book!.chapters.push(c));
-          setChapterId(c.id);
-          setView("Write");
-        },
-      },
+      ...(isBook
+        ? [
+            {
+              label: "Chapter",
+              action: () => {
+                const c = newChapter(
+                  `Chapter ${(project.book?.chapters.length || 0) + 1}`,
+                );
+                change((p) => p.book!.chapters.push(c));
+                setChapterId(c.id);
+                setView("Write");
+              },
+            },
+          ]
+        : []),
 
       { label: "Idea sample…", action: () => openPanel("ideas") },
       { label: "Definition card…", action: () => openPanel("definitions") },
@@ -1276,138 +1425,52 @@ export default function App() {
         } as React.CSSProperties
       }
     >
-      <div
-        className="menubar"
-        onMouseLeave={() => setMenu(null)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") setMenu(null);
-        }}
-      >
-        <strong className="window-brand" title="Organic Language Engine">
-          <AlderLogo /> Alder
-        </strong>
-        {Object.entries(menuItems).map(([name, items]) => (
-          <div
-            className="menu-wrap"
-            key={name}
-            onMouseEnter={() => {
-              if (menu) setMenu(name);
-            }}
-          >
-            <button
-              aria-haspopup="menu"
-              aria-expanded={menu === name}
-              className={menu === name ? "open" : ""}
-              onClick={() => setMenu(menu === name ? null : name)}
-            >
-              {name}
-            </button>
-            {menu === name && (
-              <div className="menu-popup" role="menu">
-                {items.map((item) => (
-                  <button
-                    role="menuitem"
-                    key={item.label}
-                    onClick={() => {
-                      setMenu(null);
-                      item.action();
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-        <span className="window-document">
-          {project.name} <small>· Organic Language Engine</small>
-        </span>
-        <button
-          title="Undo project change"
-          aria-label="Undo project change"
-          onClick={() => void run(() => history("undo"))}
-        >
-          <Undo2 size={13} />
-        </button>
-        <button
-          title="Redo project change"
-          aria-label="Redo project change"
-          onClick={() => void run(() => history("redo"))}
-        >
-          <Redo2 size={13} />
-        </button>
-        <button
-          title={
-            ["txt", "docx"].includes(project.settings.documentKind)
-              ? "Save document"
-              : "Save project"
-          }
-          aria-label={
-            ["txt", "docx"].includes(project.settings.documentKind)
-              ? "Save document"
-              : "Save project"
-          }
-          onClick={() => void run(saveProject)}
-        >
-          <Save size={13} />
-        </button>
-      </div>
-      <div className="writing-commandbar">
-        <button onClick={() => importFile.current?.click()}>
-          <FolderOpen size={14} />
-          Open document
-        </button>
-        <button
-          onClick={() =>
-            void run(async () => {
-              const text = window.alder?.readClipboard
-                ? await window.alder.readClipboard()
-                : await navigator.clipboard.readText();
-              if (!text.trim())
-                throw new Error("The clipboard contains no text.");
-              const c = newChapter("Clipboard", textDoc(text));
-              change((p) => p.book!.chapters.push(c));
-              setChapterId(c.id);
-              setView("Write");
-            })
-          }
-        >
-          <Copy size={14} />
-          Clipboard
-        </button>
-        <button onClick={() => openPanel("styles")}>
-          <FileText size={14} />
-          Styles
-        </button>
-        <button onClick={() => openPanel("settings")}>
-          <Settings2 size={14} />
-          Page setup
-        </button>
-        <button
-          onClick={() => {
-            const c = newChapter(
-              `Chapter ${project.book!.chapters.length + 1}`,
-            );
-            change((p) => p.book!.chapters.push(c));
-            setChapterId(c.id);
-            setView("Write");
+      {window.alder ? (
+        <NativeMenu items={menuItems} onError={setError} />
+      ) : (
+        <div
+          className="menubar"
+          onMouseLeave={() => setMenu(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setMenu(null);
           }}
         >
-          <Plus size={14} />
-          Chapter
-        </button>
-        <span>
-          {project.book?.chapters.length || 0} chapters ·{" "}
-          {words(bookText(project))} words
-        </span>
-        <button onClick={() => openPanel("export")}>
-          <Download size={14} />
-          {["txt", "docx"].includes(project.settings.documentKind)
-            ? "Export document"
-            : "Export book"}
-        </button>
-      </div>
+          {Object.entries(menuItems).map(([name, items]) => (
+            <div
+              className="menu-wrap"
+              key={name}
+              onMouseEnter={() => {
+                if (menu) setMenu(name);
+              }}
+            >
+              <button
+                aria-haspopup="menu"
+                aria-expanded={menu === name}
+                className={menu === name ? "open" : ""}
+                onClick={() => setMenu(menu === name ? null : name)}
+              >
+                {name}
+              </button>
+              {menu === name && (
+                <div className="menu-popup" role="menu">
+                  {items.map((item) => (
+                    <button
+                      role="menuitem"
+                      key={item.label}
+                      onClick={() => {
+                        setMenu(null);
+                        item.action();
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="workspaces">
         <div className="workspace-topline">
           <div className="project-label">
@@ -1435,6 +1498,37 @@ export default function App() {
               }
             >
               <ChevronDown size={12} />
+            </button>
+          </div>
+          <div className="project-actions">
+            <button
+              title="Undo project change"
+              aria-label="Undo project change"
+              onClick={() => void run(() => history("undo"))}
+            >
+              <Undo2 size={13} />
+            </button>
+            <button
+              title="Redo project change"
+              aria-label="Redo project change"
+              onClick={() => void run(() => history("redo"))}
+            >
+              <Redo2 size={13} />
+            </button>
+            <button
+              title={
+                ["txt", "docx"].includes(project.settings.documentKind)
+                  ? "Save document"
+                  : "Save project"
+              }
+              aria-label={
+                ["txt", "docx"].includes(project.settings.documentKind)
+                  ? "Save document"
+                  : "Save project"
+              }
+              onClick={() => void run(saveProject)}
+            >
+              <Save size={13} />
             </button>
           </div>
           <div className="view-tabs" role="tablist">
@@ -1465,19 +1559,21 @@ export default function App() {
           </div>
         </div>
         <div className="upper-workspace">
-          <button
-            className="browser-edge-toggle"
-            aria-label="Toggle Left Panel"
-            aria-expanded={browserOpen}
-            data-help="Show or hide the library panel. Drag its right edge to resize it; your chosen width is remembered."
-            onClick={() => setBrowserOpen((v) => !v)}
-          >
-            {browserOpen ? (
-              <ChevronLeft size={12} />
-            ) : (
-              <ChevronRight size={12} />
-            )}
-          </button>
+          {!browserOpen && (
+            <button
+              className="browser-edge-toggle"
+              aria-label="Toggle Left Panel"
+              aria-expanded={browserOpen}
+              data-help="Show or hide the library panel. Drag its right edge to resize it; your chosen width is remembered."
+              onClick={() => setBrowserOpen((v) => !v)}
+            >
+              {browserOpen ? (
+                <ChevronLeft size={12} />
+              ) : (
+                <ChevronRight size={12} />
+              )}
+            </button>
+          )}
           {browserOpen && (
             <>
               <Browser
@@ -1485,6 +1581,8 @@ export default function App() {
                 category={browserCategory}
                 onCategory={setBrowserCategory}
                 voiceManager={voiceManager}
+                libraryManager={libraryManager}
+                onHide={() => setBrowserOpen(false)}
                 ideas={ideas}
                 onInsert={insertIdea}
                 onSelectClip={selectClip}
@@ -2278,7 +2376,6 @@ export default function App() {
                       onChange={setSpeed}
                       label="Narration speed"
                     />
-                    ×
                   </span>
                   <label>
                     Volume{" "}
@@ -2720,75 +2817,6 @@ export default function App() {
               </button>
             </header>
             <div className="manager-content">
-              {panel === "projects" && (
-                <>
-                  <div className="manager-actions">
-                    <button
-                      className="accent"
-                      onClick={() => {
-                        setPanel(null);
-                        newProject();
-                      }}
-                    >
-                      New project
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (window.alder)
-                          void run(async () => {
-                            const path = await window.alder!.openPath();
-                            if (path) {
-                              await flush();
-                              load(
-                                await api("/api/projects/open", "POST", {
-                                  path,
-                                }),
-                              );
-                              setPanel(null);
-                            }
-                          });
-                        else
-                          setForm({
-                            title: "Open Alder archive",
-                            fields: [
-                              {
-                                name: "path",
-                                label: "Full path to .alder project",
-                                required: true,
-                              },
-                            ],
-                            submit: "Open",
-                            action: async (v) => {
-                              await flush();
-                              load(await api("/api/projects/open", "POST", v));
-                              setPanel(null);
-                            },
-                          });
-                      }}
-                    >
-                      Open .alder file…
-                    </button>
-                  </div>
-                  {projectList.map((p) => (
-                    <button
-                      className="project-list-item"
-                      key={p.id}
-                      onClick={() =>
-                        void run(async () => {
-                          await flush();
-                          load(await api(`/api/projects/${p.id}`));
-                          setPanel(null);
-                        })
-                      }
-                    >
-                      <FolderOpen size={18} />
-                      <strong>{p.name}</strong>
-                      <span>{new Date(p.updatedAt).toLocaleDateString()}</span>
-                      {p.id === project.id && <Check size={15} />}
-                    </button>
-                  ))}
-                </>
-              )}
               {panel === "rules" && (
                 <RulesManager
                   project={project}
@@ -3053,38 +3081,7 @@ export default function App() {
                   </button>
                 </>
               )}
-              {panel === "styles" && (
-                <StylesManager
-                  project={project}
-                  onChange={change}
-                  onError={setError}
-                  onApply={(id, kind) => {
-                    targetEditor()?.style(id, kind);
-                    setPanel(null);
-                  }}
-                />
-              )}
-              {panel === "assets" && (
-                <>
-                  {project.assets.length ? (
-                    project.assets.map((a) => (
-                      <div className="dictionary-row" key={a.id}>
-                        <FileText size={15} />
-                        <strong>{a.name}</strong>
-                        <span>{a.mime}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p>
-                      No project assets yet. Insert an image in a chapter or
-                      sandbox draft to collect it with the project.
-                    </p>
-                  )}
-                  <button onClick={() => imageFile.current?.click()}>
-                    Insert image…
-                  </button>
-                </>
-              )}
+
               {panel === "export" && (
                 <>
                   <div className="export-summary">
@@ -3189,23 +3186,7 @@ export default function App() {
                   </button>
                 </>
               )}
-              {panel === "templates" && (
-                <>
-                  <p>
-                    Create a plain text document, a Word document, or a book
-                    with its own page and chapter settings.
-                  </p>
-                  <button
-                    className="accent"
-                    onClick={() => {
-                      setPanel(null);
-                      newProject();
-                    }}
-                  >
-                    Create from template…
-                  </button>
-                </>
-              )}
+
               {panel === "accessibility" && (
                 <div className="settings-grid">
                   <label>

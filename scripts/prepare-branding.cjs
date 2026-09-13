@@ -1,4 +1,4 @@
-// Convert the supplied black-background artwork into desktop icon sizes.
+// Convert the supplied white transparent artwork into desktop icon sizes.
 const { app, nativeImage } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -40,7 +40,7 @@ app
       path.join(output, "alder.ico"),
     );
     console.log(
-      "Generated Alder icons from the supplied black-background artwork.",
+      "Generated Alder icons from the supplied white transparent artwork.",
     );
     app.quit();
   })

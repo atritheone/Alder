@@ -2838,8 +2838,8 @@ button.accent {
   gap: 5px;
 }
 .playback-speed input[type="range"] {
-  width: 160px;
-  accent-color: #666;
+  width: 80px;
+  accent-color: var(--accent);
 }
 .playback-speed input[type="number"] {
   width: 68px;
@@ -2848,8 +2848,8 @@ button.accent {
 
 /* Workspace chrome: neutral surfaces with blue for active controls. */
 :root {
-  --accent: #3d75bb;
-  --accent-light: #d0e0f4;
+  --accent: #293f5e;
+  --accent-light: #d3dbe5;
 }
 .alder-app input[type="range"],
 .alder-app input[type="checkbox"],
@@ -2866,11 +2866,11 @@ button.accent {
 .theme-neutral .filter-chips button.active {
   background: var(--accent-light);
   border-color: var(--accent);
-  color: #24558a;
+  color: #24364f;
 }
 .theme-neutral .browser-nav button.selected {
   background: var(--accent-light);
-  color: #24558a;
+  color: #24364f;
   box-shadow: inset 3px 0 var(--accent);
 }
 .alder-app .view-tabs button,
@@ -2883,7 +2883,7 @@ button.accent {
   min-width: 30px;
 }
 .alder-app .view-tabs button.active {
-  color: #24558a;
+  color: #24364f;
 }
 .alder-app .view-tabs button.active svg {
   stroke-width: 2.6;
@@ -3032,7 +3032,7 @@ button.accent {
 .new-document button.active {
   background: var(--accent-light);
   border-color: var(--accent);
-  color: #24558a;
+  color: #24364f;
 }
 
 .alder-logo {
@@ -3061,4 +3061,180 @@ button.accent {
   width: 80px;
   height: 80px;
   border-radius: 0;
+}
+/* Library dividers keep each pane independently adjustable. */
+.browser-search input {
+  min-width: 0;
+  flex: 1;
+}
+.browser-search button {
+  flex: none;
+}
+.browser-filters {
+  flex: none;
+  min-height: 60px;
+  max-height: 65%;
+  overflow: auto;
+}
+.browser-filters .filter-area {
+  min-height: 0;
+  border-bottom: 0;
+}
+.library-resizer {
+  flex: none;
+  touch-action: none;
+  user-select: none;
+  background: var(--line);
+}
+.library-resizer.vertical {
+  width: 6px;
+  cursor: col-resize;
+}
+.library-resizer.horizontal {
+  height: 6px;
+  cursor: row-resize;
+}
+.library-resizer:hover,
+.library-resizer:focus-visible {
+  background: var(--accent);
+}
+.library-list {
+  min-height: 0;
+}
+.library-manager {
+  container-type: inline-size;
+}
+.library-manager .manager-actions {
+  flex-wrap: wrap;
+}
+.library-manager .project-list-item {
+  width: 100%;
+  flex-wrap: wrap;
+  height: auto;
+  text-align: left;
+}
+.library-manager .project-list-item strong {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.library-manager .dictionary-row {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.library-manager .style-row {
+  flex-wrap: wrap;
+}
+.library-manager .style-row > div {
+  flex-basis: 100%;
+}
+.library-manager .style-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
+.library-manager .style-editor {
+  padding: 8px;
+}
+.library-manager .style-editor footer {
+  flex-wrap: wrap;
+}
+.library-manager input,
+.library-manager select {
+  max-width: 100%;
+  min-width: 0;
+}
+@container (min-width: 380px) {
+  .library-manager .style-fields {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .library-manager .style-row > div {
+    flex-basis: 0;
+  }
+}
+
+/* Square application chrome; scrolling remains native in both directions. */
+*,
+*::before,
+*::after {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.alder-app *,
+.alder-app *::before,
+.alder-app *::after,
+.start-screen *,
+.start-screen *::before,
+.start-screen *::after {
+  border-radius: 0 !important;
+}
+input[type="range"] {
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  height: 16px;
+  background: transparent;
+  padding: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #a5a5a5;
+  border: 0;
+  border-radius: 0;
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 0;
+  background: var(--accent);
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: #a5a5a5;
+  border: 0;
+  border-radius: 0;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 0;
+  background: var(--accent);
+}
+input[type="range"]:disabled {
+  opacity: 0.45;
+}
+.playback-speed input[type="range"] {
+  height: 16px;
+  background: transparent;
+}
+
+.project-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+.project-actions button {
+  border: 0;
+  background: transparent;
+  padding: 4px;
+}
+.project-actions + .view-tabs {
+  margin-left: 10px;
+}
+.playback-speed input[type="number"] {
+  box-sizing: content-box;
+  min-width: 4ch;
+  padding: 2px 3px;
+  appearance: textfield;
+}
+.playback-speed input[type="number"]::-webkit-inner-spin-button,
+.playback-speed input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
 }

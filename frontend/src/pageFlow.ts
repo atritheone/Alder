@@ -1,5 +1,5 @@
 import { Fragment, type Node as PMNode } from "prosemirror-model";
-import type { EditorView } from "prosemirror-view";
+import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 
 export type PageLayout = {
   width: number;
@@ -11,60 +11,166 @@ export type PageLayout = {
 export type FlowPage = { from: number; to: number; text: string };
 export const PAGE_GAP = 28;
 
-/** Read actual browser column boundaries, including paragraphs spanning pages.
- * Positions belong to this exact document snapshot, never to a word estimate.
+/** Paginate one continuous editable document using layout-only spacers.
+ * Nothing is inserted into the document or its undo/export history.
  */
-export function measurePages(view: EditorView, layout: PageLayout): FlowPage[] {
-  const root = view.dom.getBoundingClientRect();
-  const pitch = (layout.width + PAGE_GAP) * layout.zoom;
-  const starts = new Map<number, number>([[0, 0]]);
-  const column = (pos: number) =>
-    Math.max(
-      0,
-      Math.floor((view.coordsAtPos(pos, 1).left - root.left + 1) / pitch),
+export function paginatePages(
+  view: EditorView,
+  layout: PageLayout,
+  apply: (decorations: DecorationSet) => void,
+): FlowPage[] {
+  const doc = view.state.doc;
+  const spacers: {
+    pos: number;
+    height: number;
+    nodeSize?: number;
+    row?: boolean;
+  }[] = [];
+  const render = () =>
+    apply(
+      DecorationSet.create(
+        doc,
+        spacers.map((spacer) =>
+          spacer.nodeSize
+            ? Decoration.node(spacer.pos, spacer.pos + spacer.nodeSize, {
+                style: `height: ${spacer.height}px; margin: 0; padding: 0; border: 0;`,
+              })
+            : Decoration.widget(
+                spacer.pos,
+                () => {
+                  const element = document.createElement(
+                    spacer.row ? "tr" : "span",
+                  );
+                  element.className = "pagination-spacer";
+                  element.style.height = `${spacer.height}px`;
+                  element.setAttribute("aria-hidden", "true");
+                  if (spacer.row) {
+                    element.style.display = "table-row";
+                    const cell = document.createElement("td");
+                    let columns = 0;
+                    doc.nodeAt(spacer.pos)?.forEach((node) => {
+                      columns += Number(node.attrs.colspan || 1);
+                    });
+                    cell.colSpan = Math.max(1, columns);
+                    cell.style.cssText = `height:${spacer.height}px;padding:0;border:0;`;
+                    element.append(cell);
+                  }
+                  return element;
+                },
+                {
+                  side: -1,
+                  key: `page-${spacer.pos}-${spacer.height}`,
+                  ignoreSelection: true,
+                },
+              ),
+        ),
+      ),
     );
-  view.state.doc.descendants((node, pos) => {
-    if (!node.isText && !node.isLeaf && !node.isTextblock) return;
-    if (node.isText) {
-      const end = pos + node.nodeSize;
-      let at = pos;
-      while (at < end) {
-        const page = column(at);
-        if (!starts.has(page)) starts.set(page, at);
-        if (column(end - 1) === page) break;
-        let lo = at + 1,
-          hi = end - 1;
+  apply(DecorationSet.empty);
+  const root = view.dom.getBoundingClientRect();
+  // Include the application's UI scale as well as the page zoom.
+  const scale = root.width / (layout.width - layout.margin * 2);
+  const pitch = layout.height + PAGE_GAP;
+  const bodyHeight = layout.height - 2 * layout.margin;
+  const y = (pos: number) => {
+    const rect = view.coordsAtPos(pos, 1);
+    return {
+      top: (rect.top - root.top) / scale,
+      bottom: (rect.bottom - root.top) / scale,
+    };
+  };
+  let page = 0;
+  const starts = [0];
+  const nextPage = (
+    pos: number,
+    top: number,
+    nodeSize?: number,
+    row = false,
+  ) => {
+    page++;
+    starts.push(pos);
+    const spacer = {
+      pos,
+      height: Math.max(0, page * pitch - top),
+      nodeSize,
+      row,
+    };
+    spacers.push(spacer);
+    render();
+    // Inline widgets split a line box. Correct for its actual browser height.
+    if (!nodeSize) {
+      const actualTop = row
+        ? ((view.nodeDOM(pos) as HTMLElement).getBoundingClientRect().top -
+            root.top) /
+          scale
+        : y(pos).top;
+      const correction = page * pitch - actualTop;
+      if (Math.abs(correction) > 0.5) {
+        spacer.height = Math.max(0, spacer.height + correction);
+        render();
+      }
+    }
+  };
+  doc.descendants((node, pos) => {
+    if (node.type.name === "table_row") {
+      const element = view.nodeDOM(pos) as HTMLElement;
+      const rect = element.getBoundingClientRect();
+      if (rect.height / scale <= bodyHeight) {
+        if ((rect.bottom - root.top) / scale > page * pitch + bodyHeight)
+          nextPage(pos, (rect.top - root.top) / scale, undefined, true);
+        return false;
+      }
+    }
+    if (node.type.name === "page_break") {
+      const element = view.nodeDOM(pos) as HTMLElement | null;
+      const top = element
+        ? (element.getBoundingClientRect().top - root.top) / scale
+        : y(pos).top;
+      nextPage(pos, top, node.nodeSize);
+      return false;
+    }
+    if (node.isTextblock) {
+      let from = pos + 1;
+      const end = pos + node.nodeSize - 1;
+      while (from <= end) {
+        const limit = page * pitch + bodyHeight;
+        if (y(end).bottom <= limit + 0.5) break;
+        // Find the first visual line that no longer fits on this page.
+        let lo = from,
+          hi = end;
         while (lo < hi) {
           const mid = (lo + hi) >>> 1;
-          if (column(mid) > page) hi = mid;
+          if (y(mid).bottom > limit + 0.5) hi = mid;
           else lo = mid + 1;
         }
-        // A boundary may not split the UTF-16 surrogate pair of a character.
-        let next = lo;
-        if (next > pos && /[\uDC00-\uDFFF]/.test(node.text![next - pos]))
-          next--;
-        // Browser caret geometry can report the two UTF-16 halves on opposite
-        // sides of a wrap. Always advance, keeping the pair on one side.
-        at = next > at ? next : lo + 1;
+        const top = y(lo).top;
+        // A single oversized line cannot fit on any page. Avoid endless reflow.
+        if (top >= page * pitch - 0.5 && y(lo).bottom - top > bodyHeight) break;
+        if (lo > from && /[\uDC00-\uDFFF]/.test(doc.textBetween(lo, lo + 1)))
+          lo--;
+        nextPage(lo, top);
+        from = lo + 1;
       }
-    } else if (node.type.name !== "page_break") {
-      const page = column(node.isTextblock ? pos + 1 : pos);
-      if (!starts.has(page)) starts.set(page, pos);
+      return false;
+    }
+    if (node.isBlock && node.isLeaf) {
+      const element = view.nodeDOM(pos) as HTMLElement | null;
+      if (element) {
+        const rect = element.getBoundingClientRect();
+        const top = (rect.top - root.top) / scale;
+        if (
+          (rect.bottom - root.top) / scale > page * pitch + bodyHeight &&
+          top > page * pitch + 1
+        )
+          nextPage(pos, top);
+      }
+      return false;
     }
   });
-  const max = Math.max(...starts.keys());
-  const boundaries = Array.from(
-    { length: max + 1 },
-    (_, i) => starts.get(i) ?? starts.get(i + 1) ?? view.state.doc.content.size,
-  );
-  return boundaries.map((from, i) => ({
+  return starts.map((from, i) => ({
     from,
-    to: boundaries[i + 1] ?? view.state.doc.content.size,
-    text: view.state.doc.textBetween(
-      from,
-      boundaries[i + 1] ?? view.state.doc.content.size,
-      "\n",
-    ),
+    to: starts[i + 1] ?? doc.content.size,
+    text: doc.textBetween(from, starts[i + 1] ?? doc.content.size, "\n"),
   }));
 }
 

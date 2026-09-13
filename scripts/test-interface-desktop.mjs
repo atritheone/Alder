@@ -4,7 +4,11 @@ import fs from "node:fs";
 
 const app = await electron.launch({
   executablePath: path.resolve("node_modules/electron/dist/electron.exe"),
-  args: [".", "--headless-test"],
+  args: [
+    ".",
+    "--headless-test",
+    `--user-data-dir=${path.resolve(`work/interface-ui-${Date.now()}`)}`,
+  ],
   env: {
     ...process.env,
     ALDER_DATA_DIR: path.resolve(`work/interface-desktop-${Date.now()}`),
@@ -74,7 +78,7 @@ try {
   await page.getByLabel("Reading speed", { exact: true }).fill("0.93");
   await page
     .locator(".document-reader")
-    .getByRole("button", { name: "Read", exact: true })
+    .getByRole("button", { name: "Play Reading", exact: true })
     .click();
   try {
     await expect
@@ -128,6 +132,48 @@ try {
   expect(observed.highlights).toBeGreaterThan(10);
   expect(observed.gain).toBeCloseTo(2);
   expect(observed.speed).toBeCloseTo(0.93);
+  const reader = page.locator(".document-reader");
+  await expect(
+    reader.getByRole("button", { name: "Read", exact: true }),
+  ).toHaveCount(0);
+  await expect(reader.locator("datalist")).toHaveCount(0);
+  await expect(speedSlider).toHaveCSS("background-image", "none");
+  expect((await speedInput.boundingBox()).width).toBeLessThan(55);
+  await reader
+    .getByRole("button", { name: "Pause Reading", exact: true })
+    .click();
+  await expect
+    .poll(() => reader.locator("audio").evaluate((a) => a.paused))
+    .toBe(true);
+  const originalSource = await reader.locator("audio").evaluate((a) => a.src);
+  await reader
+    .getByRole("button", { name: "Play Reading", exact: true })
+    .click();
+  await expect
+    .poll(() => reader.locator("audio").evaluate((a) => a.paused))
+    .toBe(false);
+  expect(await reader.locator("audio").evaluate((a) => a.src)).toBe(
+    originalSource,
+  );
+  await reader
+    .getByRole("button", { name: "Pause Reading", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Chapter text editor", exact: true })
+    .fill(
+      "This is new wording. Play should read the revised document, with no separate Read button.",
+    );
+  await reader
+    .getByRole("button", { name: "Play Reading", exact: true })
+    .click();
+  await expect
+    .poll(() => reader.locator("audio").evaluate((a) => a.src), {
+      timeout: 20000,
+    })
+    .not.toBe(originalSource);
+  await expect
+    .poll(() => reader.locator("audio").evaluate((a) => a.paused))
+    .toBe(false);
   expect(errors).toEqual([]);
   fs.writeFileSync(
     "work/interface-desktop-result.json",

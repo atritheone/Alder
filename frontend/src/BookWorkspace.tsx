@@ -1,4 +1,4 @@
-import { useMemo, useState, type RefObject } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -37,13 +37,12 @@ type Props = {
   previewKey: number;
 };
 export default function BookWorkspace(p: Props) {
-  const isBook =
-    !p.project.settings.documentKind ||
-    p.project.settings.documentKind === "book" ||
-    (p.project.book?.chapters.length || 0) > 1;
+  const isBook = !["txt", "docx"].includes(p.project.settings.documentKind);
   const chapters = p.project.book?.chapters || [];
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
   const [pages, setPages] = useState<FlowPage[]>([]);
+  const [pageNumber, setPageNumber] = useState("1");
+  useEffect(() => setPageNumber("1"), [chapter?.id]);
   const [zoom, setZoom] = useState(0.8);
   const [structure, setStructure] = useState(false);
   const [dragged, setDragged] = useState<number | null>(null);
@@ -226,9 +225,10 @@ export default function BookWorkspace(p: Props) {
             <div className="book-page-tools">
               <span>
                 {pages.length || 1} {pages.length === 1 ? "page" : "pages"} ·{" "}
-                {words(chapter.text)} words
+                {words(chapters.map((c) => c.text).join(" "))} Words
+                {isBook && ` · ${chapters.length} Chapters`}
               </span>
-              <span>Continuous chapter · pages flow automatically</span>
+
               <label>
                 Zoom{" "}
                 <select
@@ -316,6 +316,13 @@ export default function BookWorkspace(p: Props) {
                 annotations={p.annotations}
                 readingRange={readingRange}
                 pageLayout={layout}
+                onVisiblePage={(page) => {
+                  if (
+                    document.activeElement?.getAttribute("aria-label") !==
+                    "Go To Page"
+                  )
+                    setPageNumber(String(page + 1));
+                }}
                 onPages={(next) =>
                   setPages((old) =>
                     JSON.stringify(old) === JSON.stringify(next) ? old : next,
@@ -331,16 +338,37 @@ export default function BookWorkspace(p: Props) {
                 styles={p.project.styles}
               />
             </div>
-            <nav className="page-navigation" aria-label="Chapter pages">
-              {pages.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => p.editorRef.current?.navigatePage(i)}
-                >
-                  Page {i + 1}
-                </button>
-              ))}
-            </nav>
+            {p.view === "Write" && (
+              <form
+                className="page-navigation"
+                aria-label="Chapter Pages"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const value = Number(pageNumber);
+                  if (
+                    Number.isInteger(value) &&
+                    value >= 1 &&
+                    value <= Math.max(1, pages.length)
+                  )
+                    p.editorRef.current?.navigatePage(value - 1);
+                }}
+              >
+                <label>
+                  Page{" "}
+                  <input
+                    aria-label="Go To Page"
+                    type="number"
+                    min="1"
+                    max={Math.max(1, pages.length)}
+                    step="1"
+                    value={pageNumber}
+                    onChange={(e) => setPageNumber(e.target.value)}
+                    data-help="Type a page number and press Enter to go to that page."
+                  />
+                </label>
+                <span>of {Math.max(1, pages.length)}</span>
+              </form>
+            )}
           </>
         )}
       </div>

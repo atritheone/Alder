@@ -2,6 +2,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import {
   Search,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Library,
   Lightbulb,
@@ -16,12 +17,15 @@ import {
   Plus,
   GripVertical,
 } from "lucide-react";
+import ResizeHandle from "./ResizeHandle";
 import type { Project, Idea } from "./types";
 type Props = {
   project: Project;
   category: string;
   onCategory: (category: string) => void;
   voiceManager: ReactNode;
+  libraryManager: ReactNode;
+  onHide: () => void;
   ideas: Idea[];
   onInsert: (idea: Idea) => void;
   onSelectClip: (id: string) => void;
@@ -100,6 +104,8 @@ export default function Browser({
   category,
   onCategory: setCategory,
   voiceManager,
+  libraryManager,
+  onHide,
   ideas,
   onInsert,
   onSelectClip,
@@ -107,6 +113,30 @@ export default function Browser({
   onPanel,
   onHint,
 }: Props) {
+  const savedSize = (
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ) => {
+    const value = Number(localStorage.getItem(key) || fallback);
+    return Number.isFinite(value)
+      ? Math.max(min, Math.min(max, value))
+      : fallback;
+  };
+  const [navWidth, setNavWidth] = useState(() =>
+    savedSize("alder.collectionsWidth", 150, 100, 360),
+  );
+  const [filterHeight, setFilterHeight] = useState(() =>
+    savedSize("alder.filtersHeight", 155, 60, 500),
+  );
+  const managed = [
+    "Voices",
+    "Styles",
+    "Templates",
+    "Projects",
+    "Project Assets",
+  ].includes(category);
   const [filter, setFilter] = useState("All"),
     [search, setSearch] = useState(""),
     [selected, setSelected] = useState<Idea | null>(null),
@@ -141,7 +171,8 @@ export default function Browser({
     setCategory(name);
     setFilter("All");
     setSearch("");
-    if (["Styles", "Templates"].includes(name)) onPanel(name.toLowerCase());
+    if (["Styles", "Templates", "Projects", "Project Assets"].includes(name))
+      onPanel(name === "Project Assets" ? "assets" : name.toLowerCase());
   };
   return (
     <aside className="browser pane" aria-label="Language browser">
@@ -149,7 +180,7 @@ export default function Browser({
         <Search size={15} />
         <input
           aria-label="Search library"
-          placeholder="Search library (Ctrl+F)"
+          placeholder="Search Library (Ctrl+F)"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -158,9 +189,21 @@ export default function Browser({
             ×
           </button>
         )}
+        <button
+          aria-label="Toggle Left Panel"
+          aria-expanded="true"
+          onClick={onHide}
+          data-help="Hide the library panel. Use the arrow beside the writing area to show it again."
+        >
+          <ChevronLeft size={12} />
+        </button>
       </div>
       <div className="browser-main">
-        <nav className="browser-nav">
+        <nav
+          className="browser-nav"
+          aria-label="Collections And Library"
+          style={{ width: `min(${navWidth}px, calc(100% - 106px))` }}
+        >
           <div className="nav-label">Collections</div>
           <button
             className={category === "Favourites" ? "selected" : ""}
@@ -181,11 +224,17 @@ export default function Browser({
             </button>
           ))}
           <div className="nav-label separated">Places</div>
-          <button onClick={() => onPanel("projects")}>
+          <button
+            className={category === "Projects" ? "selected" : ""}
+            onClick={() => pickCategory("Projects")}
+          >
             <FolderOpen size={15} />
             Projects
           </button>
-          <button onClick={() => onPanel("assets")}>
+          <button
+            className={category === "Project Assets" ? "selected" : ""}
+            onClick={() => pickCategory("Project Assets")}
+          >
             <Library size={15} />
             Project Assets
           </button>
@@ -198,30 +247,58 @@ export default function Browser({
             Add an idea…
           </button>
         </nav>
+        <ResizeHandle
+          label="Resize Collections And Content"
+          orientation="vertical"
+          value={navWidth}
+          min={100}
+          max={360}
+          onChange={(value) => {
+            setNavWidth(value);
+            localStorage.setItem("alder.collectionsWidth", String(value));
+          }}
+        />
         <div className="browser-results">
-          {category !== "Voices" && (
+          {!managed && (
             <>
-              <div className="filter-header">
-                <ChevronDown size={13} /> Filters{" "}
-                <SlidersHorizontal size={13} />
-              </div>
-              <div className="filter-area">
-                <strong>{category}</strong>
-                <div className="filter-chips">
-                  {(category === "Language Tools"
-                    ? ["All", "Analysis", "Transform", "Speech"]
-                    : ideaCats
-                  ).map((f) => (
-                    <button
-                      key={f}
-                      className={filter === f ? "active" : ""}
-                      onClick={() => setFilter(f)}
-                    >
-                      {f}
-                    </button>
-                  ))}
+              <section
+                className="browser-filters"
+                aria-label="Library Filters"
+                style={{ height: filterHeight }}
+              >
+                <div className="filter-header">
+                  <ChevronDown size={13} /> Filters{" "}
+                  <SlidersHorizontal size={13} />
                 </div>
-              </div>
+                <div className="filter-area">
+                  <strong>{category}</strong>
+                  <div className="filter-chips">
+                    {(category === "Language Tools"
+                      ? ["All", "Analysis", "Transform", "Speech"]
+                      : ideaCats
+                    ).map((f) => (
+                      <button
+                        key={f}
+                        className={filter === f ? "active" : ""}
+                        onClick={() => setFilter(f)}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+              <ResizeHandle
+                label="Resize Filters And Content"
+                orientation="horizontal"
+                value={filterHeight}
+                min={60}
+                max={500}
+                onChange={(value) => {
+                  setFilterHeight(value);
+                  localStorage.setItem("alder.filtersHeight", String(value));
+                }}
+              />
               <div className="list-heading">
                 <span>Name</span>
                 <span>Type</span>
@@ -229,10 +306,15 @@ export default function Browser({
             </>
           )}
           <div className="library-list">
-            {category === "Voices" ? (
-              <section className="browser-voices" aria-label="Voice Management">
-                <h3>Voices</h3>
-                {voiceManager}
+            {managed ? (
+              <section
+                className="browser-voices library-manager"
+                aria-label={
+                  category === "Voices" ? "Voice Management" : category
+                }
+              >
+                <h3>{category}</h3>
+                {category === "Voices" ? voiceManager : libraryManager}
               </section>
             ) : (
               <>
@@ -353,7 +435,7 @@ export default function Browser({
           </div>
         </div>
       </div>
-      {category !== "Voices" && (
+      {!managed && (
         <div className="browser-preview">
           {selected ? (
             <>

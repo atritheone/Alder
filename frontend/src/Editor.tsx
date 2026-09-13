@@ -46,7 +46,7 @@ import {
 } from "prosemirror-tables";
 import { dropCursor } from "prosemirror-dropcursor";
 import {
-  measurePages,
+  paginatePages,
   rearrangePages,
   PAGE_GAP,
   type FlowPage,
@@ -411,6 +411,7 @@ type Props = {
   label?: string;
   pageLayout?: PageLayout;
   onPages?: (pages: FlowPage[]) => void;
+  onVisiblePage?: (page: number) => void;
   onFocus?: () => void;
   readingRange?: { start: number; end: number } | null;
   document: DocNode;
@@ -450,6 +451,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const [parseError, setParseError] = useState<string | null>(null),
     [rangeWarning, setRangeWarning] = useState("");
   const [version, tick] = useState(0);
+  const pageDecorations = useRef(DecorationSet.empty);
+  const measuredPages = useRef<FlowPage[]>([]);
   const [flowPages, setFlowPages] = useState<FlowPage[]>([]);
   const [pageInset, setPageInset] = useState(0);
   const selectedTextStyle = (state: EditorState) => {
@@ -572,7 +575,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         const v = editableView(),
           layout = latest.current.pageLayout;
         if (!v || !layout) return;
-        const pages = measurePages(v, layout),
+        const pages = measuredPages.current,
           target = pages[page];
         if (!target) return;
         v.dispatch(
@@ -582,7 +585,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         );
         const scroll = host.current?.closest(".editor-scroll");
         scroll?.scrollTo({
-          left: page * (layout.width + PAGE_GAP) * layout.zoom,
+          top: page * (layout.height + PAGE_GAP) * layout.zoom,
           behavior: "smooth",
         });
       },
@@ -593,7 +596,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         try {
           const next = rearrangePages(
             v.state.doc,
-            measurePages(v, layout),
+            measuredPages.current,
             from,
             to,
           );
@@ -710,10 +713,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     const doc =
       parsed.document || schema.node("doc", null, [schema.node("paragraph")]);
     lastJSON.current = JSON.stringify(props.document);
+    pageDecorations.current = DecorationSet.empty;
+    measuredPages.current = [];
     const v = new EditorView(host.current, {
       state: EditorState.create({
         doc,
         plugins: [
+          new Plugin({ props: { decorations: () => pageDecorations.current } }),
           history(),
           keymap({
             "Ctrl-Space": () => {
@@ -806,7 +812,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       dispatchTransaction(tr) {
         if (blocked.current && tr.docChanged) return;
         const next = v.state.apply(tr);
-        if (tr.docChanged) annotationSource.current = null;
+        if (tr.docChanged) {
+          annotationSource.current = null;
+          pageDecorations.current = pageDecorations.current.map(
+            tr.mapping,
+            next.doc,
+          );
+        }
         v.updateState(next);
         if (tr.docChanged) {
           setRangeWarning("");
@@ -896,6 +908,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       latest.current.onSelection("", "");
       const doc =
         parsed.document || schema.node("doc", null, [schema.node("paragraph")]);
+      pageDecorations.current = DecorationSet.empty;
       v.updateState(EditorState.create({ doc, plugins: v.state.plugins }));
       lastJSON.current = json;
     }
@@ -949,7 +962,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       frame = requestAnimationFrame(() => {
         if (!view.current) return;
         const layout = latest.current.pageLayout!;
-        const pages = measurePages(v, layout);
+        const pages = paginatePages(v, layout, (decorations) => {
+          pageDecorations.current = decorations;
+          v.updateState(v.state);
+        });
+        measuredPages.current = pages;
         setFlowPages((old) =>
           JSON.stringify(old) === JSON.stringify(pages) ? old : pages,
         );
@@ -1236,6 +1253,19 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         className={
           "editor-scroll" + (props.showStructure ? " show-structure" : "")
         }
+        onScroll={(e) => {
+          if (!props.pageLayout) return;
+          const pitch =
+            (props.pageLayout.height + PAGE_GAP) * props.pageLayout.zoom;
+          const page = Math.max(
+            0,
+            Math.min(
+              flowPages.length - 1,
+              Math.floor((e.currentTarget.scrollTop + 24) / pitch),
+            ),
+          );
+          props.onVisiblePage?.(page);
+        }}
         style={{
           fontFamily: props.fontFamily || "Cambria",
           fontSize: `${props.fontSize || 15}px`,
@@ -1251,9 +1281,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                 "--page-margin": `${props.pageLayout.margin}px`,
                 "--page-gap": `${PAGE_GAP}px`,
                 "--page-leading": props.pageLayout.lineHeight,
-                width:
+                width: props.pageLayout.width,
+                minHeight:
                   Math.max(1, flowPages.length) *
-                    (props.pageLayout.width + PAGE_GAP) -
+                    (props.pageLayout.height + PAGE_GAP) -
                   PAGE_GAP,
                 zoom: props.pageLayout.zoom,
                 marginInline: pageInset,

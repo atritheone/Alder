@@ -283,6 +283,11 @@ export type Voice = { id: string; name: string; [key: string]: any };
 declare global {
   interface Window {
     alder?: {
+      setNativeMenu: (
+        menus:
+          | { label: string; items: { id: string; label: string }[] }[]
+          | null,
+      ) => Promise<void>;
       readClipboard?: () => Promise<string>;
       request: (method: string, path: string, body?: unknown) => Promise<any>;
       upload: (
