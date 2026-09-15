@@ -101,6 +101,7 @@ def main():
     parser.add_argument("--chatterbox-source", type=Path, default=PROJECT / "chatterbox")
     parser.add_argument("--turbo-model", type=Path)
     parser.add_argument("--qa-model", type=Path)
+    parser.add_argument("--secondary-qa-model", type=Path, help="Optional pinned small.en snapshot for resolving ambiguous checks; no runtime download.")
     parser.add_argument("--ffmpeg-directory", type=Path)
     parser.add_argument("--verify", action="store_true", help="Verify bundled interpreter and import paths, without inference.")
     args = parser.parse_args()
@@ -133,6 +134,7 @@ def main():
     turbo_revision = copy_model(turbo, output / "models/turbo", ("ve.safetensors", "t3_turbo_v1.safetensors", "s3gen_meanflow.safetensors", "conds.pt", "added_tokens.json", "merges.txt", "special_tokens_map.json", "tokenizer_config.json", "vocab.json"))
     qa_deps = copy_runtime(args.qa_runtime, output / "qa/python", output)
     qa_revision = copy_model(qa_model, output / "qa/models/base.en", ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"))
+    secondary_revision = copy_model(args.secondary_qa_model, output / "qa/models/small.en", ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt")) if args.secondary_qa_model else None
     (output / "ffmpeg").mkdir(exist_ok=True)
     for name in ("ffmpeg.exe", "ffprobe.exe"):
         shutil.copyfile(ffmpeg_dir / name, output / "ffmpeg" / name)
@@ -147,7 +149,7 @@ def main():
     inspect_portability(output)
     if args.verify:
         verify_runtime(output)
-    manifest = {"schemaVersion": 1, "turboRevision": turbo_revision, "qaRevision": qa_revision, "sourceFingerprint": digest.hexdigest(), "synthesisDependencies": synthesis_deps, "qaDependencies": qa_deps, "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "sizeBytes": sum(path.stat().st_size for path in output.rglob("*") if path.is_file()), "buildSeconds": round(time.monotonic() - started, 2), "portableImportsVerified": args.verify}
+    manifest = {"schemaVersion": 1, "turboRevision": turbo_revision, "qaRevision": qa_revision, "secondaryQaRevision": secondary_revision, "sourceFingerprint": digest.hexdigest(), "synthesisDependencies": synthesis_deps, "qaDependencies": qa_deps, "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "sizeBytes": sum(path.stat().st_size for path in output.rglob("*") if path.is_file()), "buildSeconds": round(time.monotonic() - started, 2), "portableImportsVerified": args.verify}
     (output / "bundle-manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps({key: value for key, value in manifest.items() if key not in ("synthesisDependencies", "qaDependencies")}))
 

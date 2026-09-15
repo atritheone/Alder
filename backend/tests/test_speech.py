@@ -270,7 +270,9 @@ def test_qa_comparison_does_not_hide_meaning_or_spelling_changes():
     assert compare_transcript("Hello, CAFÉ!", "hello café")["matched"]
     assert not compare_transcript("I need patience at the site.", "Eye need patients at the sight.")["matched"]
     assert not compare_transcript("It's its colour.", "Its it's color.")["matched"]
-    assert not compare_transcript("He paid 12.", "He paid twelve.")["matched"]
+    assert compare_transcript("He paid 12.", "He paid twelve.")["matched"]
+    assert not compare_transcript("He paid 12.", "He paid thirteen.")["matched"]
+    assert compare_transcript("Favourite colour at the theatre.", "Favorite color at the theater.")["matched"]
     assert not compare_transcript("", "")["matched"]
     result = compare_transcript("One two three.", "One three four.")
     assert result["wordErrorRate"] == pytest.approx(2 / 3)

@@ -281,6 +281,7 @@ class ChatterboxTurboTTS:
         temperature=0.8,
         top_k=1000,
         norm_loudness=True,
+        cancelled=None,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
@@ -292,7 +293,11 @@ class ChatterboxTurboTTS:
 
         # Norm and tokenize text
         text = punc_norm(text)
-        text_tokens = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+        if len(text) > 240 or len(text.split()) > 45:
+            raise ValueError("Speech input exceeds the safe section limit after normalization.")
+        text_tokens = self.tokenizer(text, return_tensors="pt", padding=True, truncation=False)
+        if text_tokens.input_ids.shape[-1] > 256:
+            raise ValueError("Speech input exceeds the safe tokenizer limit.")
         text_tokens = text_tokens.input_ids.to(self.device)
 
         speech_tokens = self.t3.inference_turbo(
@@ -302,6 +307,7 @@ class ChatterboxTurboTTS:
             top_k=top_k,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            cancelled=cancelled,
         )
 
         # Remove OOV tokens and add silence to end
@@ -310,6 +316,8 @@ class ChatterboxTurboTTS:
         silence = torch.tensor([S3GEN_SIL, S3GEN_SIL, S3GEN_SIL]).long().to(self.device)
         speech_tokens = torch.cat([speech_tokens, silence])
 
+        if cancelled and cancelled():
+            raise InterruptedError("Speech generation cancelled.")
         wav, _ = self.s3gen.inference(
             speech_tokens=speech_tokens,
             ref_dict=self.conds.gen,

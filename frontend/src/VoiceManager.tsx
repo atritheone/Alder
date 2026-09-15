@@ -1,3 +1,5 @@
+import { useSpeechJob } from "./useSpeechJob";
+import { useSpeechTransport } from "./useSpeechTransport";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AudioLines, LoaderCircle, Play, Square } from "lucide-react";
 import { api, mediaUrl } from "./api";
@@ -14,7 +16,6 @@ type Props = {
 export default function VoiceManager(p: Props) {
   const [all, setAll] = useState(p.voices);
   const [selectedId, setSelectedId] = useState(p.voices[0]?.id || "default");
-  const [showRemoved, setShowRemoved] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -25,16 +26,18 @@ export default function VoiceManager(p: Props) {
   const loaded = useRef("");
   const request = useRef(0);
   const resumeAudio = useNarrationGain(audio);
+  const stopRef = useRef(() => {});
+  const transport = useSpeechTransport(audio, () => stopRef.current());
   useLayoutEffect(
     () => p.onPlaybackChange(playing),
     [playing, p.onPlaybackChange],
   );
   useEffect(() => () => p.onPlaybackChange(false), [p.onPlaybackChange]);
-  const visible = all.filter((v) => showRemoved || !v.removed);
+  const visible = all.filter((v) => !v.removed);
   const selected = visible.find((v) => v.id === selectedId) || visible[0];
   useEffect(() => {
     let live = true;
-    api<{ voices: Voice[] }>("/api/speech/voices?includeRemoved=true")
+    api<{ voices: Voice[] }>("/api/speech/voices")
       .then((r) => {
         if (live) setAll(r.voices);
       })
@@ -56,9 +59,7 @@ export default function VoiceManager(p: Props) {
     [],
   );
   const refresh = async (removedId?: string) => {
-    const result = await api<{ voices: Voice[] }>(
-      "/api/speech/voices?includeRemoved=true",
-    );
+    const result = await api<{ voices: Voice[] }>("/api/speech/voices");
     setAll(result.voices);
     p.onChange(
       result.voices.filter((v) => !v.removed),
@@ -68,6 +69,7 @@ export default function VoiceManager(p: Props) {
   };
   const stopTest = () => {
     request.current++;
+    transport.stop();
     audio.current?.pause();
     setTesting(false);
     setPlaying(false);
@@ -86,6 +88,7 @@ export default function VoiceManager(p: Props) {
       return;
     }
     const attempt = ++request.current;
+    transport.prepare();
     setError("");
     setTesting(true);
     setJob(null);
@@ -99,7 +102,7 @@ export default function VoiceManager(p: Props) {
           text: "This is how this voice sounds when reading in Alder.",
           voiceId: selected.id,
           format: "wav",
-          verify: false,
+          verify: true,
         },
       );
       if (attempt !== request.current) {
@@ -114,34 +117,15 @@ export default function VoiceManager(p: Props) {
       }
     }
   };
-  useEffect(() => {
-    if (
-      !testing ||
-      !job ||
-      ["ready", "failed", "cancelled", "interrupted"].includes(job.status)
-    )
-      return;
-    let live = true;
-    const timer = setInterval(() => {
-      void api<Job>(`/api/speech/jobs/${job.id}`)
-        .then((next) => {
-          if (live) setJob(next);
-        })
-        .catch((e) => {
-          if (live) {
-            setError(e.message);
-            setTesting(false);
-          }
-        });
-    }, 500);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-  }, [job?.id, job?.status, testing]);
+  useSpeechJob(job, setJob);
+  stopRef.current = stopTest;
   useEffect(() => {
     if (!testing || !job) return;
-    if (["failed", "cancelled", "interrupted"].includes(job.status)) {
+    if (
+      ["failed", "cancelled", "interrupted", "needs_review"].includes(
+        job.status,
+      )
+    ) {
       setTesting(false);
       setError(
         job.error || "Voice test could not finish. Press Test to try again.",
@@ -151,19 +135,19 @@ export default function VoiceManager(p: Props) {
     const chunk = job.chunks[0];
     if (
       chunk?.audioUrl &&
-      chunk.status === "ready" &&
+      chunk.playbackEligible &&
       loaded.current !== job.id &&
       audio.current
     ) {
       loaded.current = job.id;
       audio.current.src = mediaUrl(chunk.audioUrl);
-      void audio.current.play().catch((e) => {
+      void transport.play().catch((e) => {
         setError(e.message);
         setTesting(false);
       });
     }
   }, [job, testing]);
-  const update = async (action: "rename" | "remove" | "restore") => {
+  const update = async (action: "rename" | "remove") => {
     if (!selected) return;
     setBusy(true);
     setError("");
@@ -172,11 +156,7 @@ export default function VoiceManager(p: Props) {
       await api(
         `/api/speech/voices/${encodeURIComponent(selected.id)}`,
         action === "remove" ? "DELETE" : "PUT",
-        action === "rename"
-          ? { name: name.trim() }
-          : action === "restore"
-            ? { removed: false }
-            : undefined,
+        action === "rename" ? { name: name.trim() } : undefined,
       );
       await refresh(action === "remove" ? selected.id : undefined);
     } catch (e) {
@@ -194,17 +174,6 @@ export default function VoiceManager(p: Props) {
       >
         Add Reference Voice…
       </button>
-      <label
-        className="removed-voices-toggle"
-        data-help="Show voices removed from Alder. Select one and choose Restore to make it available again."
-      >
-        <input
-          type="checkbox"
-          checked={showRemoved}
-          onChange={(e) => setShowRemoved(e.target.checked)}
-        />
-        Show Removed Voices
-      </label>
       <div className="voice-selector" aria-label="Available Voices">
         {visible.map((v) => (
           <button
@@ -215,6 +184,9 @@ export default function VoiceManager(p: Props) {
             onClick={() => {
               if (v.id !== selected?.id) stopTest();
               setSelectedId(v.id);
+              void api("/api/speech/prepare", "POST", { voiceId: v.id }).catch(
+                () => {},
+              );
             }}
           >
             <AudioLines size={15} />
@@ -276,24 +248,14 @@ export default function VoiceManager(p: Props) {
               )}
               {testing ? "Stop Test" : "Test"}
             </button>
-            {selected.removed ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void update("restore")}
-              >
-                Restore
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={busy || all.filter((v) => !v.removed).length <= 1}
-                data-help="Remove this voice from Alder's library. It can be restored using Show Removed Voices. Windows installations and saved narration are kept. At least one voice must remain available."
-                onClick={() => void update("remove")}
-              >
-                Remove
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={busy || all.filter((v) => !v.removed).length <= 1}
+              data-help="Remove this voice from Alder's library. Windows installations and saved narration are kept. At least one voice must remain available."
+              onClick={() => void update("remove")}
+            >
+              Remove
+            </button>
           </div>
         </form>
       )}
@@ -301,7 +263,8 @@ export default function VoiceManager(p: Props) {
       <audio
         ref={audio}
         crossOrigin="anonymous"
-        onPlay={() => {
+        onPlay={(event) => {
+          if (event.currentTarget.paused || !transport.intent) return;
           resumeAudio();
           setPlaying(true);
         }}

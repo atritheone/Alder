@@ -1,5 +1,7 @@
 # Alder speech implementation and verified baseline
 
+Historical baseline. The current pipeline requires content acceptance before playback, uses bounded generation and checking, and shares one playback controller. See [building.md](building.md) for current verification and benchmark commands; generated results stay in ignored `work/` directories.
+
 Verified 10 September 2026. Alder uses the existing local Chatterbox Turbo source through `backend/alder/speech_worker.py`. The writing service imports no Torch or speech model. It starts one owned, hidden worker only when an uncached narration chunk needs generation.
 
 ## Implemented behaviour

@@ -3,3 +3,5 @@
 ## todo
 
 add pronunciation modification with dictionaries
+
+add rich text reading and toggle

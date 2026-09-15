@@ -2,10 +2,14 @@
 from difflib import SequenceMatcher
 import re
 
+TIMING_VERSION = 2
+
 
 def word_timings(written, spoken, words, mappings=()):
+    from .speech_comparison import canonical_tokens
     expected = list(re.finditer(r"\w+(?:['’]\w+)*", spoken, re.UNICODE))
-    recognised = [(word, match.group().casefold()) for word in words for match in re.finditer(r"\w+(?:['’]\w+)*", word.get("text", ""), re.UNICODE)]
+    recognised = [(word, token) for word in words for token in canonical_tokens(word.get("text", ""))]
+    expected = [(match, token) for match in expected for token in canonical_tokens(match.group())]
     result = []
     def original_span(start, end):
         delta = 0
@@ -16,13 +20,13 @@ def word_timings(written, spoken, words, mappings=()):
             if b <= start:
                 delta += (mapping["sourceEnd"] - mapping["sourceStart"]) - (b - a)
         return start + delta, end + delta
-    matcher = SequenceMatcher(None, [m.group().casefold() for m in expected], [v for _, v in recognised], autojunk=False)
+    matcher = SequenceMatcher(None, [token for _, token in expected], [v for _, v in recognised], autojunk=False)
     for block in matcher.get_matching_blocks():
         for offset in range(block.size):
-            match = expected[block.a + offset]
+            match = expected[block.a + offset][0]
             word = recognised[block.b + offset][0]
             start, end = original_span(match.start(), match.end())
-            if 0 <= start < end <= len(written):
+            if 0 <= start < end <= len(written) and not re.search(r"\s", written[start:end]):
                 result.append({"text": written[start:end], "sourceStart": start, "sourceEnd": end,
                     "startSeconds": word["startSeconds"], "endSeconds": word["endSeconds"]})
     return result

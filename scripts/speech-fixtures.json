@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "short": "The reader followed each word across the page.",
+  "corpus": [
+    "Alder reads each word clearly. We can stop and continue without losing our place.",
+    "Dr. Smith paused beside the open door. She asked, “Are you ready?” Then the quiet room filled with conversation.",
+    "The colour of the theatre curtains was her favourite detail. A neighbour stood in the centre of the room.",
+    "There were 24 books on the shelf and 105 letters in the drawer. The second box contained forty seven cards.",
+    "🌲 The café opened early. We walked   slowly through the garden, then returned to the table.\n\nAnother paragraph begins here.",
+    "The patient waited patiently. Patience helped the patient remain calm. Their words mattered, and there was time to listen.",
+    "We crossed the valley before the rain arrived and followed a narrow path towards the old stone bridge, where the river bent around a field of tall grass and the evening light settled on the water."
+  ],
+  "sustained": "The morning light falls across the wooden table, where a small book lies open beside a cup of tea. Beyond the window, branches move gently in the wind. The reader turns a page and follows the story into a quiet garden. Nothing hurries the moment, and each sentence leads naturally to the next. A bird calls from the wall, then flies towards the trees."
+}

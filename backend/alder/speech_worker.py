@@ -26,7 +26,7 @@ def main():
         request = {}
         try:
             request = json.loads(line)
-            if request.get("operation") != "generate":
+            if request.get("operation") not in ("generate", "prepare"):
                 raise ValueError("Unsupported worker operation.")
             with redirect_stdout(sys.stderr):
                 import numpy as np
@@ -55,6 +55,14 @@ def main():
                     conditionals[voice_key] = model.conds
                     if len(conditionals) > 8:
                         conditionals.popitem(last=False)
+                if request["operation"] == "prepare":
+                    protocol.write(json.dumps({"id": request.get("id"), "ok": True, "health": health}) + "\n")
+                    protocol.flush()
+                    continue
+                cancel_path = Path(request["cancelPath"]) if request.get("cancelPath") else None
+                cancelled = lambda: bool(cancel_path and cancel_path.exists())
+                if cancelled():
+                    raise InterruptedError("Speech generation cancelled.")
                 seed = int(request["seed"])
                 random.seed(seed)
                 np.random.seed(seed)
@@ -64,10 +72,12 @@ def main():
                 settings = request.get("settings", {})
                 started = time.perf_counter()
                 with torch.inference_mode():
-                    wav = model.generate(request["text"], temperature=settings.get("temperature", .8), top_p=settings.get("topP", .95), top_k=settings.get("topK", 1000), repetition_penalty=settings.get("repetitionPenalty", 1.2))
+                    wav = model.generate(request["text"], temperature=settings.get("temperature", .8), top_p=settings.get("topP", .95), top_k=settings.get("topK", 1000), repetition_penalty=settings.get("repetitionPenalty", 1.2), cancelled=cancelled)
                 samples = wav.squeeze(0).detach().cpu().numpy()
                 if samples.ndim != 1 or not len(samples) or not np.isfinite(samples).all() or np.max(np.abs(samples)) < .00001:
                     raise RuntimeError("Chatterbox returned empty, silent, or invalid audio.")
+                if cancelled():
+                    raise InterruptedError("Speech generation cancelled.")
                 output = Path(request["output"])
                 output.parent.mkdir(parents=True, exist_ok=True)
                 temporary = output.with_name(output.name + ".tmp")
@@ -75,7 +85,9 @@ def main():
                 with temporary.open("rb+") as handle:
                     os.fsync(handle.fileno())
                 os.replace(temporary, output)
-                response = {"id": request.get("id"), "ok": True, "seconds": len(samples) / model.sr, "generationSeconds": round(time.perf_counter() - started, 3), "health": health}
+                response = {"id": request.get("id"), "ok": True, "seconds": len(samples) / model.sr, "generationSeconds": round(time.perf_counter() - started, 3), "health": health, "generation": model.t3.last_generation}
+        except InterruptedError as exc:
+            response = {"id": request.get("id"), "ok": False, "cancelled": True, "error": str(exc)}
         except Exception as exc:
             traceback.print_exc(file=sys.stderr)
             response = {"id": request.get("id"), "ok": False, "error": f"{type(exc).__name__}: {exc}"}

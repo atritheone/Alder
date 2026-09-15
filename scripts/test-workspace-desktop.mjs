@@ -284,9 +284,15 @@ try {
       exact: true,
     })
     .click();
+  await expect(
+    voiceLibrary.getByLabel("Voice Name", { exact: true }),
+  ).toHaveValue(systemVoice.name);
   await voiceLibrary
     .getByLabel("Voice Name", { exact: true })
     .fill("Library Reading Voice");
+  await expect(
+    voiceLibrary.getByLabel("Voice Name", { exact: true }),
+  ).toHaveValue("Library Reading Voice");
   await voiceLibrary
     .getByRole("button", { name: "Rename", exact: true })
     .click();
@@ -306,28 +312,34 @@ try {
     })
     .toBeGreaterThan(0.05);
   await expect(writing).toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".persistent-caret .write-caret")).toHaveCSS(
+    "visibility",
+    "hidden",
+  );
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await voiceLibrary
     .getByRole("button", { name: "Stop Voice Test", exact: true })
     .click();
-  await expect(writing).not.toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".persistent-caret .write-caret")).toHaveCSS(
+    "visibility",
+    "visible",
+  );
   await voiceLibrary
     .getByRole("button", { name: "Remove", exact: true })
     .click();
   await expect(readingVoiceOption).toHaveCount(0);
-  await voiceLibrary
-    .getByRole("checkbox", { name: "Show Removed Voices", exact: true })
-    .check();
-  await voiceLibrary
-    .getByRole("button", {
+  await expect(
+    voiceLibrary.getByRole("checkbox", {
+      name: "Show Removed Voices",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    voiceLibrary.getByRole("button", {
       name: "Select Voice Library Reading Voice",
       exact: true,
-    })
-    .click();
-  await voiceLibrary
-    .getByRole("button", { name: "Restore", exact: true })
-    .click();
-  await expect(readingVoiceOption).toHaveText("Library Reading Voice");
+    }),
+  ).toHaveCount(0);
   await browser.getByLabel("Written Word Or Expression").fill("Alder");
   await browser.getByLabel("Speak As").fill("All der");
   await browser

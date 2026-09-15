@@ -84,6 +84,48 @@ try {
   await writing.press("Control+Home");
   for (let i = 0; i < "Skip these words. ".length; i++)
     await writing.press("ArrowRight");
+  const caret = page.locator(".persistent-caret .write-caret");
+  await expect(caret).toHaveCount(1);
+  await expect(caret).toHaveCSS("visibility", "visible");
+  const nativeCaret = await writing.evaluate(() => {
+    const box = document.getSelection().getRangeAt(0).getBoundingClientRect();
+    return { x: box.x, y: box.y };
+  });
+  const caretBeforeBlur = await caret.boundingBox();
+  expect(Math.abs(caretBeforeBlur.x - nativeCaret.x)).toBeLessThan(1);
+  expect(Math.abs(caretBeforeBlur.y - nativeCaret.y)).toBeLessThan(1);
+  await speedInput.focus();
+  await expect(writing).not.toBeFocused();
+  await expect(caret).toHaveCSS("visibility", "visible");
+  expect(await caret.boundingBox()).toEqual(caretBeforeBlur);
+  const caretStyle = await caret.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      animation: style.animationName,
+      width: style.width,
+      content: el.textContent,
+    };
+  });
+  expect(caretStyle.animation).toBe("none");
+  expect(caretStyle.content).toBe("");
+  expect(parseFloat(caretStyle.width)).toBeCloseTo(1, 1);
+  const caretScreenshot = await app.evaluate(async ({ BrowserWindow }) =>
+    (
+      await BrowserWindow.getAllWindows()[0].webContents.capturePage(
+        undefined,
+        {
+          stayHidden: true,
+          stayAwake: true,
+        },
+      )
+    )
+      .toPNG()
+      .toString("base64"),
+  );
+  fs.writeFileSync(
+    "work/write-caret-desktop.png",
+    Buffer.from(caretScreenshot, "base64"),
+  );
 
   // Present the first job as interrupted, with a delayed response. Resuming
   // must reuse that job through the real resume API instead of creating anew.
@@ -103,11 +145,33 @@ try {
         globalThis.readingResumeProbe.first = false;
         const job = await response.json();
         globalThis.readingResumeProbe.jobId = job.id;
+        const stopped = await request(
+          new URL(`/api/speech/jobs/${job.id}/cancel`, url),
+          { method: "POST", headers: args[1].headers },
+        );
+        const saved = await stopped.json();
         await new Promise((resolve) => setTimeout(resolve, 600));
-        return Response.json({ ...job, status: "interrupted" });
+        return Response.json(saved);
       }
       return response;
     };
+  });
+  await page.evaluate(() => {
+    window.speechBoundaryMetrics = [];
+    const media = document.querySelector(".document-reader audio");
+    let ended;
+    media.addEventListener("ended", () => {
+      ended = { time: performance.now(), pause: 180 / media.playbackRate, job: media.src.split("/chunks/")[0] };
+    });
+    media.addEventListener("playing", () => {
+      if (ended && ended.job === media.src.split("/chunks/")[0]) {
+        window.speechBoundaryMetrics.push({
+          gapMilliseconds: performance.now() - ended.time,
+          intendedPauseMilliseconds: ended.pause,
+        });
+      }
+      ended = undefined;
+    });
   });
   await expect(page.getByLabel("Reading audio format")).toHaveCount(0);
   await expect(
@@ -159,9 +223,11 @@ try {
     throw error;
   }
   await expect(writing).toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+  await expect(caret).toHaveCSS("visibility", "hidden");
   const follow = page.getByRole("checkbox", { name: /Follow Text/i });
   await follow.uncheck();
   await expect(writing).toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+  await expect(caret).toHaveCSS("visibility", "hidden");
   await follow.check();
   const speech = await page.evaluate(async () => {
     const id = document
@@ -224,7 +290,7 @@ try {
   await expect
     .poll(() => reader.locator("audio").evaluate((a) => a.paused))
     .toBe(true);
-  await expect(writing).not.toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+  await expect(caret).toHaveCSS("visibility", "visible");
   const pausedCaret = await page.evaluate(async () => {
     const editor = document.querySelector('[aria-label="Chapter text editor"]');
     const selection = window.getSelection();
@@ -250,6 +316,37 @@ try {
   expect(pausedCaret.collapsed).toBe(true);
   expect(pausedCaret.offset).toBe(pausedCaret.expected);
   expect(pausedCaret.offset).toBeGreaterThan("Skip these words. ".length);
+  const controlMetrics = await page.evaluate(async () => {
+    const root = document.querySelector(".document-reader");
+    const audio = root.querySelector("audio");
+    const pause = [],
+      resume = [];
+    for (let i = 0; i < 20; i++) {
+      let started = performance.now();
+      root.querySelector('[aria-label="Play Reading"]').click();
+      while (audio.paused) await new Promise((r) => setTimeout(r, 1));
+      resume.push(performance.now() - started);
+      await new Promise((r) => setTimeout(r, 20));
+      started = performance.now();
+      root.querySelector('[aria-label="Pause Reading"]').click();
+      pause.push(performance.now() - started);
+      if (!audio.paused)
+        throw new Error(
+          "Pause did not silence the media element synchronously",
+        );
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    return {
+      pauseMilliseconds: pause,
+      resumeMilliseconds: resume,
+      baseLatencySeconds: window.playbackProbe.context.baseLatency,
+      outputLatencySeconds: window.playbackProbe.context.outputLatency,
+    };
+  });
+  fs.writeFileSync(
+    path.resolve("work/speech-control-metrics.json"),
+    JSON.stringify(controlMetrics, null, 2),
+  );
   const originalSource = await reader.locator("audio").evaluate((a) => a.src);
   await reader
     .getByRole("button", { name: "Play Reading", exact: true })
@@ -320,6 +417,63 @@ try {
   await expect
     .poll(() => reader.locator("audio").evaluate((a) => a.paused))
     .toBe(false);
+  await reader
+    .getByRole("button", { name: "Stop reading", exact: true })
+    .click();
+  await app.evaluate(() => {
+    const prior = globalThis.fetch;
+    globalThis.fetch = async (...args) => {
+      const response = await prior(...args);
+      if (
+        /\/api\/projects\/[^/]+\/speech$/.test(String(args[0])) &&
+        args[1]?.method === "POST"
+      )
+        await new Promise((r) => setTimeout(r, 1200));
+      return response;
+    };
+  });
+  await writing.fill(
+    "A delayed reading must stay paused until the user presses play again.",
+  );
+  await writing.press("Control+Home");
+  await reader
+    .getByRole("button", { name: "Play Reading", exact: true })
+    .click();
+  await reader
+    .getByRole("button", { name: "Loading Reading", exact: true })
+    .click();
+  await expect(
+    reader.getByRole("button", { name: "Play Reading", exact: true }),
+  ).toBeVisible();
+  await page.waitForTimeout(1600);
+  expect(await reader.locator("audio").evaluate((a) => a.paused)).toBe(true);
+  await reader
+    .getByRole("button", { name: "Play Reading", exact: true })
+    .click();
+  await expect
+    .poll(() => reader.locator("audio").evaluate((a) => a.paused))
+    .toBe(false);
+  await reader
+    .getByRole("button", { name: "Stop reading", exact: true })
+    .click();
+  for (const rate of [0.25, 1, 3]) {
+    await speedInput.fill(rate.toFixed(2));
+    await speedInput.press("Enter");
+    await expect
+      .poll(() => reader.locator("audio").evaluate((a) => a.playbackRate))
+      .toBe(rate);
+    expect(
+      await reader.locator("audio").evaluate((a) => a.preservesPitch),
+    ).toBe(true);
+  }
+  fs.writeFileSync(
+    "work/speech-boundary-metrics.json",
+    JSON.stringify(
+      await page.evaluate(() => window.speechBoundaryMetrics),
+      null,
+      2,
+    ),
+  );
   expect(errors).toEqual([]);
   fs.writeFileSync(
     "work/interface-desktop-result.json",

@@ -41,17 +41,18 @@ public class AlderSapi {
 '''
 
 
-def _call(request):
-    if os.name != "nt":
-        raise ValueError("Windows SAPI voices are available on Windows only.")
-    import base64
-    shell = Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    result = subprocess.run([str(shell), "-NoProfile", "-NonInteractive", "-EncodedCommand", base64.b64encode(SCRIPT.encode("utf-16-le")).decode()],
-        input=json.dumps(request, ensure_ascii=True), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
-        creationflags=subprocess.CREATE_NO_WINDOW)
-    if result.returncode:
-        raise RuntimeError("Windows speech failed: " + result.stderr[-1500:])
-    return json.loads(result.stdout.lstrip("\ufeff") or "[]")
+def _call(payload):
+    from .sapi_host import request
+    return request(SCRIPT, payload)
+
+
+def prepare():
+    return _call({"operation": "prepare"})
+
+
+def shutdown():
+    from .sapi_host import shutdown as close
+    close()
 
 
 @lru_cache(maxsize=1)

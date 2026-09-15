@@ -1,4 +1,10 @@
 import {
+  useSpeechJob,
+  useSpeechDemand,
+  codePointOffsets,
+} from "./useSpeechJob";
+import { useSpeechTransport } from "./useSpeechTransport";
+import {
   useEffect,
   useLayoutEffect,
   useRef,
@@ -33,10 +39,14 @@ type Props = {
   onHighlight: (range: { start: number; end: number } | null) => void;
 };
 type Snapshot = {
-  chapters: { id: string; text: string; offset: number; base: number }[];
+  chapters: {
+    id: string;
+    text: string;
+    offset: number;
+    base: number;
+    offsets: number[];
+  }[];
 };
-const utf16 = (text: string, codePoints: number) =>
-  Array.from(text).slice(0, codePoints).join("").length;
 export default function DocumentReader(p: Props) {
   const [voices, setVoices] = useState<Voice[]>([
       { id: "default", name: "Chatterbox Turbo", kind: "builtin" },
@@ -65,12 +75,42 @@ export default function DocumentReader(p: Props) {
         (n, c) => n + (c.seconds || 0) + (job.settings?.pauseSeconds ?? 0.18),
         0,
       );
-  const playable = !!job?.chunks.some((c) => c.status === "ready");
+  const playable = !!job?.chunks.some((c) => c.playbackEligible);
   const [pitch, setPitch] = useState(0);
   const audio = useRef<HTMLAudioElement>(null),
     snapshot = useRef<Snapshot | null>(null),
     loaded = useRef("");
   const resumeAudio = useNarrationGain(audio, volume);
+  const stopRef = useRef(() => {});
+  const transport = useSpeechTransport(audio, () => stopRef.current());
+  const playAudio = () => {
+    transport.intent = shouldPlay.current;
+    return transport.play().catch((error) => {
+      shouldPlay.current = false;
+      setBuffering(false);
+      setPlaying(false);
+      throw error;
+    });
+  };
+  const nextAudio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    const next = job?.chunks[chunkIndex + 1];
+    if (!next?.playbackEligible || !next.audioUrl) return;
+    const element = new Audio(mediaUrl(next.audioUrl));
+    element.preload = "auto";
+    element.crossOrigin = "anonymous";
+    nextAudio.current = element;
+    element.load();
+    return () => {
+      element.removeAttribute("src");
+      element.load();
+      nextAudio.current = null;
+    };
+  }, [
+    job?.chunks[chunkIndex + 1]?.audioUrl,
+    job?.chunks[chunkIndex + 1]?.playbackEligible,
+    chunkIndex,
+  ]);
   const [range, setRange] = useState<{ start: number; end: number } | null>(
     null,
   );
@@ -93,36 +133,45 @@ export default function DocumentReader(p: Props) {
     window.addEventListener("alder-voices-changed", refresh);
     return () => window.removeEventListener("alder-voices-changed", refresh);
   }, []);
-  useEffect(() => {
-    if (
-      !job ||
-      ["ready", "failed", "cancelled", "interrupted"].includes(job.status)
-    )
-      return;
-    let cancelled = false;
-    const timer = setInterval(
-      () =>
-        api<Job>(`/api/speech/jobs/${job.id}`)
-          .then((next) => {
-            if (!cancelled) setJob(next);
-          })
-          .catch((e) => {
-            if (!cancelled) setError(e.message);
-          }),
-      700,
-    );
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [job?.id, job?.status]);
+  useSpeechJob(job, setJob);
+  useSpeechDemand(
+    job?.id,
+    chunkIndex,
+    speed,
+    active ? (playing || shouldPlay.current ? "playing" : "paused") : "stopped",
+  );
   useEffect(() => {
     const chunk = job?.chunks[chunkIndex];
     const key = job ? `${job.id}:${chunkIndex}` : "";
     if (
+      job &&
+      chunk &&
+      !loaded.current &&
+      shouldPlay.current &&
+      !["ready", "needs_review", "failed", "cancelled", "interrupted"].includes(
+        job.status,
+      ) &&
+      (chunk.processingSeconds || 0) > (chunk.seconds || 1) / speed
+    ) {
+      const ready = [];
+      for (const next of job.chunks.slice(chunkIndex)) {
+        if (!next.playbackEligible) break;
+        ready.push(next);
+      }
+      // Slow hardware and fast listening need a small initial buffer. Bounds
+      // remain below the scheduler's eight-section limit; never wait past an
+      // unresolved passage, and leave retained/decoded resume immediate.
+      if (
+        ready.length < Math.min(3, job.chunks.length - chunkIndex) &&
+        ready.reduce((seconds, c) => seconds + (c.seconds || 0), 0) < 4 * speed
+      )
+        return;
+    }
+
+    if (
       active &&
       !fullAudio.current &&
-      chunk?.status === "ready" &&
+      chunk?.playbackEligible &&
       chunk.audioUrl &&
       loaded.current !== key &&
       audio.current
@@ -131,9 +180,9 @@ export default function DocumentReader(p: Props) {
       audio.current.src = mediaUrl(chunk.audioUrl);
       audio.current.playbackRate = speed;
       if (shouldPlay.current)
-        audio.current
-          .play()
-          .catch(() => setError("Audio is ready. Press Play to listen."));
+        playAudio().catch(() =>
+          setError("Audio is ready. Press Play to listen."),
+        );
     }
   }, [job, chunkIndex, active]);
   useEffect(() => {
@@ -189,11 +238,8 @@ export default function DocumentReader(p: Props) {
             const base = (chunk.sourceStart || 0) - source.offset;
             next = {
               start:
-                source.base +
-                utf16(source.text.slice(source.base), base + word.sourceStart),
-              end:
-                source.base +
-                utf16(source.text.slice(source.base), base + word.sourceEnd),
+                source.base + (source.offsets[base + word.sourceStart] ?? 0),
+              end: source.base + (source.offsets[base + word.sourceEnd] ?? 0),
             };
           }
           if (current.id !== p.chapter.id) p.onChapter(current.id);
@@ -277,10 +323,13 @@ export default function DocumentReader(p: Props) {
         : loaded.current === `${job.id}:${index}`
           ? elapsed
           : 0;
-      offset += utf16(
-        source.text.slice(source.base),
-        readingCursorOffset(chunk, relative),
-      );
+      offset +=
+        source.offsets[
+          Math.min(
+            source.offsets.length - 1,
+            Math.max(0, readingCursorOffset(chunk, relative)),
+          )
+        ] || 0;
     }
     if (source.id === p.chapter.id) {
       p.editorRef.current?.selectRange(offset, offset);
@@ -300,12 +349,16 @@ export default function DocumentReader(p: Props) {
   };
   const rendering =
     !!job &&
-    !["ready", "failed", "cancelled", "interrupted"].includes(job.status);
+    !["ready", "failed", "cancelled", "interrupted", "needs_review"].includes(
+      job.status,
+    );
 
   const read = async () => {
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     const request = ++playbackRequest.current;
+    transport.prepare();
+    shouldPlay.current = true;
     const requestedConfiguration = currentConfiguration();
     setRequesting(true);
     try {
@@ -317,21 +370,24 @@ export default function DocumentReader(p: Props) {
         start: 0,
         end: 0,
       };
-      await p.flush();
-      const text = p.chapter.text.slice(span.start);
+      const sourceText = p.editorRef.current?.getText() ?? p.chapter.text;
+      const text = sourceText.slice(span.start);
       if (!text.trim()) return;
       snapshot.current = {
         chapters: [
           {
             id: p.chapter.id,
-            text: p.chapter.text,
+            text: sourceText,
             offset: 0,
             base: span.start,
+            offsets: codePointOffsets(text),
           },
         ],
       };
+      await p.flush();
+      if (request !== playbackRequest.current) return;
       if (rendering && job)
-        await api(`/api/speech/jobs/${job.id}/cancel`, "POST");
+        void api(`/api/speech/jobs/${job.id}/cancel`, "POST");
       const next = await api<Job>(
         `/api/projects/${p.project.id}/speech`,
         "POST",
@@ -346,12 +402,21 @@ export default function DocumentReader(p: Props) {
           sapiVolume: 100,
           ...(p.project.settings.speechOptions || {}),
           format,
-          verify: false,
+          verify: true,
+          interactive: true,
         },
       );
       if (request !== playbackRequest.current) {
         await api(`/api/speech/jobs/${next.id}/cancel`, "POST");
         return;
+      }
+      if (
+        ["cancelled", "cancelling", "interrupted", "failed"].includes(
+          next.status,
+        )
+      ) {
+        shouldPlay.current = false;
+        transport.pause();
       }
       lastConfiguration.current = requestedConfiguration;
       setJob(next);
@@ -359,42 +424,55 @@ export default function DocumentReader(p: Props) {
       setChunkIndex(0);
       fullAudio.current = false;
       loaded.current = "";
-      shouldPlay.current = true;
       setActive(true);
     } catch (e) {
-      setError((e as Error).message);
+      if (request === playbackRequest.current) setError((e as Error).message);
     } finally {
-      requestInFlight.current = false;
-      setRequesting(false);
+      if (request === playbackRequest.current) {
+        requestInFlight.current = false;
+        setRequesting(false);
+      }
     }
   };
   const resumeReading = async () => {
     if (!job || requestInFlight.current) return;
-    requestInFlight.current = true;
-    setRequesting(true);
-    setError("");
+    const request = playbackRequest.current;
     shouldPlay.current = true;
+    transport.intent = true;
+    transport.claim();
     setActive(true);
+    setError("");
+    // Retained audio resumes before the backend acknowledges new render demand.
+    if (
+      job.chunks[chunkIndex]?.playbackEligible &&
+      loaded.current === `${job.id}:${chunkIndex}` &&
+      audio.current?.src &&
+      !audio.current.ended
+    )
+      void playAudio().catch((e) => setError(e.message));
+    requestInFlight.current = true;
     try {
       const next = await api<Job>(`/api/speech/jobs/${job.id}/resume`, "POST");
-      setJob(next);
-      if (!shouldPlay.current) return;
-      // Resume the retained audio at its paused position, including after Stop.
-      if (
-        next.chunks[chunkIndex]?.status === "ready" &&
-        loaded.current === `${job.id}:${chunkIndex}` &&
-        audio.current?.src &&
-        !audio.current.ended
-      ) {
-        await audio.current.play();
+      if (request !== playbackRequest.current) {
+        if (!shouldPlay.current)
+          void api(`/api/speech/jobs/${next.id}/cancel`, "POST").catch(
+            () => {},
+          );
+        return;
       }
+      setJob((previous) =>
+        previous?.id === next.id &&
+        (previous.eventSequence || 0) > (next.eventSequence || 0)
+          ? previous
+          : next,
+      );
+      if (next.status === "cancelling") setResumeAfterCancel(true);
+      if (audio.current?.ended && chunkIndex + 1 < next.chunks.length)
+        setChunkIndex((i) => i + 1);
     } catch (e) {
-      shouldPlay.current = false;
-      setActive(false);
-      setError((e as Error).message);
+      if (request === playbackRequest.current) setError((e as Error).message);
     } finally {
-      requestInFlight.current = false;
-      setRequesting(false);
+      if (request === playbackRequest.current) requestInFlight.current = false;
     }
   };
   useEffect(() => {
@@ -408,32 +486,41 @@ export default function DocumentReader(p: Props) {
     }
   }, [resumeAfterCancel, job?.status]);
   const loading =
-    requesting ||
-    resumeAfterCancel ||
+    (requesting && shouldPlay.current) ||
+    (resumeAfterCancel && !playing) ||
     buffering ||
     (active &&
       shouldPlay.current &&
       rendering &&
       !playing &&
-      job?.chunks[chunkIndex]?.status !== "ready");
+      (!job?.chunks[chunkIndex]?.playbackEligible || !loaded.current));
   useLayoutEffect(() => {
-    p.onPlaybackChange(
-      playing || (active && shouldPlay.current && (rendering || buffering)),
-    );
+    p.onPlaybackChange(playing || (active && shouldPlay.current));
   }, [playing, active, rendering, buffering]);
   useEffect(() => () => p.onPlaybackChange(false), [p.onPlaybackChange]);
   const togglePlayback = () => {
-    if (playing) {
+    if (playing || (loading && shouldPlay.current)) {
       shouldPlay.current = false;
-      audio.current?.pause();
+      transport.pause();
+      setActive(true);
+      setBuffering(false);
       parkCursor();
+    } else if (
+      requesting ||
+      (job && rendering && lastConfiguration.current === currentConfiguration())
+    ) {
+      shouldPlay.current = true;
+      transport.intent = true;
+      setActive(true);
+      setBuffering(true);
+      if (audio.current?.src && loaded.current === `${job?.id}:${chunkIndex}`)
+        void playAudio().catch((e) => setError(e.message));
     } else if (
       job &&
       lastConfiguration.current === currentConfiguration() &&
       ["cancelled", "failed", "interrupted", "cancelling"].includes(job.status)
     ) {
-      if (job.status === "cancelling") setResumeAfterCancel(true);
-      else void resumeReading();
+      void resumeReading();
     } else if (
       playable &&
       lastConfiguration.current === currentConfiguration() &&
@@ -447,28 +534,69 @@ export default function DocumentReader(p: Props) {
         !audio.current.ended &&
         (fullAudio.current || loaded.current === `${job.id}:${chunkIndex}`)
       )
-        void audio.current.play().catch((e) => setError(e.message));
+        void playAudio().catch((e) => setError(e.message));
+      else if (audio.current?.ended && chunkIndex + 1 < job.chunks.length)
+        setChunkIndex((i) => i + 1);
     } else if (
       !rendering ||
       lastConfiguration.current !== currentConfiguration()
     )
       void read();
   };
-  const stop = () => {
+  const stop = (park = true) => {
     playbackRequest.current++;
+    requestInFlight.current = false;
+    setRequesting(false);
+    transport.stop();
     setResumeAfterCancel(false);
     setBuffering(false);
     setActive(false);
     shouldPlay.current = false;
     audio.current?.pause();
-    if (!requesting) parkCursor();
+    if (park && !requesting) parkCursor();
     setRange(null);
     p.onHighlight(null);
     if (job && !["ready", "failed", "cancelled"].includes(job.status))
       api<Job>(`/api/speech/jobs/${job.id}/cancel`, "POST")
-        .then(setJob)
+        .then((next) =>
+          setJob((previous) =>
+            previous?.id === next.id &&
+            (previous.eventSequence || 0) <= (next.eventSequence || 0)
+              ? next
+              : previous,
+          ),
+        )
         .catch((e) => setError(e.message));
   };
+  stopRef.current = stop;
+  useEffect(() => {
+    if (
+      snapshot.current &&
+      !snapshot.current.chapters.some(
+        (c) => c.id === p.chapter.id && c.text === p.chapter.text,
+      )
+    ) {
+      stop(false);
+      snapshot.current = null;
+      lastConfiguration.current = "";
+    }
+  }, [p.chapter.id, p.chapter.text]);
+  useEffect(() => {
+    const chunk = job?.chunks[chunkIndex];
+    if (
+      active &&
+      !chunk?.playbackEligible &&
+      ["needs_review", "failed"].includes(job?.status || "")
+    ) {
+      shouldPlay.current = false;
+      transport.pause();
+      setBuffering(false);
+      setError(
+        job?.error ||
+          "This passage needs listening review in Narration before reading can continue.",
+      );
+    }
+  }, [job, chunkIndex, active]);
   const bookmarks = (p.project.settings.readingBookmarks || []) as {
     chapterId: string;
     offset: number;
@@ -496,10 +624,19 @@ export default function DocumentReader(p: Props) {
       <div className="reader-controls">
         <select
           aria-label="Reading voice"
+          onFocus={() =>
+            void api("/api/speech/prepare", "POST", { voiceId: voice }).catch(
+              () => {},
+            )
+          }
           value={voice}
           onChange={(e) => {
             const id = e.target.value;
+            stop();
             setVoice(id);
+            void api("/api/speech/prepare", "POST", { voiceId: id }).catch(
+              () => {},
+            );
             p.change((project) => {
               const c = project.book!.chapters.find(
                 (c) => c.id === p.chapter.id,
@@ -537,7 +674,7 @@ export default function DocumentReader(p: Props) {
           }
           data-help="Read from the text cursor. Pause or Stop moves the cursor to the spoken position; Play continues from there. Move the cursor yourself to choose a new starting point."
           aria-busy={loading}
-          disabled={loading}
+          disabled={false}
           onMouseDown={(e) => e.preventDefault()}
           onClick={togglePlayback}
         >
@@ -553,7 +690,7 @@ export default function DocumentReader(p: Props) {
             <Play size={12} />
           )}
         </button>
-        <button aria-label="Stop reading" onClick={stop}>
+        <button aria-label="Stop reading" onClick={() => stop()}>
           <Square size={12} />
         </button>
         <span className="speed-control">
@@ -749,7 +886,9 @@ export default function DocumentReader(p: Props) {
               (job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0),
           )
         }
-        onPlay={() => {
+        onPlay={(event) => {
+          if (event.currentTarget.paused || !transport.intent) return;
+          transport.claim();
           resumeAudio();
           setPlaying(true);
         }}
@@ -762,6 +901,9 @@ export default function DocumentReader(p: Props) {
           setBuffering(false);
         }}
         onError={() => {
+          shouldPlay.current = false;
+          transport.pause();
+          setActive(false);
           setBuffering(false);
           setPlaying(false);
           setError("Audio could not be played. Press Play to retry.");
@@ -770,8 +912,14 @@ export default function DocumentReader(p: Props) {
           setPlaying(false);
           p.onHighlight(null);
           if (job && !fullAudio.current && chunkIndex + 1 < job.chunks.length) {
-            shouldPlay.current = true;
-            setChunkIndex((i) => i + 1);
+            if (shouldPlay.current) setBuffering(true);
+            const endedIndex = chunkIndex;
+            const epoch = playbackRequest.current;
+            const delay = ((job.settings?.pauseSeconds ?? 0.18) * 1000) / speed;
+            setTimeout(() => {
+              if (epoch !== playbackRequest.current) return;
+              setChunkIndex((i) => (i === endedIndex ? i + 1 : i));
+            }, delay);
           } else {
             shouldPlay.current = false;
             parkCursor(true);

@@ -24,21 +24,20 @@ import wave
 from datetime import datetime, timezone
 
 
-SEGMENT_VERSION = 3
-TERMINAL = {"ready", "failed", "cancelled", "interrupted"}
+SEGMENT_VERSION = 4
+TERMINAL = {"ready", "failed", "cancelled", "interrupted", "needs_review"}
 ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e", "no", "fig", "inc"}
-QA_COMPARISON_VERSION = 1
+QA_COMPARISON_VERSION = 2
 
 
 def compare_transcript(expected: str, transcript: str):
     """Conservative content comparison; recognition is evidence, not a correction.
 
     Casing, Unicode presentation, and sentence punctuation are ignored. Words,
-    apostrophes, numbers, regional spelling and homophones remain distinguishable.
+    apostrophes and homophones remain distinguishable. Explicit spelling pairs
+    and unambiguous cardinal integers use versioned equivalences.
     """
-    def tokens(value):
-        normalized = unicodedata.normalize("NFKC", value).casefold().replace("’", "'")
-        return re.findall(r"[^\W_]+(?:'[^\W_]+)*", normalized, flags=re.UNICODE)
+    from .speech_comparison import canonical_tokens as tokens
     source_words, heard_words = tokens(expected), tokens(transcript)
     row = list(range(len(heard_words) + 1))
     for index, source_word in enumerate(source_words, 1):
@@ -62,6 +61,19 @@ def _hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
+def _replace(source, destination):
+    # Antivirus/indexing/sync tools can briefly hold a Windows file without
+    # delete sharing. Preserve atomic publication and retry only that condition.
+    for attempt in range(6):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(.02 * (attempt + 1))
+
+
 def _atomic_json(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
@@ -69,7 +81,7 @@ def _atomic_json(path: Path, value):
         json.dump(value, handle, ensure_ascii=False, indent=2)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    _replace(temporary, path)
 
 
 def split_narration(text: str, max_chars=240, max_words=45):
@@ -224,7 +236,11 @@ def discover_runtime(project_root: Path):
             qa_model = next((p for p in sorted((qa_repository / "snapshots").glob("*")) if p.is_dir()), None)
     qa_present = qa_model is not None and all((qa_model / name).is_file() for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"))
     qa_revision = (qa_model / "revision.txt").read_text().strip() if qa_model and (qa_model / "revision.txt").is_file() else qa_model.name if qa_model else None
-    return {"python": str(python), "pythonPresent": python.is_file(), "source": str(source), "sourcePresent": (source / "chatterbox/tts_turbo.py").is_file(), "sourceRevision": source_hasher.hexdigest(), "model": str(model) if model else None, "modelPresent": model_present, "modelRevision": model_revision, "hfHome": str(hf_home), "ffmpeg": ffmpeg if ffmpeg and Path(ffmpeg).is_file() else None, "qaPython": str(qa_python), "qaPythonPresent": qa_python.is_file(), "qaModel": str(qa_model) if qa_model else None, "qaModelPresent": qa_present, "qaModelRevision": qa_revision}
+    secondary_root = resources / "qa/models/small.en" if resources else local / "qa-models/models--Systran--faster-whisper-small.en"
+    secondary = secondary_root if resources else secondary_root / "snapshots" / (secondary_root / "refs/main").read_text().strip() if (secondary_root / "refs/main").is_file() else None
+    secondary_present = secondary is not None and all((secondary / n).is_file() for n in ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"))
+    secondary_revision = (secondary / "revision.txt").read_text().strip() if secondary_present and (secondary / "revision.txt").is_file() else secondary.name if secondary_present else None
+    return {"qaSecondaryModel": str(secondary) if secondary_present else None, "qaSecondaryRevision": secondary_revision, "python": str(python), "pythonPresent": python.is_file(), "source": str(source), "sourcePresent": (source / "chatterbox/tts_turbo.py").is_file(), "sourceRevision": source_hasher.hexdigest(), "model": str(model) if model else None, "modelPresent": model_present, "modelRevision": model_revision, "hfHome": str(hf_home), "ffmpeg": ffmpeg if ffmpeg and Path(ffmpeg).is_file() else None, "qaPython": str(qa_python), "qaPythonPresent": qa_python.is_file(), "qaModel": str(qa_model) if qa_model else None, "qaModelPresent": qa_present, "qaModelRevision": qa_revision}
 
 
 class SpeechService:
@@ -448,13 +464,12 @@ class SpeechService:
         chunks, source_offset, occurrences = [], 0, {}
         for source in sources:
             voice = self._voice(source["voiceId"])
-            for chunk in split_narration(source["text"]):
-                spoken, mappings = pronunciation_projection(chunk["text"], project.get("pronunciation", []), voice["id"])
-                if len(spoken) > 400 or len(spoken.split()) > 70:
-                    raise ValueError("Pronunciation substitutions make a speech chunk too long; shorten the substitution or source sentence.")
+            from .speech_quality import projected_sections
+            for chunk in projected_sections(source["text"], project.get("pronunciation", []), voice["id"]):
+                spoken, mappings = chunk["spokenText"], chunk["pronunciationMap"]
                 content = _hash({"text": spoken, "voice": voice.get("hash", "default"), "segmentVersion": SEGMENT_VERSION})
                 chunk_seed = (seed + int(content[:8], 16)) % 2**32
-                key = _hash({"content": content, "seed": chunk_seed, "settings": settings, "model": self.runtime["modelRevision"], "source": self.runtime["sourceRevision"], "watermark": True})
+                key = _hash({"content": content, "seed": chunk_seed, "settings": {k: v for k, v in settings.items() if k != "pauseSeconds"}, "model": self.runtime["modelRevision"], "source": self.runtime["sourceRevision"], "watermark": True})
                 occurrences[key] = occurrences.get(key, 0) + 1
                 chunks.append({**chunk, "id": key[:20] + "-" + str(occurrences[key]), "cacheKey": key, "spokenText": spoken, "pronunciationMap": mappings, "voiceId": voice["id"], "voiceHash": voice.get("hash", "default"), "seed": chunk_seed, "clipId": source.get("clipId"), "sectionId": source.get("sectionId"), "sourceStart": chunk["sourceStart"] + source_offset, "sourceEnd": chunk["sourceEnd"] + source_offset, "status": "queued"})
             source_offset += len(source["text"]) + 2
@@ -735,7 +750,7 @@ class SpeechService:
                     while frames := audio.readframes(65536):
                         combined.writeframes(frames)
                     position += audio.getnframes()
-        os.replace(temporary, output)
+        _replace(temporary, output)
         if job["format"] != "wav":
             target = output.with_suffix("." + job["format"])
             converted = target.with_name("narration.tmp." + job["format"])
@@ -767,7 +782,7 @@ class SpeechService:
                 for pipe in (process.stdout, process.stderr):
                     if pipe:
                         pipe.close()
-            os.replace(converted, target)
+            _replace(converted, target)
         with self._lock:
             if job["status"] in ("cancelling", "cancelled"):
                 job["status"] = "cancelled"
@@ -900,7 +915,7 @@ class SpeechService:
                 continue
             if response.get("health"):
                 self._worker_health = response["health"]
-            if not response.get("ok"):
+            if not response.get("ok") and not response.get("cancelled"):
                 self._close_worker()  # Fatal or generation error: discard mutable model state.
             return response
         self._close_worker()
@@ -911,7 +926,10 @@ class SpeechService:
         self._process = None
         if process is not None:
             if process.poll() is None:
-                process.terminate()
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, **_hidden_process_options())
+                else:
+                    process.terminate()
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
@@ -975,7 +993,10 @@ class SpeechService:
         self._qa_process = None
         if process is not None:
             if process.poll() is None:
-                process.terminate()
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, **_hidden_process_options())
+                else:
+                    process.terminate()
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:

@@ -15,7 +15,7 @@ import tempfile
 from zipfile import BadZipFile
 from xml.etree.ElementTree import ParseError
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
@@ -41,7 +41,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     speech = None
     speech_error = None
     try:
-        from .speech import SpeechService
+        from .speech_pipeline import SpeechPipeline as SpeechService
         speech = SpeechService(store.data_dir, root)
     except (ImportError, RuntimeError, OSError) as exc:
         speech_error = str(exc)
@@ -451,6 +451,26 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         for job in jobs:
             job["stale"] = job.get("sourceRevision") != p["revision"]
         return {"jobs": jobs}
+
+    @app.post("/api/speech/prepare")
+    async def prepare_speech(request: Request):
+        data = await body(request)
+        try:
+            return await run_in_threadpool(speech_service().prepare, data.get("voiceId", "default"))
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+    @app.get("/api/speech/jobs/{job_id}/events")
+    async def speech_events(job_id: str, after: int = Query(0, ge=0), wait: float = Query(20, ge=0, le=20)):
+        return await run_in_threadpool(speech_service().events, job_id, after, wait)
+
+    @app.post("/api/speech/jobs/{job_id}/demand")
+    async def speech_demand(job_id: str, request: Request):
+        data = await body(request)
+        try:
+            return speech_service().demand(job_id, data)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.get("/api/speech/jobs/{job_id}")
     def speech_job(job_id: str):

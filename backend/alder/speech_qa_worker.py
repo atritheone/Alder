@@ -15,11 +15,12 @@ def main():
     protocol = sys.stdout
     model = None
     health = None
+    secondary = None
     for line in sys.stdin:
         request = {}
         try:
             request = json.loads(line)
-            if request.get("operation") != "transcribe":
+            if request.get("operation") not in ("transcribe", "prepare"):
                 raise ValueError("Unsupported verification worker operation.")
             with redirect_stdout(sys.stderr):
                 from faster_whisper import WhisperModel
@@ -29,9 +30,18 @@ def main():
                     revision_file = Path(args.model) / "revision.txt"
                     health = {"model": "faster-whisper-base.en", "modelRevision": revision_file.read_text().strip() if revision_file.is_file() else Path(args.model).name, "device": "cpu", "computeType": "int8", "modelLoadSeconds": round(time.perf_counter() - started, 3)}
                 started = time.perf_counter()
+                if request["operation"] == "prepare":
+                    protocol.write(json.dumps({"id": request.get("id"), "ok": True, "health": health}) + "\n")
+                    protocol.flush()
+                    continue
                 # No source-text prompt: the recogniser must independently report
                 # audio rather than be biased toward the words being checked.
-                segments, info = model.transcribe(request["path"], language="en", beam_size=5, temperature=0, condition_on_previous_text=False, vad_filter=False, word_timestamps=True)
+                selected = model
+                if request.get("secondaryModel"):
+                    if secondary is None:
+                        secondary = WhisperModel(request["secondaryModel"], device="cpu", compute_type="int8", cpu_threads=6, local_files_only=True)
+                    selected = secondary
+                segments, info = selected.transcribe(request["path"], language="en", beam_size=5, temperature=0, condition_on_previous_text=False, vad_filter=False, word_timestamps=True)
                 segments = list(segments)
                 pieces = [{"text": segment.text.strip(), "startSeconds": segment.start, "endSeconds": segment.end, "averageLogProbability": segment.avg_logprob, "noSpeechProbability": segment.no_speech_prob} for segment in segments]
                 words = [{"text": w.word.strip(), "startSeconds": w.start, "endSeconds": w.end} for segment in segments for w in (segment.words or [])]

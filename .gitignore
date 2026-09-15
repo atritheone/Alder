@@ -16,7 +16,7 @@ desktop.ini
 .env.*
 !.env.example
 
-
+# Browser test output.
 test-results/
 playwright-report/
 
@@ -25,3 +25,26 @@ playwright-report/
 /THIRD-PARTY-NOTICES.md
 /images/
 /hardware.txt
+
+# Additional local Python environments, caches and coverage output.
+/venv/
+/env/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+*.egg-info/
+.coverage.*
+/coverage/
+/htmlcov/
+
+# Local speech/model output when tools are run outside the usual work/ folder.
+/outputs/
+/models/
+/checkpoints/
+/Crashpad/
+*.dmp
+
+# Generated verification and audit reports belong in ignored work/ directories.
+/docs/*-results.json
+/docs/*-results.md
+/docs/repository-hygiene.md

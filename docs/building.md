@@ -44,3 +44,7 @@ The large models are deliberately absent from Git. Builders provide model artifa
 Ship the complete release directory. Its size reflects the included local speech runtime/model; a small executable alone is not a complete Alder distribution. The development build is unsigned; code signing for a public distribution uses the distributor's signing identity and is not a dependency of local operation.
 
 Do not copy a live project database into a release or Git commit. `.alder` project archives and authored outputs are user data. Resource caches, test output, node_modules, Python environments and release files remain ignored.
+
+Speech checking is mandatory for automatic playback. The base.en checker is required; builders can include a pinned `small.en` snapshot using `prepare-speech-resources.py --secondary-qa-model <snapshot>`. Alder consults this optional CPU checker only after an ambiguous primary result, within a separate timeout. Missing secondary resources retain the normal bounded retry/review path. No model is downloaded at runtime.
+
+Run `scripts/benchmark-speech.py --data work/<fresh-directory> --device cuda` with `PYTHONPATH=backend` for real-engine availability measurements. Use `--device cpu` separately and `--sustained-seconds 3600` for an hour of generated stress audio with fresh seeds. Results distinguish verified backend availability from acoustic output latency; diagnostics never establish human listening approval.

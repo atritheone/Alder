@@ -294,6 +294,7 @@ export default function BookWorkspace(p: Props) {
                 onFocus={p.onFocus}
                 annotations={p.annotations}
                 readingRange={readingRange}
+                persistentCaret
                 pageLayout={layout}
                 layoutVisible={p.view === "Write"}
                 onVisiblePage={(page) => {

@@ -1,3 +1,5 @@
+import { useSpeechTransport } from "./useSpeechTransport";
+import { useSpeechJob } from "./useSpeechJob";
 import ResizeHandle from "./ResizeHandle";
 import VoiceManager from "./VoiceManager";
 import NativeMenu from "./NativeMenu";
@@ -224,8 +226,7 @@ export default function App() {
     "Hover over a control or focus it with the keyboard to learn what it does.",
   );
   const [dropping, setDropping] = useState(false);
-  const [verifySpeech, setVerifySpeech] = useState(false),
-    [audioFormat, setAudioFormat] = useState("wav");
+  const [audioFormat, setAudioFormat] = useState("wav");
   const [completion, setCompletion] = useState<string[]>([]);
   const [view, setView] = useState(() =>
       savedChoice("alder.view", ["Write", "Pages", "Page Preview"], "Write"),
@@ -303,6 +304,15 @@ export default function App() {
     lastPlayed = useRef(""),
     root = useRef<HTMLDivElement>(null);
   const resumeAudio = useNarrationGain(audio, narrationVolume);
+  const narrationTransport = useSpeechTransport(audio, () => {
+    setPlaying(false);
+    setActiveJob(null);
+    if (activeJob)
+      void api(`/api/speech/jobs/${activeJob.id}/cancel`, "POST").catch(
+        () => {},
+      );
+  });
+  useSpeechJob(activeJob, setActiveJob);
   useEffect(() => {
     document.title = project ? `${project.name} — Alder` : "Alder";
   }, [project?.name]);
@@ -414,18 +424,31 @@ export default function App() {
           setJobs(result.jobs);
           if (activeJob) {
             const updated = result.jobs.find((j) => j.id === activeJob.id);
-            if (updated) setActiveJob(updated);
+            if (updated)
+              setActiveJob((previous) =>
+                previous?.id === updated.id &&
+                (updated.eventSequence || 0) >= (previous.eventSequence || 0)
+                  ? updated
+                  : previous,
+              );
           }
         }
       } catch {}
     };
     void get();
-    const id = setInterval(get, 1700);
+    const id = detail === "Narration" ? setInterval(get, 15000) : undefined;
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [project?.id, activeJob?.id]);
+  }, [project?.id, activeJob?.id, detail]);
+  useEffect(() => {
+    if (activeJob)
+      setJobs((current) => [
+        activeJob,
+        ...current.filter((j) => j.id !== activeJob.id),
+      ]);
+  }, [activeJob]);
   useEffect(() => {
     if (!activeJob) return;
     if (
@@ -437,7 +460,7 @@ export default function App() {
       if (audio.current) {
         audio.current.src = mediaUrl(activeJob.audioUrl);
         audio.current.playbackRate = speed;
-        void audio.current
+        void narrationTransport
           .play()
           .catch(() => setHint("Audio is ready. Press Play to listen."));
       }
@@ -625,7 +648,9 @@ export default function App() {
     overrideText?: string,
   ) => {
     if (!project) return;
+    const epoch = narrationTransport.prepare();
     await flush();
+    if (epoch !== narrationTransport.epoch) return;
     const c = project.clips.find((c) => c.id === (id || selected));
     const t = project.tracks.find((t) => t.id === c?.trackId);
     const request: any = {
@@ -633,7 +658,7 @@ export default function App() {
       seed,
       ...DEFAULT_SPEECH_OPTIONS,
       ...(project.settings.speechOptions || {}),
-      verify: verifySpeech,
+      verify: true,
       format: audioFormat,
     };
     if (scope !== "collation")
@@ -651,6 +676,10 @@ export default function App() {
       "POST",
       request,
     );
+    if (epoch !== narrationTransport.epoch) {
+      void api(`/api/speech/jobs/${job.id}/cancel`, "POST");
+      return;
+    }
     setActiveJob(job);
     setJobs((j) => [job, ...j.filter((x) => x.id !== job.id)]);
     setHint("Preparing local narration…");
@@ -661,8 +690,8 @@ export default function App() {
       activeJob &&
       ["ready", "completed"].includes(activeJob.status)
     ) {
-      if (playing) audio.current.pause();
-      else void audio.current.play().catch((e) => setError(e.message));
+      if (playing) narrationTransport.pause();
+      else void narrationTransport.resume().catch((e) => setError(e.message));
     } else void run(() => startSpeech(selected || undefined, "collation"));
   };
   const saveProject = async () => {
@@ -2400,14 +2429,6 @@ export default function App() {
                       }
                     />
                   </label>
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={verifySpeech}
-                      onChange={(e) => setVerifySpeech(e.target.checked)}
-                    />
-                    Check spoken words locally
-                  </label>
                   <label>
                     Audio format
                     <select
@@ -2504,6 +2525,7 @@ export default function App() {
                           <>
                             <button
                               onClick={() => {
+                                narrationTransport.prepare();
                                 lastPlayed.current = "";
                                 setActiveJob(job);
                               }}
@@ -2553,6 +2575,8 @@ export default function App() {
                           <button
                             onClick={() =>
                               void run(async () => {
+                                if (activeJob?.id === job.id)
+                                  narrationTransport.stop();
                                 await api(
                                   `/api/speech/jobs/${job.id}/cancel`,
                                   "POST",
@@ -2585,11 +2609,12 @@ export default function App() {
                           activeJob?.id === job.id ? time : undefined
                         }
                         onPlayChunk={(url) => {
+                          narrationTransport.prepare();
                           lastPlayed.current = job.id;
                           setActiveJob(job);
                           if (audio.current) {
                             audio.current.src = mediaUrl(url);
-                            void audio.current
+                            void narrationTransport
                               .play()
                               .catch((e) => setError(e.message));
                           }
@@ -2598,21 +2623,27 @@ export default function App() {
                           if (!job.audioUrl || !audio.current) return;
                           lastPlayed.current = job.id;
                           setActiveJob(job);
+                          const epoch = narrationTransport.prepare();
                           const a = audio.current;
                           const url = mediaUrl(job.audioUrl);
                           if (a.getAttribute("src") !== url) {
                             a.addEventListener(
                               "loadedmetadata",
                               () => {
+                                if (epoch !== narrationTransport.epoch) return;
                                 a.currentTime = seconds;
-                                void a.play();
+                                void narrationTransport
+                                  .play(epoch)
+                                  .catch((e) => setError(e.message));
                               },
                               { once: true },
                             );
                             a.src = url;
                           } else {
                             a.currentTime = seconds;
-                            void a.play();
+                            void narrationTransport
+                              .play(epoch)
+                              .catch((e) => setError(e.message));
                           }
                         }}
                       />
@@ -2697,7 +2728,9 @@ export default function App() {
       <audio
         crossOrigin="anonymous"
         ref={audio}
-        onPlay={() => {
+        onPlay={(event) => {
+          if (event.currentTarget.paused || !narrationTransport.intent) return;
+          narrationTransport.claim();
           resumeAudio();
           setPlaying(true);
         }}

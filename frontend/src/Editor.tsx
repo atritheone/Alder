@@ -1,4 +1,5 @@
 import { spacedWord } from "./wordInsertion";
+import { persistentCaret } from "./persistentCaret";
 import { useInstalledFonts } from "./useInstalledFonts";
 import {
   forwardRef,
@@ -392,6 +393,7 @@ export function namedStyleTransaction(
   return tr;
 }
 export type EditorHandle = {
+  getText: () => string;
   replaceAll: (find: string, replacement: string) => void;
   getSelectionOffsets: () => { start: number; end: number };
   insertDocument: (document: DocNode) => void;
@@ -411,6 +413,7 @@ type Props = {
   label?: string;
   pageLayout?: PageLayout;
   layoutVisible?: boolean;
+  persistentCaret?: boolean;
   onPages?: (pages: FlowPage[]) => void;
   onVisiblePage?: (page: number) => void;
   onFocus?: () => void;
@@ -430,6 +433,34 @@ type Props = {
   fontSize?: number;
   styles?: Project["styles"];
 };
+/** Decoration refreshes must not overwrite a native cursor move that arrived
+ * before ProseMirror's asynchronous selectionchange observer. */
+function refreshEditorDecorations(v: EditorView) {
+  const live = v.dom.ownerDocument.getSelection();
+  if (
+    v.hasFocus() &&
+    live?.anchorNode &&
+    live.focusNode &&
+    v.dom.contains(live.anchorNode) &&
+    v.dom.contains(live.focusNode) &&
+    v.state.selection instanceof TextSelection
+  ) {
+    try {
+      const selection = TextSelection.between(
+        v.state.doc.resolve(v.posAtDOM(live.anchorNode, live.anchorOffset)),
+        v.state.doc.resolve(v.posAtDOM(live.focusNode, live.focusOffset)),
+      );
+      if (!selection.eq(v.state.selection)) {
+        v.dispatch(v.state.tr.setSelection(selection));
+        return;
+      }
+    } catch {
+      /* A pending DOM edit is reconciled by ProseMirror's observer. */
+    }
+  }
+  v.updateState(v.state);
+}
+
 export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const editorScope = useId();
   const namedStyles = useMemo(() => {
@@ -576,6 +607,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           start: offset(v.state.selection.from),
           end: offset(v.state.selection.to),
         };
+      },
+      getText() {
+        return view.current ? projectText(view.current.state.doc).text : "";
       },
       insertDocument(document) {
         const v = editableView();
@@ -737,6 +771,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         doc,
         plugins: [
           new Plugin({ props: { decorations: () => pageDecorations.current } }),
+          ...(props.persistentCaret && !blocked.current
+            ? [persistentCaret()]
+            : []),
           history(),
           keymap({
             "Ctrl-Space": () => {
@@ -867,6 +904,32 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         tick((n) => n + 1);
       },
       handleDOMEvents: {
+        blur(v) {
+          if (
+            !latest.current.persistentCaret ||
+            !(v.state.selection instanceof TextSelection)
+          )
+            return false;
+          // A toolbar can take focus before selectionchange has updated the
+          // editor state. Retain the actual cursor for unfocused drawing/reading.
+          const live = v.dom.ownerDocument.getSelection();
+          if (
+            live?.anchorNode &&
+            live.focusNode &&
+            v.dom.contains(live.anchorNode) &&
+            v.dom.contains(live.focusNode)
+          ) {
+            const selection = TextSelection.between(
+              v.state.doc.resolve(
+                v.posAtDOM(live.anchorNode, live.anchorOffset),
+              ),
+              v.state.doc.resolve(v.posAtDOM(live.focusNode, live.focusOffset)),
+            );
+            if (!selection.eq(v.state.selection))
+              v.dispatch(v.state.tr.setSelection(selection));
+          }
+          return false;
+        },
         focus() {
           latest.current.onFocus?.();
           return false;
@@ -937,13 +1000,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         !blocked.current && props.annotations
           ? projectText(v.state.doc).text
           : null;
-      v.updateState(v.state);
+      refreshEditorDecorations(v);
     }
   }, [props.annotations]);
   useLayoutEffect(() => {
     const v = view.current;
     if (!v) return;
-    v.updateState(v.state);
+    refreshEditorDecorations(v);
     if (props.readingRange)
       v.dom.querySelector(".reading-word")?.scrollIntoView({
         block: "nearest",
@@ -1062,7 +1125,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   };
   return (
     <div
-      className={"editor-shell" + (props.pageLayout ? " paginated-editor" : "")}
+      className={
+        "editor-shell" +
+        (props.pageLayout ? " paginated-editor" : "") +
+        (props.persistentCaret ? " persistent-caret" : "")
+      }
       data-alder-editor={editorScope}
     >
       <style>{namedStyles.css}</style>

@@ -217,6 +217,9 @@ export type SpeechReviewRequest = {
   note?: string;
 };
 export type SpeechChunk = {
+  playbackEligible?: boolean;
+  processingSeconds?: number;
+  verificationStatus?: string;
   wordTimings?: {
     text: string;
     sourceStart: number;
@@ -254,6 +257,7 @@ export type SpeechChunk = {
   }[];
 };
 export type Job = {
+  eventSequence?: number;
   settings?: { pauseSeconds?: number };
   id: string;
   projectId: string;

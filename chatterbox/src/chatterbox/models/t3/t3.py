@@ -391,7 +391,7 @@ class T3(nn.Module):
 
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
-                        max_gen_len=1000):
+                        max_gen_len=1000, cancelled=None):
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
@@ -429,10 +429,16 @@ class T3(nn.Module):
         probs = F.softmax(processed_logits, dim=-1)
         next_speech_token = torch.multinomial(probs, num_samples=1)
 
+        if next_speech_token.item() == self.hp.stop_speech_token:
+            raise RuntimeError("Chatterbox ended before generating speech.")
+
         generated_speech_tokens.append(next_speech_token)
         current_speech_token = next_speech_token
 
-        for _ in tqdm(range(max_gen_len)):
+        terminated = False
+        for _ in range(max_gen_len):
+            if cancelled and cancelled():
+                raise InterruptedError("Speech generation cancelled.")
             current_speech_embed = self.speech_emb(current_speech_token)
 
             llm_outputs = self.tfmr(
@@ -448,8 +454,7 @@ class T3(nn.Module):
             input_ids = torch.cat(generated_speech_tokens, dim=1)
             processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
             if torch.all(processed_logits == -float("inf")):
-                print("Warning: All logits are -inf")
-                break
+                raise RuntimeError("Speech generation produced invalid logits.")
 
             probs = F.softmax(processed_logits, dim=-1)
             next_speech_token = torch.multinomial(probs, num_samples=1)
@@ -457,8 +462,12 @@ class T3(nn.Module):
             generated_speech_tokens.append(next_speech_token)
             current_speech_token = next_speech_token
             if torch.all(next_speech_token == self.hp.stop_speech_token):
+                terminated = True
                 break
 
+        if not terminated:
+            raise RuntimeError("Speech reached its token limit without an ending.")
+        self.last_generation = {"termination": "eos", "tokens": len(generated_speech_tokens)}
         all_tokens = torch.cat(generated_speech_tokens, dim=1)
 
         # Remove EOS token if present

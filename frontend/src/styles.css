@@ -3371,8 +3371,18 @@ input[type="range"]:disabled {
   }
 }
 
-.book-workspace.speech-playing .ProseMirror {
+.persistent-caret .ProseMirror {
   caret-color: transparent;
+}
+.write-caret {
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+  width: 1px;
+  background: #494949;
+}
+.book-workspace.speech-playing .write-caret {
+  visibility: hidden;
 }
 .voice-selector {
   display: flex;
@@ -3420,10 +3430,4 @@ input[type="range"]:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-}
-.voice-manager .removed-voices-toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 8px;
 }
