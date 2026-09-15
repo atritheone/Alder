@@ -9,6 +9,48 @@ import wave
 QUALITY_VERSION = 2
 
 
+# Common prose in capitals is emphasis, while initialisms and pronunciation
+# overrides must keep their authored spelling. This only changes spoken input.
+SHORT_EMPHASIS = frozenset('THE AND BUT NOT FOR YOU ARE WAS ALL HOW WHO WHY YES OUT OFF TOO ONE TWO TEN AS AT BY DO GO HE IF IN IS ME MY NO OF ON OR SO TO UP WE AN AM BE'.split())
+INITIALISMS = frozenset('NASA NATO HTTP HTTPS HTML JSON XML SQL API ASCII UTF8 USB CPU GPU RAM ROM PDF DOCX UNESCO UNICEF'.split())
+
+
+def spoken_case(text, mappings):
+    if not re.search(r"\b[A-Z]{2,}\b", text):
+        return text
+    from .language import _speller
+    checker = _speller()
+    def replace(match):
+        word = match.group()
+        if any(m['spokenStart'] < match.end() and match.start() < m['spokenEnd'] for m in mappings):
+            return word
+        if word in INITIALISMS:
+            return word
+        if word in SHORT_EMPHASIS or (len(word) >= 4 and checker is not None and word.lower() in checker):
+            return word.lower()
+        return word
+    return re.sub(r'\b[A-Z]{2,}\b', replace, text)
+
+
+def normalize_spoken(text, mappings):
+    return spoken_case(text, mappings).replace("`", "'")
+
+
+def speech_projection(text, entries, voice_id):
+    from .speech import pronunciation_projection
+    from .speech_comparison import expand_contraction
+    spoken, mappings = pronunciation_projection(text, entries, voice_id)
+    automatic = []
+    for match in re.finditer(r"\b[^\W_]+['’][^\W_]+\b", text):
+        expanded = expand_contraction(match.group())
+        if expanded == match.group() or any(m['sourceStart'] < match.end() and match.start() < m['sourceEnd'] for m in mappings):
+            continue
+        automatic.append({'word':match.group(), 'spoken':expanded, 'caseSensitive':True})
+    if automatic:
+        spoken, mappings = pronunciation_projection(text, [*entries, *automatic], voice_id)
+    return normalize_spoken(spoken, mappings), mappings
+
+
 def projected_sections(text, entries, voice_id, max_chars=220, max_words=40):
     from .speech import split_narration, pronunciation_projection
     pending = split_narration(text, max_chars, max_words)
@@ -24,7 +66,7 @@ def projected_sections(text, entries, voice_id, max_chars=220, max_words=40):
     result = []
     while pending:
         part = pending.pop(0)
-        spoken, mapping = pronunciation_projection(part["text"], entries, voice_id)
+        spoken, mapping = speech_projection(part["text"], entries, voice_id)
         if len(spoken) <= max_chars and len(spoken.split()) <= max_words:
             result.append({**part, "spokenText": spoken, "pronunciationMap": mapping})
             continue

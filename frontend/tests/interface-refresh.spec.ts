@@ -56,24 +56,22 @@ test("clean startup, TXT creation, Aptos, help, and exact speed", async ({
     name: "Reading speed slider",
     exact: true,
   });
-  await expect(slider).toHaveValue("1.03");
+  await expect(slider).toHaveValue("1.05");
   await slider.focus();
   await slider.press("ArrowRight");
   await expect(page.getByLabel("Reading speed", { exact: true })).toHaveValue(
-    "1.04",
+    "1.10",
   );
   const families = (await (await request.get("/api/fonts")).json()).families;
   expect(families.length).toBeGreaterThan(5);
   const menu = page.getByLabel("Font family", { exact: true }).first();
   for (const family of families)
     await expect(
-      menu
-        .locator("option")
-        .filter({
-          hasText: new RegExp(
-            `^${family.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
-          ),
-        }),
+      menu.locator("option").filter({
+        hasText: new RegExp(
+          `^${family.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        ),
+      }),
     ).toHaveCount(1);
   await expect(menu).toHaveValue("Cambria");
   await expect(editor).toHaveCSS("font-family", /Cambria/);
@@ -82,7 +80,9 @@ test("clean startup, TXT creation, Aptos, help, and exact speed", async ({
   );
   await page.getByRole("button", { name: "Toggle help area" }).click();
   await page.getByLabel("Reading speed", { exact: true }).hover();
-  await expect(page.getByLabel("Context help")).toContainText("0.01");
+  await expect(page.getByLabel("Context help")).toContainText(
+    "two decimal places",
+  );
   await page.getByRole("button", { name: "Toggle sandbox" }).hover();
   await expect(page.getByLabel("Context help")).toContainText("separate area");
   await page.screenshot({ path: "work/alder-grey-workspace.png" });

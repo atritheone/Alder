@@ -34,6 +34,8 @@ type Props = {
   onRead: (chapter: Chapter) => void;
   annotations?: Annotation[];
   readingRange?: { start: number; end: number } | null;
+  previewActive: boolean;
+  onPreview: (open: boolean) => void;
   previewUrl: string;
   previewKey: number;
 };
@@ -216,161 +218,167 @@ export default function BookWorkspace(p: Props) {
             </button>
           </header>
         )}
-        {p.view === "Page Preview" ? (
+        {p.previewActive && (
           <PublicationPreview
+            onClose={() => p.onPreview(false)}
             project={p.project}
             refreshKey={p.previewKey}
             htmlUrl={p.previewUrl}
           />
-        ) : (
-          <>
-            {p.view === "Pages" && (
-              <div
-                className="page-arranger"
-                aria-label="Arrange pages"
-                data-help="Drag pages into reading order, or use the arrows. Moving a page adds explicit page breaks to preserve its boundaries. Undo typing reverses the move."
-              >
-                <div className="page-card-grid">
-                  {pages.map((page, i) => (
-                    <article
-                      className="page-card"
-                      key={i}
-                      draggable
-                      onDragStart={() => setDragged(i)}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        if (dragged !== null)
-                          p.editorRef.current?.movePage(dragged, i);
-                        setDragged(null);
-                      }}
-                    >
-                      <header>Page {i + 1}</header>
-                      <p>{page.text.slice(0, 750) || "Blank page"}</p>
-                      <footer>
-                        <button
-                          aria-label={`Move page ${i + 1} earlier`}
-                          disabled={i === 0}
-                          onClick={() =>
-                            p.editorRef.current?.movePage(i, i - 1)
-                          }
-                        >
-                          <ArrowUp size={12} />
-                        </button>
-                        <button
-                          aria-label={`Move page ${i + 1} later`}
-                          disabled={i === pages.length - 1}
-                          onClick={() =>
-                            p.editorRef.current?.movePage(i, i + 1)
-                          }
-                        >
-                          <ArrowDown size={12} />
-                        </button>
-                      </footer>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div
-              className={
-                p.view === "Pages"
-                  ? "book-editor measuring-editor"
-                  : "book-editor"
-              }
-            >
-              <Editor
-                ref={p.editorRef}
-                label="Chapter text editor"
-                document={chapter.document}
-                identity={chapter.id}
-                onChange={(document, text) =>
-                  update((c) => {
-                    c.document = document;
-                    c.text = text;
-                  })
-                }
-                onSelection={p.onSelection}
-                onFocus={p.onFocus}
-                annotations={p.annotations}
-                readingRange={readingRange}
-                persistentCaret
-                pageLayout={layout}
-                layoutVisible={p.view === "Write"}
-                onVisiblePage={(page) => {
-                  if (
-                    document.activeElement?.getAttribute("aria-label") !==
-                    "Go To Page"
-                  )
-                    setPageNumber(String(page + 1));
-                }}
-                onPages={(next) =>
-                  setPages((old) =>
-                    JSON.stringify(old) === JSON.stringify(next) ? old : next,
-                  )
-                }
-                showStructure={structure}
-                onToggleStructure={() => setStructure((v) => !v)}
-                onImage={p.onImage}
-                onLink={p.onLink}
-                onComplete={p.onComplete}
-                fontFamily={p.project.settings.fontFamily}
-                fontSize={(p.project.settings.fontSize * 96) / 72}
-                styles={p.project.styles}
-              />
-            </div>
-            {["Write", "Pages"].includes(p.view) && (
-              <form
-                className="page-navigation"
-                aria-label="Chapter Pages"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const value = Number(pageNumber);
-                  if (
-                    Number.isInteger(value) &&
-                    value >= 1 &&
-                    value <= Math.max(1, pages.length)
-                  )
-                    p.editorRef.current?.navigatePage(value - 1);
-                }}
-              >
-                <label>
-                  Page{" "}
-                  <input
-                    aria-label="Go To Page"
-                    type="number"
-                    min="1"
-                    max={Math.max(1, pages.length)}
-                    step="1"
-                    value={pageNumber}
-                    style={{ width: `${Math.max(1, pageNumber.length)}ch` }}
-                    onChange={(e) => setPageNumber(e.target.value)}
-                    data-help="Type a page number and press Enter to go to that page."
-                  />
-                </label>
-                <span>of {Math.max(1, pages.length)}</span>
-                <span className="writing-counts">
-                  {words(chapters.map((c) => c.text).join(" "))} Words
-                  {isBook && ` · ${chapters.length} Chapters`}
-                </span>
-                <label className="writing-zoom">
-                  Zoom{" "}
-                  <select
-                    aria-label="Page zoom"
-                    value={zoom}
-                    onChange={(e) => setZoom(Number(e.target.value))}
-                  >
-                    {[0.5, 0.65, 0.8, 1, 1.25].map((z) => (
-                      <option key={z} value={z}>
-                        {Math.round(z * 100)}%
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </form>
-            )}
-          </>
         )}
+        <>
+          {p.view === "Pages" && (
+            <div
+              className="page-arranger"
+              aria-label="Arrange pages"
+              data-help="Drag pages into reading order, or use the arrows. Moving a page adds explicit page breaks to preserve its boundaries. Undo typing reverses the move."
+            >
+              <div className="page-card-grid">
+                {pages.map((page, i) => (
+                  <article
+                    className="page-card"
+                    key={i}
+                    draggable
+                    onDragStart={() => setDragged(i)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragged !== null)
+                        p.editorRef.current?.movePage(dragged, i);
+                      setDragged(null);
+                    }}
+                  >
+                    <header>Page {i + 1}</header>
+                    <p>{page.text.slice(0, 750) || "Blank page"}</p>
+                    <footer>
+                      <button
+                        aria-label={`Move page ${i + 1} earlier`}
+                        disabled={i === 0}
+                        onClick={() => p.editorRef.current?.movePage(i, i - 1)}
+                      >
+                        <ArrowUp size={12} />
+                      </button>
+                      <button
+                        aria-label={`Move page ${i + 1} later`}
+                        disabled={i === pages.length - 1}
+                        onClick={() => p.editorRef.current?.movePage(i, i + 1)}
+                      >
+                        <ArrowDown size={12} />
+                      </button>
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+          <div
+            className={
+              p.view === "Pages" || p.previewActive
+                ? "book-editor measuring-editor"
+                : "book-editor"
+            }
+          >
+            <Editor
+              ref={p.editorRef}
+              label="Chapter text editor"
+              document={chapter.document}
+              identity={chapter.id}
+              onChange={(document, text) =>
+                update((c) => {
+                  c.document = document;
+                  c.text = text;
+                })
+              }
+              onSelection={p.onSelection}
+              onFocus={p.onFocus}
+              annotations={p.annotations}
+              readingRange={readingRange}
+              persistentCaret
+              pageLayout={layout}
+              layoutVisible={p.view === "Write" && !p.previewActive}
+              onVisiblePage={(page) => {
+                if (
+                  document.activeElement?.getAttribute("aria-label") !==
+                  "Go To Page"
+                )
+                  setPageNumber(String(page + 1));
+              }}
+              onPages={(next) =>
+                setPages((old) =>
+                  JSON.stringify(old) === JSON.stringify(next) ? old : next,
+                )
+              }
+              showStructure={structure}
+              onToggleStructure={() => setStructure((v) => !v)}
+              onImage={p.onImage}
+              onLink={p.onLink}
+              onComplete={p.onComplete}
+              fontFamily={p.project.settings.fontFamily}
+              fontSize={(p.project.settings.fontSize * 96) / 72}
+              styles={p.project.styles}
+            />
+          </div>
+          {!p.previewActive && ["Write", "Pages"].includes(p.view) && (
+            <form
+              className="page-navigation"
+              aria-label="Chapter Pages"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const value = Number(pageNumber);
+                if (
+                  Number.isInteger(value) &&
+                  value >= 1 &&
+                  value <= Math.max(1, pages.length)
+                )
+                  p.editorRef.current?.navigatePage(value - 1);
+              }}
+            >
+              <label>
+                Page{" "}
+                <input
+                  aria-label="Go To Page"
+                  type="number"
+                  min="1"
+                  max={Math.max(1, pages.length)}
+                  step="1"
+                  value={pageNumber}
+                  style={{ width: `${Math.max(1, pageNumber.length)}ch` }}
+                  onChange={(e) => setPageNumber(e.target.value)}
+                  data-help="Type a page number and press Enter to go to that page."
+                />
+              </label>
+              <span>of {Math.max(1, pages.length)}</span>
+              <span className="writing-counts">
+                {words(chapters.map((c) => c.text).join(" "))} Words
+                {isBook && ` · ${chapters.length} Chapters`}
+              </span>
+              <label className="writing-zoom">
+                Zoom{" "}
+                <select
+                  aria-label="Page zoom"
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                >
+                  {[0.5, 0.65, 0.8, 1, 1.25].map((z) => (
+                    <option key={z} value={z}>
+                      {Math.round(z * 100)}%
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {p.view === "Write" && (
+                <button
+                  type="button"
+                  aria-label="Preview"
+                  data-help="Preview the saved publication layout. Back To Write returns to editing at your current position."
+                  onClick={() => p.onPreview(true)}
+                >
+                  Preview
+                </button>
+              )}
+            </form>
+          )}
+        </>
       </div>
     </section>
   );

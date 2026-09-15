@@ -24,10 +24,10 @@ import wave
 from datetime import datetime, timezone
 
 
-SEGMENT_VERSION = 4
+SEGMENT_VERSION = 8
 TERMINAL = {"ready", "failed", "cancelled", "interrupted", "needs_review"}
 ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e", "no", "fig", "inc"}
-QA_COMPARISON_VERSION = 2
+from .speech_comparison import VERSION as QA_COMPARISON_VERSION
 
 
 def compare_transcript(expected: str, transcript: str):
@@ -109,20 +109,23 @@ def split_narration(text: str, max_chars=240, max_words=45):
         for end in boundaries:
             sentence = raw[sentence_start:end]
             tokens = list(re.finditer(r"\S+", sentence))
-            group = []
-            for token in tokens:
-                if len(token.group()) > max_chars:
+            at = 0
+            while at < len(tokens):
+                stop = at
+                while stop < len(tokens) and stop - at < max_words and tokens[stop].end() - tokens[at].start() <= max_chars:
+                    stop += 1
+                if stop == at:
                     raise ValueError(f"A word exceeds {max_chars} characters; check pasted URLs or missing spaces.")
-                if group and (token.end() - group[0].start() > max_chars or len(group) >= max_words):
-                    a = paragraph.start() + sentence_start + group[0].start()
-                    b = paragraph.start() + sentence_start + group[-1].end()
-                    paragraph_chunks.append({"text": text[a:b], "sourceStart": a, "sourceEnd": b, "paragraphEnd": False})
-                    group = []
-                group.append(token)
-            if group:
-                a = paragraph.start() + sentence_start + group[0].start()
-                b = paragraph.start() + sentence_start + group[-1].end()
+                if stop < len(tokens):
+                    # Prefer a complete clause over cutting a phrase at the hard limit.
+                    minimum = at + max(3, (stop - at) // 3)
+                    strong = [i + 1 for i in range(minimum - 1, stop) if re.search(r'[;:]$', tokens[i].group())]
+                    weak = [i + 1 for i in range(minimum - 1, stop) if re.search(r'[,—]$', tokens[i].group())]
+                    stop = (strong or weak or [stop])[-1]
+                a = paragraph.start() + sentence_start + tokens[at].start()
+                b = paragraph.start() + sentence_start + tokens[stop - 1].end()
                 paragraph_chunks.append({"text": text[a:b], "sourceStart": a, "sourceEnd": b, "paragraphEnd": False})
+                at = stop
             sentence_start = end
         # A cursor can sit immediately before sentence punctuation. Do not send
         # a punctuation-only chunk to a voice that produces an empty WAV for it.
@@ -670,11 +673,11 @@ class SpeechService:
         is_sapi = chunk["voiceId"].startswith("sapi-")
         timing_cache = cached.with_suffix(".words.json")
         if is_sapi and (not valid_cache or not timing_cache.is_file()):
-            from .sapi import render
+            from .sapi import render, native_timings
             response = render(chunk["voiceId"], chunk["spokenText"], cached, job["settings"].get("sapiRate", 0), job["settings"].get("sapiVolume", 100), job["settings"].get("sapiPitch", 0))
             native = response.get("words", [])
             seconds = _wav_info(cached)["seconds"]
-            timings = [{"text": w["text"], "startSeconds": w["seconds"], "endSeconds": native[i+1]["seconds"] if i+1 < len(native) else seconds} for i, w in enumerate(native)]
+            timings = native_timings(native, seconds)
             _atomic_json(timing_cache, {"words": timings})
             valid_cache = True
         if not valid_cache:
@@ -882,7 +885,7 @@ class SpeechService:
             return
         self._close_worker()
         environment = os.environ.copy()
-        environment.update({"HF_HOME": str(self.root / "model-cache"), "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "PYTHONUNBUFFERED": "1", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONPATH": self.runtime["source"]})
+        environment.update({"HF_HOME": str(self.root / "model-cache"), "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONPATH": self.runtime["source"]})
         self._stderr = (self.root / "worker.log").open("a", encoding="utf-8")
         self._process = subprocess.Popen([self.runtime["python"], "-u", str(Path(__file__).with_name("speech_worker.py")), "--model", self.runtime["model"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._stderr, text=True, encoding="utf-8", errors="replace", env=environment, **_hidden_process_options())
         self._responses = queue.Queue()
@@ -949,7 +952,7 @@ class SpeechService:
         if not self.runtime.get("qaPythonPresent") or not self.runtime.get("qaModelPresent"):
             raise RuntimeError("The bundled speech content-check runtime or model is unavailable.")
         environment = os.environ.copy()
-        environment.update({"HF_HOME": str(self.root / "model-cache"), "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "PYTHONUNBUFFERED": "1", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONPATH": ""})
+        environment.update({"HF_HOME": str(self.root / "model-cache"), "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONPATH": ""})
         self._qa_stderr = (self.root / "verification-worker.log").open("a", encoding="utf-8")
         self._qa_process = subprocess.Popen([self.runtime["qaPython"], "-u", str(Path(__file__).with_name("speech_qa_worker.py")), "--model", self.runtime["qaModel"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._qa_stderr, text=True, encoding="utf-8", errors="replace", env=environment, **_hidden_process_options())
         self._qa_responses = queue.Queue()

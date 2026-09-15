@@ -46,16 +46,42 @@ try {
   });
   await speedInput.fill("1.37");
   await speedInput.press("Tab");
-  await expect(speedSlider).toHaveValue("1.37");
+  await expect(speedInput).toHaveValue("1.37");
+  await expect(speedSlider).toHaveAttribute("step", "0.05");
+  await expect(speedSlider).toHaveValue("1.35");
   await speedSlider.focus();
   await speedSlider.press("ArrowRight");
-  await expect(speedInput).toHaveValue("1.38");
+  await expect(speedInput).toHaveValue("1.40");
   await speedInput.fill("1.376");
   await speedInput.press("Enter");
   await expect(speedInput).toHaveValue("1.38");
   await speedInput.fill("9");
   await speedInput.press("Tab");
   await expect(speedInput).toHaveValue("3.00");
+  await speedInput.fill("1.00");
+  await speedInput.press("Tab");
+  const scrollBefore = await page
+    .locator(".book-editor .editor-scroll")
+    .evaluate((el) => el.scrollTop);
+  await speedSlider.hover();
+  await page.mouse.wheel(0, -100);
+  await expect(speedInput).toHaveValue("1.05");
+  await page.mouse.wheel(0, 100);
+  await expect(speedInput).toHaveValue("1.00");
+  const volumeSlider = page.getByRole("slider", {
+    name: "Reading volume",
+    exact: true,
+  });
+  await volumeSlider.hover();
+  await page.mouse.wheel(0, -100);
+  await expect(volumeSlider).toHaveValue("2.05");
+  await page.mouse.wheel(0, 100);
+  await expect(volumeSlider).toHaveValue("2");
+  expect(
+    await page
+      .locator(".book-editor .editor-scroll")
+      .evaluate((el) => el.scrollTop),
+  ).toBe(scrollBefore);
   // Observe the actual playback graph, including the cross-origin media source.
   await page.evaluate(() => {
     const original = AudioContext.prototype.createGain;
@@ -161,7 +187,11 @@ try {
     const media = document.querySelector(".document-reader audio");
     let ended;
     media.addEventListener("ended", () => {
-      ended = { time: performance.now(), pause: 180 / media.playbackRate, job: media.src.split("/chunks/")[0] };
+      ended = {
+        time: performance.now(),
+        pause: 180 / media.playbackRate,
+        job: media.src.split("/chunks/")[0],
+      };
     });
     media.addEventListener("playing", () => {
       if (ended && ended.job === media.src.split("/chunks/")[0]) {
@@ -466,6 +496,101 @@ try {
       await reader.locator("audio").evaluate((a) => a.preservesPitch),
     ).toBe(true);
   }
+  // Inject a failed future passage around real, checked SAPI audio. Reading
+  // must reach that passage before reporting it, then retry at the same index.
+  await speedInput.fill("1.00");
+  await speedInput.press("Enter");
+  await app.evaluate(() => {
+    const prior = globalThis.fetch;
+    const probe = { id: "", held: null, ready: null, resumes: 0, creates: 0 };
+    globalThis.playbackRetryProbe = probe;
+    globalThis.fetch = async (...args) => {
+      const url = String(args[0]);
+      if (probe.id && url.includes(`/api/speech/jobs/${probe.id}/events`)) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const snapshot = probe.resumes ? probe.ready : probe.held;
+        return Response.json({
+          sequence: snapshot.eventSequence,
+          snapshot,
+          reset: true,
+        });
+      }
+      if (probe.id && url.endsWith(`/api/speech/jobs/${probe.id}/resume`)) {
+        probe.resumes++;
+        return Response.json(probe.ready);
+      }
+      const response = await prior(...args);
+      if (
+        /\/api\/projects\/[^/]+\/speech$/.test(url) &&
+        args[1]?.method === "POST"
+      ) {
+        probe.creates++;
+        let job = await response.json();
+        for (let n = 0; n < 200 && job.status !== "ready"; n++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const current = await prior(
+            new URL(`/api/speech/jobs/${job.id}`, url),
+            { headers: args[1].headers },
+          );
+          job = await current.json();
+        }
+        if (job.status !== "ready" || job.chunks.length !== 3)
+          throw new Error("Retry test requires three checked SAPI passages.");
+        probe.id = job.id;
+        probe.ready = { ...job, eventSequence: 20000 };
+        probe.held = structuredClone(job);
+        probe.held.eventSequence = 10000;
+        probe.held.status = "failed";
+        probe.held.error = "Could not read this passage. Press Play to retry.";
+        delete probe.held.audioUrl;
+        probe.held.chunks[1].playbackEligible = false;
+        probe.held.chunks[1].verificationStatus = "needs_review";
+        delete probe.held.chunks[1].audioUrl;
+        return Response.json(probe.held);
+      }
+      return response;
+    };
+  });
+  await writing.fill(
+    "The first passage should play before any error appears. The second passage must resume here after retry. The third passage must never replace the second.",
+  );
+  await writing.press("Control+Home");
+  await reader
+    .getByRole("button", { name: "Play Reading", exact: true })
+    .click();
+  await expect
+    .poll(() => reader.locator("audio").evaluate((a) => a.paused), {
+      timeout: 20000,
+    })
+    .toBe(false);
+  await expect(reader.getByRole("alert")).toHaveCount(0);
+  await expect(reader.getByRole("alert")).toHaveText(
+    "Could not read this passage. Press Play to retry.",
+    { timeout: 20000 },
+  );
+  const retrySource = await app.evaluate(
+    () => globalThis.playbackRetryProbe.ready.chunks[1].audioUrl,
+  );
+  await reader
+    .getByRole("button", { name: "Play Reading", exact: true })
+    .click();
+  await expect
+    .poll(() => reader.locator("audio").evaluate((a) => a.src), {
+      timeout: 10000,
+    })
+    .toContain(retrySource);
+  await expect
+    .poll(() => reader.locator("audio").evaluate((a) => a.paused))
+    .toBe(false);
+  await expect(reader.getByRole("alert")).toHaveCount(0);
+  const retryCounts = await app.evaluate(() => ({
+    creates: globalThis.playbackRetryProbe.creates,
+    resumes: globalThis.playbackRetryProbe.resumes,
+  }));
+  expect(retryCounts).toEqual({ creates: 1, resumes: 1 });
+  await reader
+    .getByRole("button", { name: "Stop reading", exact: true })
+    .click();
   fs.writeFileSync(
     "work/speech-boundary-metrics.json",
     JSON.stringify(
@@ -480,6 +605,14 @@ try {
     JSON.stringify({ ok: true, ...observed }, null, 2),
   );
   console.log(JSON.stringify({ ok: true, ...observed }));
+} catch (error) {
+  console.error(error);
+  throw error;
 } finally {
-  await app.close();
+  const timer = setTimeout(() => app.process().kill(), 10000);
+  try {
+    await app.close();
+  } finally {
+    clearTimeout(timer);
+  }
 }

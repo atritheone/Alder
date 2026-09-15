@@ -14,7 +14,6 @@ import {
   ChevronDown,
   ChevronLeft,
   FilePenLine,
-  ScanEye,
   PanelLeftClose,
   PanelLeftOpen,
   Columns3,
@@ -86,6 +85,7 @@ import { openDocuments } from "./openDocuments";
 import { helpFor } from "./contextHelp";
 import { useNarrationGain } from "./audioPlayback";
 import PlaybackSpeed from "./PlaybackSpeed";
+import { useWheelSlider } from "./useWheelSlider";
 
 type Field = {
   name: string;
@@ -221,6 +221,13 @@ export default function App() {
   const installedFonts = useInstalledFonts(project?.settings.fontFamily);
   const [newOpen, setNewOpen] = useState(false);
   const [narrationVolume, setNarrationVolume] = useState(2);
+  const narrationVolumeSlider = useWheelSlider(
+    narrationVolume,
+    setNarrationVolume,
+    0,
+    4,
+    0.05,
+  );
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpText, setHelpText] = useState(
     "Hover over a control or focus it with the keyboard to learn what it does.",
@@ -228,8 +235,10 @@ export default function App() {
   const [dropping, setDropping] = useState(false);
   const [audioFormat, setAudioFormat] = useState("wav");
   const [completion, setCompletion] = useState<string[]>([]);
+  const [writePreview, setWritePreview] = useState(false);
+  useEffect(() => setWritePreview(false), [project?.id]);
   const [view, setView] = useState(() =>
-      savedChoice("alder.view", ["Write", "Pages", "Page Preview"], "Write"),
+      savedChoice("alder.view", ["Write", "Pages"], "Write"),
     ),
     [detail, setDetail] = useState(() =>
       savedChoice("alder.detail", ["Clip", "Devices", "Narration"], "Clip"),
@@ -1553,7 +1562,6 @@ export default function App() {
             {[
               { name: "Write", icon: FilePenLine },
               { name: "Pages", icon: Columns3 },
-              { name: "Page Preview", icon: ScanEye },
             ].map(({ name, icon: Icon }) => (
               <button
                 role="tab"
@@ -1562,13 +1570,8 @@ export default function App() {
                 key={name}
                 className={view === name ? "active" : ""}
                 onClick={() => {
-                  if (name === "Page Preview")
-                    void run(async () => {
-                      await flush();
-                      setPreviewRevision((n) => n + 1);
-                      setView(name);
-                    });
-                  else setView(name);
+                  setWritePreview(false);
+                  setView(name);
                 }}
               >
                 <Icon size={16} />
@@ -1688,6 +1691,18 @@ export default function App() {
               void run(() => startSpeech(undefined, "selection", c.text))
             }
             annotations={writingFocus ? analysis?.annotations : undefined}
+            previewActive={view === "Write" && writePreview}
+            onPreview={(open) => {
+              if (!open) {
+                setWritePreview(false);
+                return;
+              }
+              void run(async () => {
+                await flush();
+                setPreviewRevision((n) => n + 1);
+                setWritePreview(true);
+              });
+            }}
             previewKey={previewRevision}
             previewUrl={mediaUrl(
               `/api/projects/${project.id}/preview?r=${previewRevision}`,
@@ -2418,6 +2433,7 @@ export default function App() {
                     Volume{" "}
                     <input
                       aria-label="Narration volume"
+                      ref={narrationVolumeSlider}
                       data-help-label={`${Math.round(narrationVolume * 100)}%`}
                       type="range"
                       min="0"
@@ -3208,11 +3224,15 @@ export default function App() {
                     </div>
                   )}
                   <button
-                    onClick={() => {
-                      setPanel(null);
-                      setView("Page Preview");
-                      setPreviewRevision((n) => n + 1);
-                    }}
+                    onClick={() =>
+                      void run(async () => {
+                        await flush();
+                        setPanel(null);
+                        setView("Write");
+                        setWritePreview(true);
+                        setPreviewRevision((n) => n + 1);
+                      })
+                    }
                   >
                     Preview publication
                   </button>

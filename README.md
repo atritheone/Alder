@@ -51,7 +51,7 @@ The sandbox is a separate place to try wording and keep draft versions. Insertin
 a draft into the chapter copies its content; subsequent sandbox experiments do
 not change the book.
 
-Writing pages are an editable layout. **Page Preview** shows the final typeset
+Writing pages are an editable layout. **Page Preview**, opened from Write’s page controls, shows the final typeset
 PDF, including publication matter, running headers, and page numbers.
 
 ### Saving your work
@@ -68,7 +68,7 @@ stopping its background services.
 
 - **Write** — continuous chapter prose on automatically flowing pages.
 - **Pages** — page arrangement within the selected chapter.
-- **Page Preview** — exported PDF pages and a reflowable reading view.
+- **Page Preview**, inside Write — exported PDF pages and a reflowable reading view; Back To Write preserves your editing position and undo history.
 - **Sandbox** — independent drafts and word exploration below the document.
 - **Language tools** — checks and previewable transformations.
 - **Narration** — saved audio, waveforms, and listening review.

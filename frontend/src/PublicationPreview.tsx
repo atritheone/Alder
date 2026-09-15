@@ -10,7 +10,12 @@ import { api, download, mediaUrl } from "./api";
 import type { Project } from "./types";
 import "./publication-preview.css";
 
-type Props = { project: Project; refreshKey: number; htmlUrl: string };
+type Props = {
+  project: Project;
+  refreshKey: number;
+  htmlUrl: string;
+  onClose?: () => void;
+};
 type Proof = {
   downloadUrl: string;
   filename: string;
@@ -53,6 +58,7 @@ export default function PublicationPreview({
   project,
   refreshKey,
   htmlUrl,
+  onClose,
 }: Props) {
   const [mode, setMode] = useState<"print" | "reading">("print");
   const [retry, setRetry] = useState(0);
@@ -279,6 +285,17 @@ export default function PublicationPreview({
       aria-label="Publication preview"
     >
       <div className="publication-toolbar">
+        {onClose && (
+          <button
+            type="button"
+            className="preview-return"
+            aria-label="Back To Write"
+            data-help="Return to editing without losing your position or undo history."
+            onClick={onClose}
+          >
+            Back To Write
+          </button>
+        )}
         <strong>Publication preview</strong>
         <div
           className="publication-modes"

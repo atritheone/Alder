@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "short": "The reader followed each word across the page.",
   "corpus": [
     "Alder reads each word clearly. We can stop and continue without losing our place.",
@@ -8,7 +8,15 @@
     "There were 24 books on the shelf and 105 letters in the drawer. The second box contained forty seven cards.",
     "🌲 The café opened early. We walked   slowly through the garden, then returned to the table.\n\nAnother paragraph begins here.",
     "The patient waited patiently. Patience helped the patient remain calm. Their words mattered, and there was time to listen.",
-    "We crossed the valley before the rain arrived and followed a narrow path towards the old stone bridge, where the river bent around a field of tall grass and the evening light settled on the water."
+    "We crossed the valley before the rain arrived and followed a narrow path towards the old stone bridge, where the river bent around a field of tall grass and the evening light settled on the water.",
+    "Eleanor'll return to-morrow; we'll meet at the station.",
+    "They’re ready, but we can’t leave until the rain stops.",
+    "The labelled bookshelves stood beside a colourful armchair.",
+    "Photosynthesis converts light into chemical energy within chloroplasts.",
+    "The archaeologist examined a palimpsest beside the ancient aqueduct.",
+    "Chapter 12 contains 125 observations from the expedition.",
+    "The café served crème brûlée while Zoë read her résumé.",
+    "“Keep going,” she whispered—then paused. The journey wasn't over."
   ],
   "sustained": "The morning light falls across the wooden table, where a small book lies open beside a cup of tea. Beyond the window, branches move gently in the wind. The reader turns a page and follows the story into a quiet garden. Nothing hurries the moment, and each sentence leads naturally to the next. A bird calls from the wall, then flies towards the trees."
 }

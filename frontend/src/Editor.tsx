@@ -482,7 +482,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     blocked = useRef(false);
   const [parseError, setParseError] = useState<string | null>(null),
     [rangeWarning, setRangeWarning] = useState("");
-  const [version, tick] = useState(0);
+  const [, tick] = useState(0);
+  const [documentVersion, documentTick] = useState(0);
   const pageDecorations = useRef(DecorationSet.empty);
   const measuredPages = useRef<FlowPage[]>([]);
   const [flowPages, setFlowPages] = useState<FlowPage[]>([]);
@@ -875,6 +876,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         }
         v.updateState(next);
         if (tr.docChanged) {
+          documentTick((n) => n + 1);
           setRangeWarning("");
           const json = next.doc.toJSON();
           lastJSON.current = JSON.stringify(json);
@@ -1035,17 +1037,31 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   }, [props.pageLayout?.width, props.pageLayout?.zoom, props.layoutVisible]);
   useLayoutEffect(() => {
     const v = view.current;
-    if (!v || !props.pageLayout || blocked.current) return;
+    if (
+      !v ||
+      !props.pageLayout ||
+      blocked.current ||
+      props.layoutVisible === false
+    )
+      return;
     let frame = 0;
     const measure = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        if (!view.current) return;
+        if (!view.current || !v.dom.getBoundingClientRect().width) return;
+        const viewport = v.dom.closest<HTMLElement>(".editor-scroll");
+        const scrollTop = viewport?.scrollTop;
+        const scrollLeft = viewport?.scrollLeft;
+        refreshEditorDecorations(v);
         const layout = latest.current.pageLayout!;
         const pages = paginatePages(v, layout, (decorations) => {
           pageDecorations.current = decorations;
           v.updateState(v.state);
         });
+        if (viewport && scrollTop !== undefined && scrollLeft !== undefined) {
+          viewport.scrollTop = scrollTop;
+          viewport.scrollLeft = scrollLeft;
+        }
         measuredPages.current = pages;
         setFlowPages((old) =>
           JSON.stringify(old) === JSON.stringify(pages) ? old : pages,
@@ -1067,10 +1083,15 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       document.fonts.removeEventListener("loadingdone", measure);
     };
   }, [
-    version,
+    documentVersion,
     props.identity,
     props.document,
-    props.pageLayout,
+    props.pageLayout?.width,
+    props.pageLayout?.height,
+    props.pageLayout?.margin,
+    props.pageLayout?.lineHeight,
+    props.pageLayout?.zoom,
+    props.layoutVisible,
     props.styles,
     props.fontSize,
   ]);

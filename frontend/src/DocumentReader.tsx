@@ -27,6 +27,7 @@ import { useNarrationGain } from "./audioPlayback";
 import { spokenWord } from "./wordFollowing";
 import { readingCursorOffset } from "./readingCursor";
 import PlaybackSpeed from "./PlaybackSpeed";
+import { useWheelSlider } from "./useWheelSlider";
 
 type Props = {
   project: Project;
@@ -57,6 +58,7 @@ export default function DocumentReader(p: Props) {
     [error, setError] = useState("");
   const [speed, setSpeed] = useState(1),
     [volume, setVolume] = useState(2);
+  const volumeSlider = useWheelSlider(volume, setVolume, 0, 4, 0.05);
   const [rate, setRate] = useState(0),
     [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);
@@ -411,9 +413,8 @@ export default function DocumentReader(p: Props) {
         return;
       }
       if (
-        ["cancelled", "cancelling", "interrupted", "failed"].includes(
-          next.status,
-        )
+        ["cancelled", "cancelling", "interrupted"].includes(next.status) ||
+        (next.status === "failed" && !next.chunks[0]?.playbackEligible)
       ) {
         shouldPlay.current = false;
         transport.pause();
@@ -451,6 +452,7 @@ export default function DocumentReader(p: Props) {
     )
       void playAudio().catch((e) => setError(e.message));
     requestInFlight.current = true;
+    setRequesting(true);
     try {
       const next = await api<Job>(`/api/speech/jobs/${job.id}/resume`, "POST");
       if (request !== playbackRequest.current) {
@@ -467,12 +469,19 @@ export default function DocumentReader(p: Props) {
           : next,
       );
       if (next.status === "cancelling") setResumeAfterCancel(true);
-      if (audio.current?.ended && chunkIndex + 1 < next.chunks.length)
+      if (
+        audio.current?.ended &&
+        loaded.current === `${job.id}:${chunkIndex}` &&
+        chunkIndex + 1 < next.chunks.length
+      )
         setChunkIndex((i) => i + 1);
     } catch (e) {
       if (request === playbackRequest.current) setError((e as Error).message);
     } finally {
-      if (request === playbackRequest.current) requestInFlight.current = false;
+      if (request === playbackRequest.current) {
+        requestInFlight.current = false;
+        setRequesting(false);
+      }
     }
   };
   useEffect(() => {
@@ -486,7 +495,7 @@ export default function DocumentReader(p: Props) {
     }
   }, [resumeAfterCancel, job?.status]);
   const loading =
-    (requesting && shouldPlay.current) ||
+    (requesting && shouldPlay.current && !playing) ||
     (resumeAfterCancel && !playing) ||
     buffering ||
     (active &&
@@ -518,7 +527,13 @@ export default function DocumentReader(p: Props) {
     } else if (
       job &&
       lastConfiguration.current === currentConfiguration() &&
-      ["cancelled", "failed", "interrupted", "cancelling"].includes(job.status)
+      [
+        "cancelled",
+        "failed",
+        "interrupted",
+        "cancelling",
+        "needs_review",
+      ].includes(job.status)
     ) {
       void resumeReading();
     } else if (
@@ -585,18 +600,20 @@ export default function DocumentReader(p: Props) {
     const chunk = job?.chunks[chunkIndex];
     if (
       active &&
+      !requesting &&
       !chunk?.playbackEligible &&
       ["needs_review", "failed"].includes(job?.status || "")
     ) {
       shouldPlay.current = false;
       transport.pause();
       setBuffering(false);
-      setError(
-        job?.error ||
-          "This passage needs listening review in Narration before reading can continue.",
-      );
+      parkCursor();
+      setRange(null);
+      p.onHighlight(null);
+      setActive(false);
+      setError("Could not read this passage. Press Play to retry.");
     }
-  }, [job, chunkIndex, active]);
+  }, [job, chunkIndex, active, requesting]);
   const bookmarks = (p.project.settings.readingBookmarks || []) as {
     chapterId: string;
     offset: number;
@@ -700,7 +717,8 @@ export default function DocumentReader(p: Props) {
           Volume{" "}
           <input
             aria-label="Reading volume"
-            data-help-label={`Narration volume: ${Math.round(volume * 100)}%`}
+            ref={volumeSlider}
+            data-help-label={`Narration volume: ${Math.round(volume * 100)}%. Drag or scroll over the slider to adjust.`}
             type="range"
             min="0"
             max="4"
@@ -859,7 +877,7 @@ export default function DocumentReader(p: Props) {
           )}
         </div>
       )}
-      {(error || job?.error) && <p role="alert">{error || job?.error}</p>}
+      {error && <p role="alert">{error}</p>}
       {job?.status === "ready" && job.chunks.some((c) => c.timingError) && (
         <p>
           Word timing is unavailable for some passages. Highlighting pauses

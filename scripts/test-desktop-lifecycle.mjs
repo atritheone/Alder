@@ -49,7 +49,7 @@ try {
   );
   const features = {};
   if (process.argv.includes("--features")) {
-    await page.getByRole("tab", { name: "Page Preview", exact: true }).click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await expect(page.locator(".publication-canvas-scroll")).toHaveAttribute(
       "aria-busy",
       "false",

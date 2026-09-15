@@ -39,12 +39,37 @@ The large models are deliberately absent from Git. Builders provide model artifa
 4. Run `node scripts/verify-resources.mjs` and `node scripts/smoke-desktop.mjs`.
 5. Run `npm run package` to produce `release/win-unpacked/`.
 6. Run `node scripts/smoke-desktop.mjs --packaged` and `node scripts/test-desktop-lifecycle.mjs --packaged --features`. These strip external tool paths and unrelated Python configuration; the lifecycle check closes immediately after an edit and verifies the committed database and stopped backend.
-7. Run `release/win-unpacked/resources/python/python.exe -I scripts/verify-publishing-tools.py --resources release/win-unpacked/resources --output work/packaged-publishing-isolation`. This checks the shipped EPUB/AZW3 engines with an empty external tool path. Record actual speech and publishing release checks in `docs/verification.md`.
+7. Run `release/win-unpacked/resources/python/python.exe -I scripts/verify-publishing-tools.py --resources release/win-unpacked/resources --output work/packaged-publishing-isolation`. This checks the shipped EPUB/AZW3 engines with an empty external tool path. Keep generated speech and publishing verification results in ignored `work/` directories.
 
 Ship the complete release directory. Its size reflects the included local speech runtime/model; a small executable alone is not a complete Alder distribution. The development build is unsigned; code signing for a public distribution uses the distributor's signing identity and is not a dependency of local operation.
 
 Do not copy a live project database into a release or Git commit. `.alder` project archives and authored outputs are user data. Resource caches, test output, node_modules, Python environments and release files remain ignored.
 
-Speech checking is mandatory for automatic playback. The base.en checker is required; builders can include a pinned `small.en` snapshot using `prepare-speech-resources.py --secondary-qa-model <snapshot>`. Alder consults this optional CPU checker only after an ambiguous primary result, within a separate timeout. Missing secondary resources retain the normal bounded retry/review path. No model is downloaded at runtime.
+Speech checking is mandatory for automatic playback. The base.en checker is required; builders can include a pinned `small.en` snapshot using `prepare-speech-resources.py --secondary-qa-model <snapshot>`. Alder consults this optional CPU checker only after an ambiguous primary result, within a separate timeout. Missing secondary resources retain bounded automatic recovery. Regular Write playback automatically tries up to six fresh takes for a short unresolved passage, with a shared twelve-attempt/180-second cap when a source section is subdivided. It preserves checked sections and the reading position; it does not require listening review. Long sentences prefer clause boundaries, and known spelling/compound variants do not trigger regeneration. Ordinary English words capitalised for emphasis are normalised in spoken input, while recognised initialisms and explicit pronunciation replacements are preserved; the manuscript is unchanged. Persistently unsuccessful speech remains stopped rather than playing rejected audio. Narration production retains explicit review for unresolved output. No model is downloaded at runtime.
 
 Run `scripts/benchmark-speech.py --data work/<fresh-directory> --device cuda` with `PYTHONPATH=backend` for real-engine availability measurements. Use `--device cpu` separately and `--sustained-seconds 3600` for an hour of generated stress audio with fresh seeds. Results distinguish verified backend availability from acoustic output latency; diagnostics never establish human listening approval.
+
+
+Write’s Page Preview button opens the publication proof without replacing the editor.
+`node scripts/test-write-preview-desktop.mjs` checks PDF rendering, editor identity,
+selection and undo preservation in an isolated desktop workspace.
+
+Speech input expands unambiguous English contractions with original-text offsets.
+English content checks accept contracted forms, listed spelling/compound variants,
+and omitted Latin accents; source text and synthesized pronunciation keep the
+original accents. These spelling checks cannot certify pronunciation or prosody.
+Both speech workers use UTF-8 explicitly on Windows. The real-engine corpus includes
+scientific vocabulary, names, accented loanwords, historic spellings and contractions;
+keep benchmark output under `work/`, not in Git.
+
+
+Windows SAPI timing uses non-overlapping progress spans. Repeated notifications
+for one source span are merged; repeated words at different positions remain.
+Decoded event-text lengths avoid inflated SSML entity counts. Versioned SAPI
+caches prevent old rejected timing metadata from being reused.
+
+Playback sliders support mouse-wheel adjustment without scrolling the document.
+Speed dragging and wheel adjustment use 0.05 steps; typed speed retains two-decimal
+precision. Volume wheel adjustment uses five percentage points per step.
+`node scripts/test-playback-sliders-desktop.mjs` checks both Write and Narration,
+including controls that are hidden and reopened.

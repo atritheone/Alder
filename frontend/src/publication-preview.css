@@ -163,3 +163,10 @@
     padding: 8px;
   }
 }
+
+.publication-toolbar .preview-return {
+  flex-shrink: 0;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+}

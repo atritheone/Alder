@@ -50,7 +50,7 @@ This update builds the development application; no release package is replaced
 automatically.
 
 The writing workspace now centers each page, including page navigation in a
-longer document, and uses glyphs for Write, Pages, and Page Preview. Blue
+longer document, and uses glyphs for Write and Pages. Page Preview opens inside Write from its page controls; Back To Write retains the editor, selection, and undo history. Blue
 marks active controls, sliders, and primary actions against grey surfaces.
 Library width can be dragged or adjusted with the separator's arrow keys; a
 small arrow at the end of Search Library hides it; an edge arrow restores it. Menus switch on hover while open and

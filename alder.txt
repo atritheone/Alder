@@ -5,3 +5,7 @@
 add pronunciation modification with dictionaries
 
 add rich text reading and toggle
+
+expand arrange to allow easily moving and inserting paragraphs etc.
+
+make help displace thesaurus area and fit in sandbox.

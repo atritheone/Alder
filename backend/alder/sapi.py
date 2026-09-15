@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 import subprocess
@@ -74,3 +75,44 @@ def render(voice_id, text, path, rate=0, volume=100, pitch=0):
     if not voice:
         raise ValueError("This Windows SAPI voice is not installed or is unavailable.")
     return _call({"operation": "render", "voice": voice["name"], "text": text, "path": str(path), "rate": rate, "volume": volume, "pitch": pitch})
+
+
+NATIVE_TIMING_VERSION = 3
+
+
+def native_timings(events, duration):
+    """SAPI progress describes source spans, not an independent transcript.
+
+    Some engines report overlapping spans ("took", then "took A"). Count each
+    source span once, retaining later occurrences at distinct positions. The
+    positions are UTF-16 units, including SSML offsets when pitched.
+    Only relative overlap is used, so markup prefixes do not shift the words.
+    """
+    covered = 0
+    groups = []
+    for event in events:
+        start = int(event['start'])
+        # CharacterCount can include extra XML-entity characters in SSML (an
+        # ampersand adds four even to unrelated words). Text is already decoded.
+        encoded = event['text'].encode('utf-16-le')
+        length = len(encoded) // 2
+        end = start + length
+        if start < 0 or length <= 0 or end <= covered:
+            continue
+        overlap = max(0, covered - start)
+        text = encoded[overlap * 2:].decode('utf-16-le').strip()
+        covered = end
+        if text:
+            groups.append((text, max(0., min(duration, float(event['seconds'])))))
+    words = []
+    for i, (text, start) in enumerate(groups):
+        end = max(start, groups[i+1][1] if i+1 < len(groups) else duration)
+        tokens = re.findall(r'\S+', text)
+        total = sum(len(token) for token in tokens)
+        offset = 0
+        for token in tokens:
+            next_offset = offset + len(token)
+            words.append({'text':token, 'startSeconds':start+(end-start)*offset/total,
+                          'endSeconds':start+(end-start)*next_offset/total})
+            offset = next_offset
+    return words

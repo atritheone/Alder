@@ -27,59 +27,62 @@ try {
   });
   const text =
     "This is a continuous paragraph that must wrap from the bottom of one page to the top of the next without changing any wording. ".repeat(
-      90,
+      900,
     );
   await editor.fill(text);
   await expect
     .poll(() => page.locator(".page-sheet").count())
     .toBeGreaterThan(2);
   console.log("pages", await page.locator(".page-sheet").count());
-  const geometry = await editor.evaluate((el) => {
-    const canvas = el.closest(".flow-canvas"),
-      sheets = [...canvas.querySelectorAll(".page-sheet")].map((e) => {
-        const r = e.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height };
-      });
-    const bounds = el.getBoundingClientRect(),
-      scale = bounds.width / el.offsetWidth,
-      margin =
-        parseFloat(getComputedStyle(canvas).getPropertyValue("--page-margin")) *
-        scale;
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT),
-      failures = [];
-    let node;
-    while ((node = walker.nextNode())) {
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      for (const r of range.getClientRects()) {
-        if (r.width < 1) continue;
-        if (
-          !sheets.some(
-            (s) =>
-              r.top >= s.y + margin - 3 &&
-              r.bottom <= s.y + s.height - margin + 3,
+  const measureGeometry = () =>
+    editor.evaluate((el) => {
+      const canvas = el.closest(".flow-canvas"),
+        sheets = [...canvas.querySelectorAll(".page-sheet")].map((e) => {
+          const r = e.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        });
+      const bounds = el.getBoundingClientRect(),
+        scale = bounds.width / el.offsetWidth,
+        margin =
+          parseFloat(
+            getComputedStyle(canvas).getPropertyValue("--page-margin"),
+          ) * scale;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT),
+        failures = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const r of range.getClientRects()) {
+          if (r.width < 1) continue;
+          if (
+            !sheets.some(
+              (s) =>
+                r.top >= s.y + margin - 3 &&
+                r.bottom <= s.y + s.height - margin + 3,
+            )
           )
-        )
-          failures.push({
-            top: r.top,
-            bottom: r.bottom,
-            text: node.textContent.slice(0, 30),
-          });
+            failures.push({
+              top: r.top,
+              bottom: r.bottom,
+              text: node.textContent.slice(0, 30),
+            });
+        }
       }
-    }
-    return {
-      sheets,
-      failures: failures.slice(0, 12),
-      spacers: [...el.querySelectorAll(".pagination-spacer")].map((e) => ({
-        height: e.style.height,
-        top: e.getBoundingClientRect().top,
-      })),
-      scroll: {
-        width: el.closest(".editor-scroll").scrollWidth,
-        client: el.closest(".editor-scroll").clientWidth,
-      },
-    };
-  });
+      return {
+        sheets,
+        failures: failures.slice(0, 12),
+        spacers: [...el.querySelectorAll(".pagination-spacer")].map((e) => ({
+          height: e.style.height,
+          top: e.getBoundingClientRect().top,
+        })),
+        scroll: {
+          width: el.closest(".editor-scroll").scrollWidth,
+          client: el.closest(".editor-scroll").clientWidth,
+        },
+      };
+    });
+  const geometry = await measureGeometry();
   console.log(JSON.stringify(geometry));
   const capture = await app.evaluate(async ({ BrowserWindow }) =>
     (
@@ -99,6 +102,25 @@ try {
   expect(geometry.failures).toEqual([]);
   expect(geometry.scroll.width).toBeLessThanOrEqual(geometry.scroll.client + 2);
   await expect(editor).toHaveText(text.trim());
+  await expect(page.locator(".save-status")).toHaveText("Saved");
+  await page.waitForTimeout(250);
+  await editor.focus();
+  for (const key of [
+    "Control+End",
+    "ArrowUp",
+    "ArrowUp",
+    "Control+Home",
+    "ArrowDown",
+    "Control+End",
+  ]) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(100);
+    expect(
+      (await measureGeometry()).failures,
+      `Page alignment after ${key}`,
+    ).toEqual([]);
+  }
+
   const field = page.getByRole("spinbutton", {
     name: "Go To Page",
     exact: true,
@@ -126,7 +148,9 @@ try {
   await page.keyboard.insertText(" Last words.");
   await expect(editor).toContainText("Last words.");
   await page.getByLabel("Page zoom", { exact: true }).selectOption("1.25");
-  await expect.poll(() => page.locator(".page-sheet").count()).toBe(4);
+  await expect
+    .poll(() => page.locator(".page-sheet").count())
+    .toBe(geometry.sheets.length);
   await page.getByLabel("Page zoom", { exact: true }).selectOption("0.8");
   await editor.fill("First page.");
   await expect.poll(() => page.locator(".page-sheet").count()).toBe(1);

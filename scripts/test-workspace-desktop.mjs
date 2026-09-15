@@ -78,7 +78,7 @@ try {
   await page
     .locator(".paginated-editor .editor-scroll")
     .evaluate((el) => el.scrollTo(0, 0));
-  for (const name of ["Write", "Pages", "Page Preview"]) {
+  for (const name of ["Write", "Pages"]) {
     const tab = page.getByRole("tab", { name, exact: true });
     await expect(tab).toHaveText("");
     await expect(tab).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
@@ -113,9 +113,9 @@ try {
   ).toBeLessThan(30);
   await expect(page.locator(".alder-app [title]")).toHaveCount(0);
   await page.getByRole("button", { name: "Toggle help area" }).click();
-  await page.getByRole("tab", { name: "Page Preview", exact: true }).hover();
+  await page.getByRole("button", { name: "Preview", exact: true }).hover();
   const help = page.getByLabel("Context help", { exact: true });
-  await expect(help).toContainText("Preview exported PDF");
+  await expect(help).toContainText("Preview the saved publication layout");
   const helpBox = await help.boundingBox(),
     root = await page.locator(".alder-app").boundingBox();
   expect(helpBox.x + helpBox.width).toBeGreaterThan(root.x + root.width - 20);
@@ -440,6 +440,14 @@ try {
     "work/workspace-desktop.png",
     Buffer.from(screenshot, "base64"),
   );
+} catch (error) {
+  console.error(error);
+  throw error;
 } finally {
-  await app.close();
+  const timer = setTimeout(() => app.process().kill(), 10000);
+  try {
+    await app.close();
+  } finally {
+    clearTimeout(timer);
+  }
 }

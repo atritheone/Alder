@@ -2,7 +2,7 @@
 from difflib import SequenceMatcher
 import re
 
-TIMING_VERSION = 2
+TIMING_VERSION = 3
 
 
 def word_timings(written, spoken, words, mappings=()):
@@ -27,8 +27,17 @@ def word_timings(written, spoken, words, mappings=()):
             word = recognised[block.b + offset][0]
             start, end = original_span(match.start(), match.end())
             if 0 <= start < end <= len(written) and not re.search(r"\s", written[start:end]):
-                result.append({"text": written[start:end], "sourceStart": start, "sourceEnd": end,
-                    "startSeconds": word["startSeconds"], "endSeconds": word["endSeconds"]})
+                previous = result[-1] if result else None
+                same_span = previous and previous["sourceStart"] == start and previous["sourceEnd"] == end
+                same_audio_word = (previous and previous["startSeconds"] == word["startSeconds"]
+                    and previous["endSeconds"] == word["endSeconds"] and previous["sourceEnd"] <= start
+                    and not re.search(r"\s", written[previous["sourceStart"]:end]))
+                if same_span or same_audio_word:
+                    previous.update(sourceEnd=end, text=written[previous["sourceStart"]:end],
+                                    endSeconds=max(previous["endSeconds"], word["endSeconds"]))
+                else:
+                    result.append({"text": written[start:end], "sourceStart": start, "sourceEnd": end,
+                        "startSeconds": word["startSeconds"], "endSeconds": word["endSeconds"]})
     return result
 
 

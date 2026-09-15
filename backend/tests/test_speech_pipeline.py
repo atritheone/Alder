@@ -349,3 +349,283 @@ def test_export_rechecks_acceptance_after_assembly(service, monkeypatch):
     service._finish_export(job)
     assert service.get_job(job['id'])['status'] == 'needs_review'
     with pytest.raises(KeyError): service.audio_path(job['id'])
+
+
+def test_interactive_failure_retries_fresh_audio_without_review(service, monkeypatch):
+    generate = service._invoke_worker
+    def varied(p, **kwargs):
+        response = generate(p, **kwargs)
+        path = Path(p['output'])
+        data = path.read_bytes()
+        path.write_bytes(data[:-2] + struct.pack('<h', p['seed'] % 1000))
+        return response
+    monkeypatch.setattr(service, '_invoke_worker', varied)
+    original = service._invoke_qa_worker
+    def reject_second(p, **kwargs):
+        result = original(p, **kwargs)
+        if result['transcript'].startswith('Second'):
+            result['transcript'] = 'Wrong words.'
+        return result
+    monkeypatch.setattr(service, '_invoke_qa_worker', reject_second)
+    done = finish(service, submit(service, 'First passage reads clearly. Second passage follows.', interactive=True))
+    assert done['status'] == 'failed' and 'Press Play' in done['error']
+    assert 'review' not in done['error'].lower()
+    assert done['chunks'][0]['playbackEligible'] and not done['chunks'][1]['playbackEligible']
+    original_seeds = [p['seed'] for p in service.generated]
+    original_first = service.audio_path(done['id'], done['chunks'][0]['id']).read_bytes()
+    monkeypatch.setattr(service, '_invoke_qa_worker', original)
+    service.resume(done['id'])
+    retried = finish(service, done)
+    assert retried['status'] == 'ready' and not retried.get('error')
+    assert all(c['playbackEligible'] for c in retried['chunks'])
+    assert len(service.generated) == len(original_seeds) + 1
+    assert service.generated[-1]['seed'] not in original_seeds
+    assert service.audio_path(done['id'], done['chunks'][0]['id']).read_bytes() == original_first
+
+
+def test_production_review_is_not_implicitly_accepted_or_retried(service, monkeypatch):
+    monkeypatch.setattr(service, '_invoke_qa_worker', lambda *a, **kw: {'ok': True, 'transcript': 'Other words.', 'words': []})
+    done = finish(service, submit(service))
+    assert done['status'] == 'needs_review'
+    service.resume(done['id'])
+    assert service.get_job(done['id'])['status'] == 'needs_review'
+    assert not done['chunks'][0]['playbackEligible']
+
+
+def test_repeated_bad_take_reuses_negative_check_without_accepting(service, monkeypatch):
+    calls = []
+    def reject(*a, **kw):
+        calls.append(1)
+        return {'ok': True, 'transcript': 'Other words.', 'words': []}
+    monkeypatch.setattr(service, '_invoke_qa_worker', reject)
+    first = finish(service, submit(service))
+    count = len(calls)
+    second = finish(service, submit(service))
+    assert first['status'] == second['status'] == 'needs_review'
+    assert len(calls) == count
+    assert not second['chunks'][0]['playbackEligible']
+
+
+def test_secondary_checker_failure_is_not_cached_as_final_rejection(service, monkeypatch):
+    calls = []
+    service.runtime['qaSecondaryModel'] = 'secondary-test-model'
+    def unavailable(p, **kwargs):
+        calls.append(p)
+        if p.get('secondaryModel'):
+            raise RuntimeError('temporary checker failure')
+        return {'ok': True, 'transcript': 'Other words.', 'words': []}
+    monkeypatch.setattr(service, '_invoke_qa_worker', unavailable)
+    assert finish(service, submit(service))['status'] == 'needs_review'
+    count = len(calls)
+    assert not list((service.root/'cache').glob('*.check.json'))
+    assert finish(service, submit(service))['status'] == 'needs_review'
+    assert len(calls) > count
+
+
+@pytest.mark.parametrize('good_on', [3, 6])
+def test_interactive_recovers_automatically_without_failed_state(service, monkeypatch, good_on):
+    original_generate, original_check, persist = service._invoke_worker, service._invoke_qa_worker, service._persist
+    states = []
+    def generate(p, **kwargs):
+        result = original_generate(p, **kwargs)
+        path = Path(p['output'])
+        data = path.read_bytes()
+        path.write_bytes(data[:-2] + struct.pack('<h', len(service.generated)))
+        return result
+    def check(p, **kwargs):
+        result = original_check(p, **kwargs)
+        if len(service.checked) < good_on:
+            result['transcript'] = 'Wrong output.'
+        return result
+    def record(job):
+        states.append(job['status'])
+        persist(job)
+    monkeypatch.setattr(service, '_invoke_worker', generate)
+    monkeypatch.setattr(service, '_invoke_qa_worker', check)
+    monkeypatch.setattr(service, '_persist', record)
+    done = finish(service, submit(service, interactive=True))
+    assert done['status'] == 'ready' and done['chunks'][0]['playbackEligible']
+    assert len(service.generated) == good_on
+    assert not {'failed', 'needs_review'}.intersection(states)
+    assert len({p['seed'] for p in service.generated}) == good_on
+
+
+def test_interactive_persistent_mismatch_still_has_finite_budget(service, monkeypatch):
+    monkeypatch.setattr(service, '_invoke_qa_worker', lambda *a, **kw: {'ok':True,'transcript':'Different words.','words':[]})
+    done = finish(service, submit(service, interactive=True))
+    assert done['status'] == 'failed' and len(service.generated) == 6
+    assert not done['chunks'][0]['playbackEligible']
+
+
+def test_spelling_and_compound_variants_do_not_reject_correct_speech():
+    from alder.speech import compare_transcript
+    assert compare_transcript('The book-shelves were labelled.', 'The bookshelves were labeled.')['matched']
+    assert compare_transcript('His waistcoat pocket.', 'His waist coat pocket.')['matched']
+    assert not compare_transcript('Orange marmalade.', 'Orange marmalageed.')['matched']
+    assert not compare_transcript('His waistcoat pocket.', 'His west coat poke.')['matched']
+    assert not compare_transcript('Here are book-shelves.', 'Here are bookshelves. Thanks for watching.')['matched']
+
+
+def test_long_sentence_prefers_clause_boundaries_without_losing_text():
+    text = 'She took down a jar from one of the shelves as she passed; it was labelled orange marmalade, but she found it empty and put it back.'
+    parts = projected_sections(text, [], 'default', 100, 22)
+    assert parts[0]['text'].endswith('passed;')
+    assert ''.join(''.join(c['text'].split()) for c in parts) == ''.join(text.split())
+    assert all(len(c['spokenText']) <= 100 and len(c['spokenText'].split()) <= 22 for c in parts)
+
+
+def test_compound_spelling_keeps_word_highlights_on_the_written_word():
+    from alder.reading import word_timings
+    from alder.speech import compare_transcript
+    assert compare_transcript('She fell down stairs.', 'She fell downstairs.')['matched']
+    timings = valid_timings(word_timings('bookshelves', 'bookshelves', [
+        {'text':'book','startSeconds':0.,'endSeconds':.3},
+        {'text':'shelves','startSeconds':.3,'endSeconds':.8}]), 'bookshelves', 1)
+    assert len(timings) == 1 and timings[0]['text'] == 'bookshelves' and timings[0]['endSeconds'] == .8
+    timings = valid_timings(word_timings('book-shelves', 'book-shelves', [
+        {'text':'bookshelves','startSeconds':0.,'endSeconds':.8}]), 'book-shelves', 1)
+    assert len(timings) == 1 and timings[0]['text'] == 'book-shelves'
+
+
+def test_capitalised_prose_is_spoken_as_words_without_changing_source(monkeypatch):
+    monkeypatch.setattr('alder.language._speller', lambda: {'through','curtseying','marmalade','orange','nasa'})
+    text = "I fall THROUGH the earth, CURTSEYING with NASA and the FBI."
+    part = projected_sections(text, [], 'default')[0]
+    assert part['spokenText'] == "I fall through the earth, curtseying with NASA and the FBI."
+    assert part['text'] == text and part['sourceEnd'] == len(text)
+    mapped = projected_sections('I read OLE.', [{'word':'OLE','spoken':'THROUGH NASA'}], 'default')[0]
+    assert 'THROUGH NASA' in mapped['spokenText']
+
+
+def test_curtsey_variants_do_not_hide_wrong_words_or_repetition():
+    from alder.speech import compare_transcript
+    assert compare_transcript('She tried to curtsey, fancy CURTSEYING.', 'She tried to curtsy, fancy curtsying.')['matched']
+    assert not compare_transcript('She tried to curtsey.', 'She tried to courtesy.')['matched']
+    assert not compare_transcript('She tried to curtsey.', 'She tried to curtsy. There you go.')['matched']
+
+
+def test_saved_failed_reading_applies_current_spoken_normalization(service, monkeypatch):
+    original = service._invoke_qa_worker
+    monkeypatch.setattr('alder.language._speller', lambda: set())
+    monkeypatch.setattr(service, '_invoke_qa_worker', lambda *a, **kw: {'ok':True,'transcript':'Wrong speech.','words':[]})
+    done = finish(service, submit(service, text='ALDER READS CLEARLY.', interactive=True))
+    assert done['status'] == 'failed'
+    chunk = service._jobs[done['id']]['chunks'][0]
+    prior = chunk['cacheKey']
+    monkeypatch.setattr('alder.language._speller', lambda: {'alder','reads','clearly'})
+    monkeypatch.setattr(service, '_invoke_qa_worker', original)
+    service.resume(done['id'])
+    done = finish(service, done)
+    assert done['status'] == 'ready' and chunk['cacheKey'] != prior, done
+    assert chunk['spokenText'] == 'alder reads clearly.'
+    assert chunk['text'] == 'ALDER READS CLEARLY.'
+
+
+def test_unambiguous_contractions_expand_for_speech_preserving_source():
+    from alder.speech import compare_transcript
+    text = "Dinah'll miss me to-night. She'd say Alice's here."
+    parts = projected_sections(text, [], 'default')
+    assert parts[0]['text'] == "Dinah'll miss me to-night."
+    assert parts[0]['spokenText'] == 'Dinah will miss me to-night.'
+    assert parts[0]['pronunciationMap'][0]['sourceStart'] == 0
+    assert parts[0]['pronunciationMap'][0]['sourceEnd'] == 8
+    assert parts[1]['spokenText'] == "She'd say Alice's here."
+    assert compare_transcript("Dinah'll miss me to-night.", 'Dinah will miss me tonight.')['matched']
+    assert not compare_transcript("Dinah'll miss me.", 'Dinah missed me.')['matched']
+    custom = projected_sections("Dinah'll read.", [{'word':"Dinah'll",'spoken':'Dyna will'}], 'default')[0]
+    assert custom['spokenText'] == 'Dyna will read.'
+
+
+def test_contraction_expansion_obeys_final_section_limits():
+    text = "They'll read and we'll listen because they'll continue and we'll follow. " * 12
+    parts = projected_sections(text, [], 'default', 100, 20)
+    assert all(len(c['spokenText'])<=100 and len(c['spokenText'].split())<=20 for c in parts)
+    assert ''.join(''.join(c['text'].split()) for c in parts)==''.join(text.split())
+
+
+@pytest.mark.parametrize('written,heard', [
+    ("They’re ready, but we can’t leave.", "They are ready, but we cannot leave."),
+    ("The colourful armchair was labelled.", "The colorful arm chair was labeled."),
+    ("The archaeologist returned to-day.", "The archeologist returned today."),
+    ("Chapter 12 contains 125 observations.", "Chapter twelve contains one hundred and twenty five observations."),
+])
+def test_varied_source_spellings_share_content_check(written, heard):
+    from alder.speech import compare_transcript
+    assert compare_transcript(written, heard)['matched']
+    assert not compare_transcript(written, heard + ' Extra words.')['matched']
+
+
+def test_expanded_contraction_highlight_stays_on_original_word():
+    from alder.reading import word_timings
+    part = projected_sections("Dinah’ll read.", [], 'default')[0]
+    timed = word_timings(part['text'], part['spokenText'], [
+        {'text':'Dinah', 'startSeconds':0., 'endSeconds':.4},
+        {'text':'will', 'startSeconds':.4, 'endSeconds':.6},
+        {'text':'read', 'startSeconds':.6, 'endSeconds':1.},
+    ], part['pronunciationMap'])
+    assert [(w['text'], w['sourceStart'], w['sourceEnd']) for w in timed] == [('Dinah’ll',0,8),('read',9,13)]
+    assert timed[0]['startSeconds'] == 0 and timed[0]['endSeconds'] == .6
+
+
+def test_windows_worker_protocol_preserves_unicode(service, monkeypatch, tmp_path):
+    # Run the actual QA worker protocol through the service's actual pipes, with
+    # recognition stubbed so no model or GPU is needed. Parent locale is hostile.
+    import subprocess
+    from alder import speech_qa_worker
+    runner = tmp_path / 'qa_protocol.py'
+    runner.write_text("""import sys, types, runpy
+class Model:
+ def __init__(self, *args, **kwargs): pass
+ def transcribe(self, path, **kwargs):
+  assert path == 'Zo\u00eb.wav', repr(path)
+  word = types.SimpleNamespace(word='cr\u00e8me br\u00fbl\u00e9e', start=0, end=1)
+  segment = types.SimpleNamespace(text=word.word, start=0, end=1, avg_logprob=0, no_speech_prob=0, words=[word])
+  return iter([segment]), types.SimpleNamespace(language='en')
+sys.modules['faster_whisper'] = types.SimpleNamespace(WhisperModel=Model)
+runpy.run_path(WORKER, run_name='__main__')
+""".replace('WORKER', repr(str(Path(speech_qa_worker.__file__)))), encoding='utf-8')
+    original = subprocess.Popen
+    def launch(command, **kwargs):
+        return original([command[0], '-u', str(runner), *command[3:]], **kwargs)
+    monkeypatch.setenv('PYTHONIOENCODING', 'cp1252')
+    monkeypatch.setenv('PYTHONUTF8', '0')
+    monkeypatch.setattr('alder.speech.subprocess.Popen', launch)
+    service.runtime.update(qaPython=sys.executable, qaModel=str(tmp_path))
+    response = type(service)._invoke_qa_worker(service, {'operation':'transcribe', 'path':'Zoë.wav'}, timeout=10)
+    assert response['ok'] and response['transcript'] == 'crème brûlée'
+    assert response['words'][0]['text'] == 'crème brûlée'
+
+
+def test_ambiguous_and_nested_contractions():
+    from alder.speech_comparison import expand_contraction
+    assert expand_contraction("ain't") == "ain't"
+    assert expand_contraction("she'd") == "she'd"
+    assert expand_contraction("we'll've") == 'we will have'
+
+
+def test_english_recognition_may_omit_accents_but_not_change_names_or_words():
+    from alder.speech import compare_transcript
+    assert compare_transcript('Zoë read her résumé at the café.', 'Zoe read her resume at the cafe.')['matched']
+    assert not compare_transcript('Zoë read her résumé.', 'Zoey read her racemate.')['matched']
+    assert not compare_transcript('Zoë read her résumé.', 'Zoe read her racemé.')['matched']
+    source = 'Zoë read her résumé at the café.'
+    assert projected_sections(source, [], 'default')[0]['spokenText'] == source
+
+
+def test_sapi_overlapping_progress_is_accepted_without_regenerating(service, monkeypatch):
+    monkeypatch.setattr('alder.sapi.voices', lambda: [{'id':'sapi-test','name':'Test','kind':'sapi','hash':'test'}])
+    calls=[]
+    def render(voice, text, path, *args):
+        calls.append(text)
+        pcm(path, 2)
+        return {'words':[
+            {'text':'Alder','start':0,'length':5,'seconds':0},
+            {'text':'Alder reads','start':0,'length':11,'seconds':.5},
+            {'text':'clearly','start':12,'length':7,'seconds':1},
+        ]}
+    monkeypatch.setattr('alder.sapi.render', render)
+    done=finish(service, service.submit({'id':'test','revision':0,'pronunciation':[]},
+        {'scope':'selection','text':'Alder reads clearly.','voiceId':'sapi-test','interactive':True}))
+    assert done['status']=='ready', done
+    assert calls==['Alder reads clearly.'] and not service.checked
+    assert [w['text'] for w in done['chunks'][0]['wordTimings']]==['Alder','reads','clearly']

@@ -67,6 +67,9 @@ export function paginatePages(
       ),
     );
   apply(DecorationSet.empty);
+  // Removing spacers can clamp/anchor the scroll position. Measure against
+  // the current editor origin, never a viewport coordinate captured earlier.
+  const rootTop = () => view.dom.getBoundingClientRect().top;
   const root = view.dom.getBoundingClientRect();
   // Include the application's UI scale as well as the page zoom.
   const scale = root.width / (layout.width - layout.margin * 2);
@@ -75,8 +78,8 @@ export function paginatePages(
   const y = (pos: number) => {
     const rect = view.coordsAtPos(pos, 1);
     return {
-      top: (rect.top - root.top) / scale,
-      bottom: (rect.bottom - root.top) / scale,
+      top: (rect.top - rootTop()) / scale,
+      bottom: (rect.bottom - rootTop()) / scale,
     };
   };
   let page = 0;
@@ -101,7 +104,7 @@ export function paginatePages(
     if (!nodeSize) {
       const actualTop = row
         ? ((view.nodeDOM(pos) as HTMLElement).getBoundingClientRect().top -
-            root.top) /
+            rootTop()) /
           scale
         : y(pos).top;
       const correction = page * pitch - actualTop;
@@ -116,15 +119,15 @@ export function paginatePages(
       const element = view.nodeDOM(pos) as HTMLElement;
       const rect = element.getBoundingClientRect();
       if (rect.height / scale <= bodyHeight) {
-        if ((rect.bottom - root.top) / scale > page * pitch + bodyHeight)
-          nextPage(pos, (rect.top - root.top) / scale, undefined, true);
+        if ((rect.bottom - rootTop()) / scale > page * pitch + bodyHeight)
+          nextPage(pos, (rect.top - rootTop()) / scale, undefined, true);
         return false;
       }
     }
     if (node.type.name === "page_break") {
       const element = view.nodeDOM(pos) as HTMLElement | null;
       const top = element
-        ? (element.getBoundingClientRect().top - root.top) / scale
+        ? (element.getBoundingClientRect().top - rootTop()) / scale
         : y(pos).top;
       nextPage(pos, top, node.nodeSize);
       return false;
@@ -157,9 +160,9 @@ export function paginatePages(
       const element = view.nodeDOM(pos) as HTMLElement | null;
       if (element) {
         const rect = element.getBoundingClientRect();
-        const top = (rect.top - root.top) / scale;
+        const top = (rect.top - rootTop()) / scale;
         if (
-          (rect.bottom - root.top) / scale > page * pitch + bodyHeight &&
+          (rect.bottom - rootTop()) / scale > page * pitch + bodyHeight &&
           top > page * pitch + 1
         )
           nextPage(pos, top);

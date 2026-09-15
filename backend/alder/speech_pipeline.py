@@ -15,8 +15,10 @@ import wave
 
 from .speech import SpeechService, _hash, _now, _atomic_json, _replace, _wav_info, compare_transcript
 from .speech_metrics import SpeechMetrics
-from .speech_quality import QUALITY_VERSION, inspect_pcm, projected_sections, valid_timings
+from .sapi import NATIVE_TIMING_VERSION, native_timings
+from .speech_quality import QUALITY_VERSION, inspect_pcm, projected_sections, valid_timings, speech_projection
 from .reading import word_timings, TIMING_VERSION
+from .speech_comparison import VERSION as COMPARISON_VERSION
 
 STOPPED = {"cancelling", "ready", "failed", "cancelled", "interrupted", "needs_review"}
 
@@ -53,7 +55,7 @@ class SpeechPipeline(SpeechService):
         result = super().capabilities()
         result["controls"] = [name for name in result["controls"] if name != "verify"]
         result["verification"].update(required=True, maximumRetries=1, maximumSectionAttempts=6,
-                                      secondaryAvailable=bool(self.runtime.get("qaSecondaryModel")))
+                                      secondaryAvailable=bool(self.runtime.get("qaSecondaryModel")), maximumInteractiveSectionAttempts=12)
         return result
 
     def submit(self, project, request):
@@ -233,7 +235,9 @@ class SpeechPipeline(SpeechService):
         current = d.get("index", 0)
         if index < current:
             return True
-        budget = (4 if d.get("mode") == "paused" else 12) * d.get("speed", 1)
+        recent = job["chunks"][max(0, current - 4):current + 8]
+        recovery = max((c.get("processingSeconds", 0) for c in recent), default=0)
+        budget = (4 if d.get("mode") == "paused" else min(45, max(12, recovery * 1.5))) * d.get("speed", 1)
         ahead = sum(c.get("seconds", max(.3, len(c["spokenText"].split()) / 2.5)) + job["settings"]["pauseSeconds"] for c in job["chunks"][current:index])
         return index - current < 8 and ahead < budget
 
@@ -262,7 +266,7 @@ class SpeechPipeline(SpeechService):
                                     self._assembling.add(job_id)
                                     self._exports.submit(self._finish_export, job)
                                 else:
-                                    job["status"] = "needs_review"
+                                    self._hold_unresolved(job)
                                     self._persist(job)
                             continue
                         if not self._wanted(job, job["chunks"].index(chunk)):
@@ -300,7 +304,7 @@ class SpeechPipeline(SpeechService):
         _replace(temporary, destination)
 
     def _take(self, job, chunk, seed):
-        cache = self.root / "cache" / (_hash({"synthesis": chunk["cacheKey"], "seed": seed}) + ".wav")
+        cache = self.root / "cache" / (_hash({"synthesis": chunk["cacheKey"], "seed": seed, **({"nativeTimings": NATIVE_TIMING_VERSION} if chunk["voiceId"].startswith("sapi-") else {})}) + ".wav")
         try:
             _wav_info(cache)
             if chunk["voiceId"].startswith("sapi-"):
@@ -329,7 +333,7 @@ class SpeechPipeline(SpeechService):
                     response = render(chunk["voiceId"], chunk["spokenText"], cache, job["settings"].get("sapiRate", 0), job["settings"].get("sapiVolume", 100), job["settings"].get("sapiPitch", 0))
                     native = response.get("words", [])
                     seconds = _wav_info(cache)["seconds"]
-                    words = [{"text": w["text"], "startSeconds": w["seconds"], "endSeconds": native[i+1]["seconds"] if i+1 < len(native) else seconds} for i, w in enumerate(native)]
+                    words = native_timings(native, seconds)
                     _atomic_json(cache.with_suffix(".native.json"), {"words": words})
                 else:
                     response = self._invoke_worker({"operation": "generate", "text": chunk["spokenText"], "seed": seed,
@@ -353,14 +357,14 @@ class SpeechPipeline(SpeechService):
     def _check_locked(self, job, chunk, cache):
         audio_hash = hashlib.sha256(cache.read_bytes()).hexdigest()
         identity = _hash({"audio": audio_hash, "text": chunk["spokenText"], "version": QUALITY_VERSION,
-                          "model": self.runtime.get("qaModelRevision"), "secondary": self.runtime.get("qaSecondaryRevision"), "voice": chunk["voiceId"], "comparison": 2})
+                          "model": self.runtime.get("qaModelRevision"), "secondary": self.runtime.get("qaSecondaryRevision"), "voice": chunk["voiceId"], "comparison": COMPARISON_VERSION, **({"nativeTimings": NATIVE_TIMING_VERSION} if chunk["voiceId"].startswith("sapi-") else {})})
         path = self.root / "cache" / (identity + ".check.json")
         try:
             check = json.loads(path.read_text("utf-8"))
-            if (check.get("audioHash") == audio_hash and check.get("status") == "matched"
+            if (check.get("audioHash") == audio_hash and check.get("status") in {"matched", "needs_review"}
                 and check.get("acoustic", {}).get("version") == QUALITY_VERSION
                 and isinstance(check.get("words"), list)
-                and compare_transcript(chunk["spokenText"], check.get("transcript", ""))["matched"]):
+                and check.get("matched") is compare_transcript(chunk["spokenText"], check.get("transcript", ""))["matched"]):
                 os.utime(path, None)
                 return check, True
         except (OSError, ValueError):
@@ -418,7 +422,9 @@ class SpeechPipeline(SpeechService):
                      model=model, modelRevision=self.runtime.get("qaSecondaryRevision") if model == "faster-whisper-small.en" else self.runtime.get("qaModelRevision"), checkedAt=_now(),
                      recognitionSeconds=time.monotonic() - started)
         self._metric("checked", job, chunk, seconds=check["recognitionSeconds"], matched=check["matched"])
-        if check["matched"]:
+        # A completed negative check is reusable too; it still cannot grant playback.
+        # Worker errors and incomplete checks never reach this publication point.
+        if not check.get("secondaryError"):
             _atomic_json(path, check)
         return check, False
 
@@ -430,14 +436,18 @@ class SpeechPipeline(SpeechService):
             with self._lock:
                 budget = job.setdefault("_budgets", {}).setdefault(root, {"attempts": 0, "seconds": 0})
             selected = None
-            for index in range(1 + min(1, job.get("verificationRetries", 1))):
+            # A short passage cannot use split recovery. Use the same fresh-take
+            # sequence that an explicit Play retry used to require, automatically.
+            leaf = chunk.get("splitDepth") or (len(chunk["spokenText"]) <= 125 and len(chunk["spokenText"].split()) <= 22)
+            attempts_allowed = 6 if job.get("interactive") and leaf else 1 + min(1, job.get("verificationRetries", 1))
+            for index in range(attempts_allowed):
                 if self._cancelled(job):
                     raise InterruptedError("Reading stopped.")
                 with self._lock:
-                    if budget["attempts"] >= 6 or budget["seconds"] + time.monotonic() - started > 180:
+                    if budget["attempts"] >= (12 if job.get("interactive") else 6) or budget["seconds"] + time.monotonic() - started > 180:
                         break
                     budget["attempts"] += 1
-                seed = (chunk["seed"] + 99991 * index) % 2**32
+                seed = (chunk["seed"] + 200003 * (index // 2) + 99991 * (index % 2)) % 2**32
                 try:
                     cache, cached = self._take(job, chunk, seed)
                 except InterruptedError:
@@ -465,7 +475,7 @@ class SpeechPipeline(SpeechService):
                     if self._split_section(job, chunk, root):
                         job["status"] = "queued"
                         return
-                raise RuntimeError("Speech retry budget exhausted. Review the passage before retrying.")
+                raise RuntimeError("Could not read this passage. Press Play to retry." if job.get("interactive") else "Speech retry budget exhausted. Review the passage before retrying.")
             destination = self._chunk_path(job, chunk)
             self._copy_audio(destination.parent / selected["file"], destination)
             info = _wav_info(destination)
@@ -481,7 +491,12 @@ class SpeechPipeline(SpeechService):
                     self._split_section(job, chunk, root)
                 job["progress"] = sum(self._eligible(job, c) for c in job["chunks"]) / len(job["chunks"])
                 if not self._cancelled(job):
-                    job["status"] = "failed" if any(c.get("verificationStatus") == "check_failed" for c in job["chunks"]) else "needs_review" if any(c.get("verificationStatus") == "needs_review" for c in job["chunks"]) else "queued"
+                    if any(c.get("verificationStatus") == "check_failed" for c in job["chunks"]):
+                        job["status"] = "failed"
+                    elif any(c.get("verificationStatus") == "needs_review" for c in job["chunks"]):
+                        self._hold_unresolved(job)
+                    else:
+                        job["status"] = "queued"
                 self._metric("section_ready", job, chunk, seconds=time.monotonic() - started, accepted=check["matched"])
         except InterruptedError:
             with self._lock:
@@ -508,6 +523,11 @@ class SpeechPipeline(SpeechService):
                     self._enqueue(job)
                 except OSError as exc:
                     job.update(status="failed", error=f"Speech could not be saved: {exc}")
+
+    def _hold_unresolved(self, job):
+        job["status"] = "failed" if job.get("interactive") else "needs_review"
+        if job.get("interactive"):
+            job["error"] = "Could not read this passage. Press Play to retry."
 
     def _split_section(self, job, chunk, root):
         if chunk.get("splitDepth") or self._cancelled(job):
@@ -563,7 +583,7 @@ class SpeechPipeline(SpeechService):
                 return self._public(job)
             if job.get("modelRevision") != self.runtime["modelRevision"] or job.get("sourceFingerprint") != self.runtime["sourceRevision"]:
                 raise ValueError("The speech engine changed. Start a new reading to retain consistent audio.")
-            if job["status"] == "needs_review" or job["status"] == "ready" and all(self._eligible(job, c) for c in job["chunks"]) or any(j == job_id for j, _ in self._inflight):
+            if (job["status"] == "needs_review" and not job.get("interactive")) or job["status"] == "ready" and all(self._eligible(job, c) for c in job["chunks"]) or any(j == job_id for j, _ in self._inflight):
                 return self._public(job)
             job.update(schemaVersion=2, verify=True, follow=True, verificationModelRevision=self.runtime.get("qaModelRevision"))
             (self.root / "jobs" / job_id / "cancel.flag").unlink(missing_ok=True)
@@ -573,12 +593,22 @@ class SpeechPipeline(SpeechService):
                 except (OSError, ValueError, wave.Error, EOFError):
                     valid = False
                 if not valid:
+                    spoken, mapping = speech_projection(c["text"], job.get("_pronunciation", []), c["voiceId"])
+                    if spoken != c["spokenText"]:
+                        c["cacheKey"] = _hash({"previous": c["cacheKey"], "spoken": spoken, "speechTextVersion": 1})
+                        c["spokenText"] = spoken
+                        c["pronunciationMap"] = mapping
+                    if c.get("verificationStatus") == "needs_review":
+                        # Retry wording failures with fresh speech, preserving checked neighbours.
+                        rounds = max(1, (len(c.get("qaAttempts", [])) + 1) // 2)
+                        c["seed"] = (c["seed"] + 200003 * rounds) % 2**32
                     c.update(status="queued", verificationStatus="pending")
+                    c.pop("error", None)
                     c.pop("manualReview", None)
                     c.pop("audioUrl", None)
             job["status"] = "queued"
             job["_budgets"] = {}  # An explicit retry starts a fresh bounded recovery session.
-            job.pop("error", None)
+            job["error"] = ""
             self._demand.setdefault(job_id, {}).update(mode="playing", at=time.monotonic())
             self._persist(job)
             self._enqueue(job)

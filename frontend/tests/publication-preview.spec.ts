@@ -53,7 +53,7 @@ test("PDF proof renders real exported pages and reading controls preserve source
       response.url().endsWith(`/api/projects/${project.id}/export`) &&
       response.request().method() === "POST",
   );
-  await page.getByRole("tab", { name: "Page Preview", exact: true }).click();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
   const proof = await (await response).json();
   expect(proof.sourceRevision).toBe(saved.revision + 1);
   expect(proof.validation.pages).toBeGreaterThan(1);
@@ -135,7 +135,7 @@ test("failed PDF generation can be retried without losing the project", async ({
   await page.goto("/");
   await openSaved(page);
   await expect(page.locator(".project-label strong")).toHaveText(project.name);
-  await page.getByRole("tab", { name: "Page Preview", exact: true }).click();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText(
     "Test publication service interruption",
   );
