@@ -191,6 +191,9 @@ const baseSchema = new Schema({
           getAttrs: (dom) => ({
             src: dom.getAttribute("src"),
             alt: dom.getAttribute("alt") || "",
+            title: dom.getAttribute("title"),
+            width: dom.getAttribute("width"),
+            assetId: dom.getAttribute("data-asset-id"),
           }),
         },
       ],
@@ -206,6 +209,7 @@ const baseSchema = new Schema({
             alt: n.attrs.alt,
             title: n.attrs.title,
             width: n.attrs.width,
+            "data-asset-id": n.attrs.assetId,
           },
         ],
       ],
@@ -282,7 +286,14 @@ export const schema = new Schema({
     superscript: { parseDOM: [{ tag: "sup" }], toDOM: () => ["sup", 0] },
     highlight: {
       attrs: { color: { default: "#f0dc8a" } },
-      parseDOM: [{ tag: "mark" }],
+      parseDOM: [
+        {
+          tag: "mark",
+          getAttrs: (dom) => ({
+            color: dom.style.backgroundColor || "#f0dc8a",
+          }),
+        },
+      ],
       toDOM: (n) => ["mark", { style: "background:" + n.attrs.color }, 0],
     },
   }),
@@ -411,6 +422,9 @@ export type EditorHandle = {
 };
 type Props = {
   label?: string;
+  rawMode?: boolean;
+  onToggleRaw?: () => void;
+  rawDisabled?: boolean;
   pageLayout?: PageLayout;
   layoutVisible?: boolean;
   persistentCaret?: boolean;
@@ -784,18 +798,31 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             "Mod-z": undo,
             "Mod-y": redo,
             "Mod-Shift-z": redo,
-            "Mod-b": toggleMark(schema.marks.strong),
-            "Mod-i": toggleMark(schema.marks.em),
-            "Mod-u": toggleMark(schema.marks.underline),
+            "Mod-b": props.rawMode
+              ? () => true
+              : toggleMark(schema.marks.strong),
+            "Mod-i": props.rawMode ? () => true : toggleMark(schema.marks.em),
+            "Mod-u": props.rawMode
+              ? () => true
+              : toggleMark(schema.marks.underline),
             Enter: splitListItem(schema.nodes.list_item),
-            Tab: sinkListItem(schema.nodes.list_item),
+            Tab: props.rawMode
+              ? (state, dispatch) => {
+                  dispatch?.(state.tr.insertText("\t"));
+                  return true;
+                }
+              : sinkListItem(schema.nodes.list_item),
             "Shift-Tab": liftListItem(schema.nodes.list_item),
-            "Shift-Enter": chainCommands(exitCode, (state, dispatch) => {
-              dispatch?.(
-                state.tr.replaceSelectionWith(schema.nodes.hard_break.create()),
-              );
-              return true;
-            }),
+            "Shift-Enter": props.rawMode
+              ? baseKeymap.Enter
+              : chainCommands(exitCode, (state, dispatch) => {
+                  dispatch?.(
+                    state.tr.replaceSelectionWith(
+                      schema.nodes.hard_break.create(),
+                    ),
+                  );
+                  return true;
+                }),
           }),
           keymap(baseKeymap),
           columnResizing(),
@@ -905,6 +932,21 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         latest.current.onSelection(word, selected);
         tick((n) => n + 1);
       },
+      handlePaste(v, event) {
+        if (!latest.current.rawMode) return false;
+        const text = event.clipboardData?.getData("text/plain");
+        if (text === undefined) return false;
+        refreshEditorDecorations(v);
+        const doc = schema.nodeFromJSON({
+          type: "doc",
+          content: text.split(/\r?\n/).map((line) => ({
+            type: "paragraph",
+            content: line ? [{ type: "text", text: line }] : [],
+          })),
+        });
+        v.dispatch(v.state.tr.replaceSelection(Slice.maxOpen(doc.content)));
+        return true;
+      },
       handleDOMEvents: {
         blur(v) {
           if (
@@ -982,6 +1024,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       json = JSON.stringify(props.document);
     if (v && json !== lastJSON.current) {
       const parsed = parseEditorDocument(props.document);
+      // Source paragraphs omit default attributes. Equivalent parent updates
+      // must not recreate editor state, reset the caret or clear undo history.
+      if (parsed.document?.eq(v.state.doc) && !blocked.current) {
+        lastJSON.current = json;
+        return;
+      }
       blocked.current = !parsed.document;
       setParseError(parsed.error);
       setRangeWarning("");
@@ -1148,6 +1196,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     <div
       className={
         "editor-shell" +
+        (props.rawMode ? " raw-mode" : "") +
         (props.pageLayout ? " paginated-editor" : "") +
         (props.persistentCaret ? " persistent-caret" : "")
       }
@@ -1176,173 +1225,189 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         aria-disabled={!!parseError}
         inert={!!parseError}
       >
-        <select
-          aria-label="Paragraph type"
-          defaultValue="paragraph"
-          onChange={(e) =>
-            command(
-              setBlockType(
-                e.target.value === "paragraph"
-                  ? schema.nodes.paragraph
-                  : schema.nodes.heading,
-                e.target.value === "paragraph"
-                  ? null
-                  : { level: Number(e.target.value) },
-              ),
-            )
-          }
-        >
-          <option value="paragraph">Body</option>
-          <option value="1">Heading 1</option>
-          <option value="2">Heading 2</option>
-          <option value="3">Heading 3</option>
-        </select>
-        <select
-          aria-label="Font family"
-          value={currentFont}
-          onChange={(e) => setFont("fontFamily", e.target.value)}
-        >
-          {installedFonts.map((f) => (
-            <option key={f}>{f}</option>
-          ))}
-        </select>
-        <select
-          aria-label="Font size"
-          defaultValue="12"
-          onChange={(e) => setFont("fontSize", Number(e.target.value))}
-        >
-          {[9, 10, 11, 12, 14, 16, 18, 24, 32].map((f) => (
-            <option key={f}>{f}</option>
-          ))}
-        </select>
-        <button
-          data-help-label="Bold (Ctrl+B)"
-          aria-label="Bold"
-          className={mark("strong") ? "active" : ""}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => command(toggleMark(schema.marks.strong))}
-        >
-          <Bold />
-        </button>
-        <button
-          data-help-label="Italic (Ctrl+I)"
-          aria-label="Italic"
-          className={mark("em") ? "active" : ""}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => command(toggleMark(schema.marks.em))}
-        >
-          <Italic />
-        </button>
-        <button
-          data-help-label="Underline (Ctrl+U)"
-          aria-label="Underline"
-          className={mark("underline") ? "active" : ""}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => command(toggleMark(schema.marks.underline))}
-        >
-          <Underline />
-        </button>
-        <i />
-        <button
-          data-help-label="Align left"
-          aria-label="Align left"
-          onClick={() => align("left")}
-        >
-          <AlignLeft />
-        </button>
-        <button
-          data-help-label="Align centre"
-          aria-label="Align centre"
-          onClick={() => align("center")}
-        >
-          <AlignCenter />
-        </button>
-        <button
-          data-help-label="Align right"
-          aria-label="Align right"
-          onClick={() => align("right")}
-        >
-          <AlignRight />
-        </button>
-        <button
-          data-help-label="Bullet list"
-          aria-label="Bullet list"
-          onClick={() => command(wrapInList(schema.nodes.bullet_list))}
-        >
-          <List />
-        </button>
-        <button
-          data-help-label="Numbered list"
-          aria-label="Numbered list"
-          onClick={() => command(wrapInList(schema.nodes.ordered_list))}
-        >
-          <ListOrdered />
-        </button>
-        <button
-          data-help-label="Block quote"
-          aria-label="Block quote"
-          onClick={() => command(wrapIn(schema.nodes.blockquote))}
-        >
-          <Quote />
-        </button>
-        <i />
-        <button
-          data-help-label="Insert image"
-          aria-label="Insert image"
-          onClick={props.onImage}
-        >
-          <ImagePlus />
-        </button>
-        <button
-          data-help-label="Insert table"
-          aria-label="Insert table"
-          onClick={table}
-        >
-          <Table2 />
-        </button>
-        <button
-          data-help-label="Add table row"
-          aria-label="Add table row"
-          onClick={() => command(addRowAfter)}
-        >
-          +row
-        </button>
-        <button
-          data-help-label="Add table column"
-          aria-label="Add table column"
-          onClick={() => command(addColumnAfter)}
-        >
-          +col
-        </button>
-        <button
-          data-help-label="Delete table"
-          aria-label="Delete table"
-          onClick={() => command(deleteTable)}
-        >
-          −table
-        </button>
-        <button
-          data-help-label="Insert link"
-          aria-label="Insert link"
-          onClick={props.onLink}
-        >
-          <Link />
-        </button>
-        <button
-          data-help-label="Insert page break"
-          aria-label="Insert page break"
-          onClick={() => {
-            const v = editableView();
-            if (v)
-              v.dispatch(
-                v.state.tr.replaceSelectionWith(
-                  schema.nodes.page_break.create(),
-                ),
-              );
-          }}
-        >
-          <WrapText />
-        </button>
+        {!props.rawMode && (
+          <>
+            <select
+              aria-label="Paragraph type"
+              defaultValue="paragraph"
+              onChange={(e) =>
+                command(
+                  setBlockType(
+                    e.target.value === "paragraph"
+                      ? schema.nodes.paragraph
+                      : schema.nodes.heading,
+                    e.target.value === "paragraph"
+                      ? null
+                      : { level: Number(e.target.value) },
+                  ),
+                )
+              }
+            >
+              <option value="paragraph">Body</option>
+              <option value="1">Heading 1</option>
+              <option value="2">Heading 2</option>
+              <option value="3">Heading 3</option>
+            </select>
+            <select
+              aria-label="Font family"
+              value={currentFont}
+              onChange={(e) => setFont("fontFamily", e.target.value)}
+            >
+              {installedFonts.map((f) => (
+                <option key={f}>{f}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Font size"
+              defaultValue="12"
+              onChange={(e) => setFont("fontSize", Number(e.target.value))}
+            >
+              {[9, 10, 11, 12, 14, 16, 18, 24, 32].map((f) => (
+                <option key={f}>{f}</option>
+              ))}
+            </select>
+            <button
+              data-help-label="Bold (Ctrl+B)"
+              aria-label="Bold"
+              className={mark("strong") ? "active" : ""}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => command(toggleMark(schema.marks.strong))}
+            >
+              <Bold />
+            </button>
+            <button
+              data-help-label="Italic (Ctrl+I)"
+              aria-label="Italic"
+              className={mark("em") ? "active" : ""}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => command(toggleMark(schema.marks.em))}
+            >
+              <Italic />
+            </button>
+            <button
+              data-help-label="Underline (Ctrl+U)"
+              aria-label="Underline"
+              className={mark("underline") ? "active" : ""}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => command(toggleMark(schema.marks.underline))}
+            >
+              <Underline />
+            </button>
+            <i />
+            <button
+              data-help-label="Align left"
+              aria-label="Align left"
+              onClick={() => align("left")}
+            >
+              <AlignLeft />
+            </button>
+            <button
+              data-help-label="Align centre"
+              aria-label="Align centre"
+              onClick={() => align("center")}
+            >
+              <AlignCenter />
+            </button>
+            <button
+              data-help-label="Align right"
+              aria-label="Align right"
+              onClick={() => align("right")}
+            >
+              <AlignRight />
+            </button>
+            <button
+              data-help-label="Bullet list"
+              aria-label="Bullet list"
+              onClick={() => command(wrapInList(schema.nodes.bullet_list))}
+            >
+              <List />
+            </button>
+            <button
+              data-help-label="Numbered list"
+              aria-label="Numbered list"
+              onClick={() => command(wrapInList(schema.nodes.ordered_list))}
+            >
+              <ListOrdered />
+            </button>
+            <button
+              data-help-label="Block quote"
+              aria-label="Block quote"
+              onClick={() => command(wrapIn(schema.nodes.blockquote))}
+            >
+              <Quote />
+            </button>
+            <i />
+            <button
+              data-help-label="Insert image"
+              aria-label="Insert image"
+              onClick={props.onImage}
+            >
+              <ImagePlus />
+            </button>
+            <button
+              data-help-label="Insert table"
+              aria-label="Insert table"
+              onClick={table}
+            >
+              <Table2 />
+            </button>
+            <button
+              data-help-label="Add table row"
+              aria-label="Add table row"
+              onClick={() => command(addRowAfter)}
+            >
+              +row
+            </button>
+            <button
+              data-help-label="Add table column"
+              aria-label="Add table column"
+              onClick={() => command(addColumnAfter)}
+            >
+              +col
+            </button>
+            <button
+              data-help-label="Delete table"
+              aria-label="Delete table"
+              onClick={() => command(deleteTable)}
+            >
+              −table
+            </button>
+            <button
+              data-help-label="Insert link"
+              aria-label="Insert link"
+              onClick={props.onLink}
+            >
+              <Link />
+            </button>
+            <button
+              data-help-label="Insert page break"
+              aria-label="Insert page break"
+              onClick={() => {
+                const v = editableView();
+                if (v)
+                  v.dispatch(
+                    v.state.tr.replaceSelectionWith(
+                      schema.nodes.page_break.create(),
+                    ),
+                  );
+              }}
+            >
+              <WrapText />
+            </button>
+          </>
+        )}
+        {props.onToggleRaw && (
+          <button
+            type="button"
+            aria-label="Raw"
+            aria-pressed={!!props.rawMode}
+            disabled={props.rawDisabled}
+            onClick={props.onToggleRaw}
+            data-help="Edit source markup on the document pages. Turn Raw off to return to formatted writing."
+          >
+            Raw
+          </button>
+        )}
         <span className="toolbar-spacer" />
         <button
           className={props.showStructure ? "active" : ""}

@@ -11,6 +11,10 @@ export function persistentCaret() {
       caret.setAttribute("aria-hidden", "true");
       host.append(caret);
       const update = (current: EditorView) => {
+        caret.classList.toggle(
+          "is-editing",
+          current.hasFocus() && document.hasFocus(),
+        );
         const selection = current.state.selection;
         let head = selection.head;
         let empty = selection instanceof TextSelection && selection.empty;
@@ -41,6 +45,10 @@ export function persistentCaret() {
       observer.observe(host);
       view.dom.addEventListener("load", refresh, true);
       view.dom.addEventListener("keyup", refresh);
+      view.dom.addEventListener("focus", refresh);
+      view.dom.addEventListener("blur", refresh);
+      window.addEventListener("focus", refresh);
+      window.addEventListener("blur", refresh);
       view.dom.addEventListener("pointerup", refresh);
       document.fonts.addEventListener("loadingdone", refresh);
       document.addEventListener("selectionchange", refresh);
@@ -51,6 +59,10 @@ export function persistentCaret() {
           observer.disconnect();
           view.dom.removeEventListener("load", refresh, true);
           view.dom.removeEventListener("keyup", refresh);
+          view.dom.removeEventListener("focus", refresh);
+          view.dom.removeEventListener("blur", refresh);
+          window.removeEventListener("focus", refresh);
+          window.removeEventListener("blur", refresh);
           view.dom.removeEventListener("pointerup", refresh);
           document.fonts.removeEventListener("loadingdone", refresh);
           document.removeEventListener("selectionchange", refresh);

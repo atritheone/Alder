@@ -629,3 +629,14 @@ def test_sapi_overlapping_progress_is_accepted_without_regenerating(service, mon
     assert done['status']=='ready', done
     assert calls==['Alder reads clearly.'] and not service.checked
     assert [w['text'] for w in done['chunks'][0]['wordTimings']]==['Alder','reads','clearly']
+
+
+def test_spoken_ranges_preserve_source_mapping_and_explicit_pronunciation():
+    from alder.speech_quality import speech_projection
+    text = 'Between 1914–1925, things changed.'
+    spoken, mapping = speech_projection(text, [], 'default')
+    assert spoken == 'Between 1914 to 1925, things changed.'
+    assert text[mapping[0]['sourceStart']:mapping[0]['sourceEnd']] == '1914–1925'
+    assert spoken[mapping[0]['spokenStart']:mapping[0]['spokenEnd']] == '1914 to 1925'
+    spoken, _ = speech_projection(text, [{'word': '1914–1925', 'spoken': 'the early period'}], 'default')
+    assert spoken == 'Between the early period, things changed.'

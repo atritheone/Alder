@@ -23,7 +23,7 @@ def publication_project(project: dict) -> dict:
         p["sections"].append({"id": identifier, "title": title, "role": chapter.get("role", "chapter"), "order": order})
         p["clips"].append({"id": identifier, "trackId": "book-output", "title": chapter["title"],
                            "document": deepcopy(chapter["document"]), "text": chapter["text"],
-                           "variants": [], "voiceId": chapter.get("voiceId")})
+                           "variants": [], "voiceId": chapter.get("voiceId"), **({"rawSource":deepcopy(chapter["rawSource"])} if chapter.get("rawSource") else {})})
         p["placements"].append({"id": "book-" + identifier, "clipId": identifier, "sectionId": identifier,
                                 "order": 0, "include": chapter.get("include", True)})
     return p

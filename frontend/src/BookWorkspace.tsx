@@ -16,6 +16,8 @@ import type { Annotation, Chapter, Project } from "./types";
 import type { FlowPage } from "./pageFlow";
 import "./book-workspace.css";
 import DocumentReader from "./DocumentReader";
+import { sourceForChapter, parseRawSource, rawTextDocument } from "./rawSource";
+import { documentText } from "./textProjection";
 
 type Props = {
   flush: () => Promise<void>;
@@ -43,6 +45,17 @@ export default function BookWorkspace(p: Props) {
   const isBook = !["txt", "docx"].includes(p.project.settings.documentKind);
   const chapters = p.project.book?.chapters || [];
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
+  const [rawActive, setRawActive] = useState(false);
+  const [rawOpenError, setRawOpenError] = useState("");
+  useEffect(() => {
+    setRawActive(false);
+    setRawOpenError("");
+  }, [chapter?.id]);
+  const showRaw = rawActive && p.view === "Write" && !p.previewActive;
+  const rawDocument = useMemo(
+    () => rawTextDocument(chapter?.rawSource?.text || ""),
+    [chapter?.rawSource?.text],
+  );
   const [pages, setPages] = useState<FlowPage[]>([]);
   const [pageNumber, setPageNumber] = useState("1");
   useEffect(() => setPageNumber("1"), [chapter?.id]);
@@ -87,6 +100,47 @@ export default function BookWorkspace(p: Props) {
       const target = project.book!.chapters.find((c) => c.id === chapter.id);
       if (target) fn(target);
     });
+  const toggleRaw = () => {
+    if (showRaw) {
+      setRawActive(false);
+      return;
+    }
+    try {
+      const source = sourceForChapter({
+        ...chapter,
+        rawFormat:
+          chapter.rawFormat ||
+          (p.project.settings.preferredFormat === "md" ||
+          (chapters.length === 1 &&
+            /\.(md|markdown)$/i.test(p.project.lastImport?.name || ""))
+            ? "markdown"
+            : "html"),
+      });
+      update((c) => {
+        c.rawSource = source;
+        c.rawFormat = source.format;
+      });
+      setRawOpenError("");
+      setRawActive(true);
+    } catch (error) {
+      setRawOpenError((error as Error).message);
+    }
+  };
+  const editRaw = (text: string) => {
+    const source = { format: chapter.rawSource!.format, text };
+    try {
+      const document = parseRawSource(source);
+      update((c) => {
+        c.rawSource = source;
+        c.document = document;
+        c.text = documentText(document);
+      });
+    } catch (error) {
+      update((c) => {
+        c.rawSource = { ...source, error: (error as Error).message };
+      });
+    }
+  };
   const add = () => {
     const next = newChapter(`Chapter ${chapters.length + 1}`);
     p.change((project) => project.book!.chapters.push(next));
@@ -168,16 +222,18 @@ export default function BookWorkspace(p: Props) {
         </nav>
       )}
       <div className="book-main">
-        <DocumentReader
-          project={p.project}
-          chapter={chapter}
-          editorRef={p.editorRef}
-          flush={p.flush}
-          change={p.change}
-          onChapter={p.onChapter}
-          onHighlight={setReadingRange}
-          onPlaybackChange={setSpeechPlaying}
-        />
+        {!showRaw && (
+          <DocumentReader
+            project={p.project}
+            chapter={chapter}
+            editorRef={p.editorRef}
+            flush={p.flush}
+            change={p.change}
+            onChapter={p.onChapter}
+            onHighlight={setReadingRange}
+            onPlaybackChange={setSpeechPlaying}
+          />
+        )}
         {isBook && (
           <header className="chapter-toolbar">
             <input
@@ -217,6 +273,12 @@ export default function BookWorkspace(p: Props) {
               <Trash2 size={13} />
             </button>
           </header>
+        )}
+        {rawOpenError && <p role="alert">{rawOpenError}</p>}
+        {showRaw && chapter.rawSource?.error && (
+          <p className="raw-source-error" role="alert">
+            {chapter.rawSource.error}
+          </p>
         )}
         {p.previewActive && (
           <PublicationPreview
@@ -280,19 +342,29 @@ export default function BookWorkspace(p: Props) {
           >
             <Editor
               ref={p.editorRef}
-              label="Chapter text editor"
-              document={chapter.document}
-              identity={chapter.id}
+              label={showRaw ? "Raw text editor" : "Chapter text editor"}
+              document={showRaw ? rawDocument : chapter.document}
+              identity={chapter.id + (showRaw ? ":raw" : ":formatted")}
+              rawMode={showRaw}
+              onToggleRaw={p.view === "Write" ? toggleRaw : undefined}
+              rawDisabled={
+                speechPlaying ||
+                !!p.externalPlayback ||
+                (showRaw && !!chapter.rawSource?.error)
+              }
               onChange={(document, text) =>
-                update((c) => {
-                  c.document = document;
-                  c.text = text;
-                })
+                showRaw
+                  ? editRaw(text)
+                  : update((c) => {
+                      c.document = document;
+                      c.text = text;
+                      delete c.rawSource;
+                    })
               }
               onSelection={p.onSelection}
               onFocus={p.onFocus}
-              annotations={p.annotations}
-              readingRange={readingRange}
+              annotations={showRaw ? [] : p.annotations}
+              readingRange={showRaw ? null : readingRange}
               persistentCaret
               pageLayout={layout}
               layoutVisible={p.view === "Write" && !p.previewActive}
@@ -313,7 +385,7 @@ export default function BookWorkspace(p: Props) {
               onImage={p.onImage}
               onLink={p.onLink}
               onComplete={p.onComplete}
-              fontFamily={p.project.settings.fontFamily}
+              fontFamily={showRaw ? "Consolas" : p.project.settings.fontFamily}
               fontSize={(p.project.settings.fontSize * 96) / 72}
               styles={p.project.styles}
             />
@@ -370,6 +442,7 @@ export default function BookWorkspace(p: Props) {
                 <button
                   type="button"
                   aria-label="Preview"
+                  disabled={!!chapter.rawSource?.error}
                   data-help="Preview the saved publication layout. Back To Write returns to editing at your current position."
                   onClick={() => p.onPreview(true)}
                 >

@@ -20,7 +20,7 @@ export async function openDocuments(files: File[]): Promise<Project | null> {
     const kind = file.name.toLowerCase().endsWith(".txt") ? "txt" : "docx";
     Object.assign(imported.settings, {
       documentKind: kind,
-      preferredFormat: kind,
+      preferredFormat: /\.(md|markdown)$/i.test(file.name) ? "md" : kind,
       includeTitle: false,
       footer: false,
     });

@@ -136,3 +136,21 @@ def test_simple_document_exports_only_authored_text_and_cambria_layout(tmp_path)
     if "Cambria" in installed_families():
         assert not any("substituted" in warning for warning in pdf["warnings"])
     assert "7" in page.extract_text()
+
+
+def test_markdown_source_survives_import_save_and_export(tmp_path):
+    source = '# A title\n\nAn __important__ [link][ref].\n\n[ref]: https://example.com\n'
+    path = tmp_path / 'source.md'
+    path.write_bytes(source.encode('utf-8'))
+    imported = import_document(path)
+    assert imported['rawSource'] == {'format':'markdown', 'text':source}
+    p = book_project()
+    p['book']['chapters'] = [dict(p['book']['chapters'][0], document=imported['document'], rawSource=imported['rawSource'])]
+    saved = validate_project(p)
+    exported = build_export(saved, 'md', tmp_path)
+    assert source.strip() in Path(exported['path']).read_text('utf-8')
+    edited = deepcopy(saved)
+    edited['book']['chapters'][0]['document'] = text_document('Edited formatted text.')
+    edited = validate_project(edited, saved)
+    assert 'rawSource' not in edited['book']['chapters'][0]
+    assert source.strip() not in Path(build_export(edited, 'md', tmp_path)['path']).read_text('utf-8')

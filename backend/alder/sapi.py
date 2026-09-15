@@ -77,7 +77,7 @@ def render(voice_id, text, path, rate=0, volume=100, pitch=0):
     return _call({"operation": "render", "voice": voice["name"], "text": text, "path": str(path), "rate": rate, "volume": volume, "pitch": pitch})
 
 
-NATIVE_TIMING_VERSION = 3
+NATIVE_TIMING_VERSION = 4
 
 
 def native_timings(events, duration):
@@ -100,19 +100,32 @@ def native_timings(events, duration):
         if start < 0 or length <= 0 or end <= covered:
             continue
         overlap = max(0, covered - start)
-        text = encoded[overlap * 2:].decode('utf-16-le').strip()
+        remaining = encoded[overlap * 2:].decode('utf-16-le')
+        source_start = start + overlap + len(remaining[:len(remaining)-len(remaining.lstrip())].encode('utf-16-le')) // 2
+        text = remaining.strip()
         covered = end
         if text:
-            groups.append((text, max(0., min(duration, float(event['seconds'])))))
+            groups.append((text, max(0., min(duration, float(event['seconds']))), source_start))
     words = []
-    for i, (text, start) in enumerate(groups):
+    previous_end = None
+    for i, (text, start, source_start) in enumerate(groups):
         end = max(start, groups[i+1][1] if i+1 < len(groups) else duration)
-        tokens = re.findall(r'\S+', text)
-        total = sum(len(token) for token in tokens)
+        tokens = list(re.finditer(r'\S+', text))
+        total = sum(len(token.group()) for token in tokens)
         offset = 0
-        for token in tokens:
+        for match in tokens:
+            token = match.group()
+            token_start = source_start + len(text[:match.start()].encode('utf-16-le')) // 2
             next_offset = offset + len(token)
-            words.append({'text':token, 'startSeconds':start+(end-start)*offset/total,
-                          'endSeconds':start+(end-start)*next_offset/total})
+            word_end = start+(end-start)*next_offset/total
+            if words and previous_end == token_start:
+                # One written token may produce several native events: 1898
+                # becomes 18 + 98, decimals and abbreviations split likewise.
+                words[-1]['text'] += token
+                words[-1]['endSeconds'] = word_end
+            else:
+                words.append({'text':token, 'startSeconds':start+(end-start)*offset/total,
+                              'endSeconds':word_end})
+            previous_end = token_start + len(token.encode('utf-16-le')) // 2
             offset = next_offset
     return words

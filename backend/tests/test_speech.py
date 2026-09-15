@@ -441,3 +441,44 @@ def test_voice_library_names_removal_and_restore_keep_saved_references(service, 
         service.update_voice(voice["id"], name=" ")
     with pytest.raises(ValueError):
         service.update_voice("../outside", removed=True)
+
+
+def test_ranges_and_negative_numbers_keep_their_meaning():
+    for written, spoken in [('1914–1925', '1914 to 1925'), ('1914-1925', '1914 to 1925'),
+                            ('Pages 10–20.', 'Pages ten to twenty.'), ('1.5–2.5', 'one point five to two point five')]:
+        assert compare_transcript(written, spoken)['matched']
+    assert not compare_transcript('-5', 'five')['matched']
+    assert not compare_transcript('3-5', 'three to five')['matched']
+    assert not compare_transcript('1914–1925', '1914 to 1926')['matched']
+    assert not compare_transcript('1914–1925', '1914 1925')['matched']
+
+
+def test_numbered_heading_stays_with_its_text_and_separate_from_citation():
+    text = '([Museum][2])\n2. 1914–1925: A new period\nThe story continues.'
+    chunks = split_narration(text)
+    assert chunks[0]['text'] == '([Museum][2])'
+    assert chunks[1]['text'].startswith('2. 1914–1925:')
+    assert ' '.join(c['text'] for c in chunks).split() == text.split()
+    assert all(text[c['sourceStart']:c['sourceEnd']] == c['text'] for c in chunks)
+
+
+@pytest.mark.parametrize('written,spoken', [('20th','twentieth'), ('21st','twenty-first'), ('112th','one hundred and twelfth'), ('1000th','one thousandth'), ('99th','ninety ninth')])
+def test_ordinal_spellings_are_equivalent(written, spoken):
+    assert compare_transcript(written, spoken)['matched']
+    assert compare_transcript(spoken, written)['matched']
+
+
+def test_ordinal_normalization_does_not_hide_changed_numbers():
+    for a,b in [('20th','twenty'), ('20th','nineteenth'), ('11st','eleventh'), ('021st','twenty first')]:
+        assert not compare_transcript(a,b)['matched']
+
+
+def test_numbered_heading_does_not_merge_with_following_prose():
+    text = '1. The trade and the maritime scene were separate\nA new paragraph explains the history.'
+    chunks = split_narration(text)
+    assert [c['text'] for c in chunks] == text.split('\n')
+
+
+def test_recognisable_spelling_does_not_trigger_new_speech():
+    assert compare_transcript('a recognisable economy', 'a recognizable economy')['matched']
+    assert not compare_transcript('a recognisable economy', 'an unrecognizable economy')['matched']

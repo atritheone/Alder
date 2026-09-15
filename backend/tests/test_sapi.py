@@ -45,3 +45,14 @@ def test_ssml_entity_counts_do_not_trim_unrelated_words():
         {'text':'read','start':116,'length':8,'seconds':.6},
     ], 1)
     assert [w['text'] for w in words] == ['Zoë','&','Alice','read']
+
+
+def test_native_fragments_of_one_number_merge_but_separate_numbers_do_not():
+    words = native_timings([
+        {'text':'18','start':20,'length':2,'seconds':0},
+        {'text':'98','start':22,'length':2,'seconds':.2},
+        {'text':'18','start':25,'length':2,'seconds':.4},
+        {'text':'98','start':28,'length':2,'seconds':.6},
+    ], 1)
+    assert [w['text'] for w in words] == ['1898','18','98']
+    assert words[0]['endSeconds'] == .4

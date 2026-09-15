@@ -96,15 +96,24 @@ def split_narration(text: str, max_chars=240, max_words=45):
     for paragraph in re.finditer(r"[^\n]+(?:\n(?!\s*\n)[^\n]+)*", text):
         raw = paragraph.group()
         sentence_start = 0
-        boundaries = []
+        # Numbered headings/list entries belong to the text after their number,
+        # never to a citation at the end of the preceding paragraph.
+        numbered = list(re.finditer(r"(?m)^[ \t]*\d+[.)][ \t]+(?=\S)", raw))
+        boundaries = [m.start() for m in numbered if m.start()]
+        for heading in numbered:
+            newline = raw.find("\n", heading.end())
+            if newline >= 0:
+                boundaries.append(newline + 1)
         for match in re.finditer(r"[.!?]+[\"'”’»)]*(?=\s|$)", raw):
+            if any(m.start() <= match.start() < m.end() for m in numbered):
+                continue
             prefix = raw[:match.start()]
             previous = re.search(r"([\w.]+)$", prefix)
             token = previous.group(1).lower() if previous else ""
             if match.group().startswith(".") and (token in ABBREVIATIONS or re.fullmatch(r"(?:[A-Za-z]\.)*[A-Za-z]", token)):
                 continue
             boundaries.append(match.end())
-        boundaries.append(len(raw))
+        boundaries = sorted(set([*boundaries, len(raw)]))
         paragraph_chunks = []
         for end in boundaries:
             sentence = raw[sentence_start:end]

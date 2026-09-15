@@ -108,7 +108,8 @@ def project_document(project: dict) -> list[dict]:
             blocks.extend(copy.deepcopy(document.get("content", [])))
             ids.append(clip["id"])
         result.append({"id": section["id"], "title": section.get("title", ""), "role": section.get("role", "chapter"),
-                       "blocks": blocks, "text": plain_text({"type": "doc", "content": blocks}), "clipIds": ids})
+                       "blocks": blocks, "text": plain_text({"type": "doc", "content": blocks}), "clipIds": ids,
+                       **({"rawMarkdown":clips[ids[0]]["rawSource"]["text"]} if len(selected)==1 and not selected[0][1].get("frozenDocument") and not selected[0][1].get("frozenText") and not selected[0][1].get("variantId") and not clips[ids[0]].get("activeVariantId") and clips[ids[0]].get("rawSource",{}).get("format")=="markdown" and not clips[ids[0]]["rawSource"].get("error") else {})})
     return result
 
 
@@ -1111,8 +1112,8 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
             for section in sections:
                 if section["title"]:
                     pieces.append(("## " if format == "md" else "") + section["title"] + "\n\n")
-                pieces.append((section["text"] + "\n\n") if format == "txt" else "".join(_markdown(n, warnings) for n in section["blocks"]))
-            path.write_text("".join(pieces).rstrip() + "\n", "utf-8")
+                pieces.append((section["text"] + "\n\n") if format == "txt" else section["rawMarkdown"] + "\n\n" if "rawMarkdown" in section else "".join(_markdown(n, warnings) for n in section["blocks"]))
+            path.write_text("".join(pieces).rstrip() + "\n", "utf-8", newline="")
             if format == "txt":
                 _warn(warnings, "Plain text preserves wording and order but omits rich formatting, images, links and page settings.")
         elif format == "docx":
@@ -1399,6 +1400,7 @@ def import_document(path: Path) -> dict:
     extension = path.suffix.lower()
     warnings, assets = [], []
     title = path.stem
+    raw_source = None
     if extension in (".txt", ".md", ".markdown", ".html", ".htm"):
         raw = path.read_bytes()
         try:
@@ -1410,6 +1412,7 @@ def import_document(path: Path) -> dict:
             document = text_document(text)
         else:
             if extension in (".md", ".markdown"):
+                raw_source = {"format":"markdown", "text":text}
                 from markdown_it import MarkdownIt
                 text = MarkdownIt("commonmark", {"html": False}).render(text)
             document = _import_html(text, warnings, assets)
@@ -1457,4 +1460,4 @@ def import_document(path: Path) -> dict:
         warnings.extend(notices)
         document = text_document(text)
     document = _normalise_import_blocks(document)
-    return {"title":title, "document":document, "text":plain_text(document), "warnings":warnings, "assets":assets}
+    return {"title":title, "document":document, "text":plain_text(document), "warnings":warnings, "assets":assets, **({"rawSource":raw_source, "rawFormat":"markdown"} if raw_source else {})}

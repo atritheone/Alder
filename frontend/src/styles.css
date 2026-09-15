@@ -3381,8 +3381,25 @@ input[type="range"]:disabled {
   width: 1px;
   background: #494949;
 }
+.write-caret.is-editing {
+  animation: write-caret-blink 1s step-end infinite;
+}
+@keyframes write-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
 .book-workspace.speech-playing .write-caret {
   visibility: hidden;
+  animation: none;
+}
+/* Keep the following lines visible before the spoken word reaches the edge. */
+.book-workspace .reading-word {
+  scroll-margin-block: 1lh 4lh;
 }
 .voice-selector {
   display: flex;

@@ -24,6 +24,8 @@ export function migrateBook(project: Project): Project {
     .sort((a, b) => a.order - b.order)
     .map((section) => {
       const blocks: DocNode[] = [];
+      let rawSource: Chapter["rawSource"];
+      let meaningfulSources = 0;
       for (const placement of orderedPlacements(project).filter(
         (p) => p.sectionId === section.id && p.include,
       )) {
@@ -39,6 +41,15 @@ export function migrateBook(project: Project): Project {
         if (!version && !placement.frozenDocument)
           throw new Error("An existing manuscript version is missing.");
         const document = placement.frozenDocument || version!.document;
+        if (
+          document.content?.some(
+            (node) => node.type !== "paragraph" || documentText(node).trim(),
+          )
+        ) {
+          meaningfulSources++;
+          if (!placement.frozenDocument && !pinned && !source.activeVariantId)
+            rawSource = source.rawSource;
+        }
         blocks.push(...structuredClone(document.content || []));
       }
       return {
@@ -47,6 +58,9 @@ export function migrateBook(project: Project): Project {
           content: blocks.length ? blocks : [{ type: "paragraph" }],
         }),
         role: section.role,
+        ...(meaningfulSources === 1 && rawSource
+          ? { rawSource, rawFormat: rawSource.format }
+          : {}),
       };
     });
   return {

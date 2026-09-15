@@ -306,7 +306,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         clip_id = uid("clip_")
         p["clips"].append({"id": clip_id, "trackId": track["id"], "slot": slot,
                            "title": imported.get("title") or Path(file.filename).stem,
-                           "document": imported.get("document") or text_document(imported.get("text", "")), "variants": [], "tags": ["imported"]})
+                           "document": imported.get("document") or text_document(imported.get("text", "")), "variants": [], "tags": ["imported"], **({"rawSource":imported["rawSource"], "rawFormat":imported["rawFormat"]} if imported.get("rawSource") else {})})
         if not p["sections"]:
             p["sections"].append({"id": uid("section_"), "title": "Imported text", "role": "chapter", "order": 0})
         section = p["sections"][-1]
@@ -315,7 +315,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         p["lastImport"] = {"name": file.filename, "warnings": imported.get("warnings", []), "clipId": clip_id, "createdAt": now()}
         if p.get("book"):
             p["book"]["chapters"].append({"id": uid("chapter_"), "title": imported.get("title") or Path(file.filename).stem,
-                "document": p["clips"][-1]["document"], "text": "", "include": True, "role": "chapter", "voiceId": None})
+                "document": p["clips"][-1]["document"], "text": "", "include": True, "role": "chapter", "voiceId": None, **({"rawSource":imported["rawSource"], "rawFormat":imported["rawFormat"]} if imported.get("rawSource") else {})})
         return await run_in_threadpool(store.update, project_id, p, p["revision"])
 
     @app.get("/api/projects/{project_id}/preview", response_class=HTMLResponse)

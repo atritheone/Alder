@@ -368,3 +368,14 @@
   user-select: none;
   line-height: 0;
 }
+
+/* Raw uses the same page geometry, flow engine and navigation as formatted Write. */
+.raw-mode .ProseMirror p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.raw-source-error {
+  margin: 0;
+  padding: 6px 12px;
+}

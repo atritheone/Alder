@@ -325,6 +325,13 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
             register(chapter, "chapter")
             if not isinstance(chapter.get("title"), str) or not chapter["title"].strip() or len(chapter["title"]) > 300:
                 raise ValidationError("A chapter requires a title of 1–300 characters.")
+            if "rawSource" in chapter:
+                source = chapter["rawSource"]
+                if not isinstance(source, dict) or source.get("format") not in {"markdown", "html"} or not isinstance(source.get("text"), str):
+                    raise ValidationError("Raw source requires a text value and a Markdown or HTML format.")
+                old = next((c for c in (previous or {}).get("book", {}).get("chapters", []) if c["id"] == chapter["id"]), None)
+                if old and source == old.get("rawSource") and chapter.get("document") != old.get("document"):
+                    chapter.pop("rawSource")
             chapter["document"] = validate_document(chapter.get("document"))
             chapter["text"] = document_text(chapter["document"])
             chapter.setdefault("include", True)

@@ -29,6 +29,8 @@ export type Variant = {
   createdAt: string;
 };
 export type Clip = {
+  rawSource?: RawSource;
+  rawFormat?: "markdown" | "html";
   createdAt?: string;
   updatedAt?: string;
   id: string;
@@ -95,6 +97,7 @@ export type NamedStyle = StyleProperties & {
   basedOn?: string | null;
 };
 export type Project = {
+  lastImport?: { name: string; clipId?: string; warnings?: string[] };
   book?: { version: 1; chapters: Chapter[] };
   id: string;
   name: string;
@@ -125,7 +128,14 @@ export type Project = {
   };
   assets: Asset[];
 };
+export type RawSource = {
+  format: "markdown" | "html";
+  text: string;
+  error?: string;
+};
 export type Chapter = {
+  rawSource?: RawSource;
+  rawFormat?: "markdown" | "html";
   id: string;
   title: string;
   role: string;

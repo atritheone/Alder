@@ -38,7 +38,7 @@ def normalize_spoken(text, mappings):
 
 def speech_projection(text, entries, voice_id):
     from .speech import pronunciation_projection
-    from .speech_comparison import expand_contraction
+    from .speech_comparison import expand_contraction, NUMBER_RANGE, spoken_range
     spoken, mappings = pronunciation_projection(text, entries, voice_id)
     automatic = []
     for match in re.finditer(r"\b[^\W_]+['’][^\W_]+\b", text):
@@ -46,6 +46,9 @@ def speech_projection(text, entries, voice_id):
         if expanded == match.group() or any(m['sourceStart'] < match.end() and match.start() < m['sourceEnd'] for m in mappings):
             continue
         automatic.append({'word':match.group(), 'spoken':expanded, 'caseSensitive':True})
+    for match in NUMBER_RANGE.finditer(text):
+        if not any(m['sourceStart'] < match.end() and match.start() < m['sourceEnd'] for m in mappings):
+            automatic.append({'word': match.group(), 'spoken': spoken_range(match), 'caseSensitive': True})
     if automatic:
         spoken, mappings = pronunciation_projection(text, [*entries, *automatic], voice_id)
     return normalize_spoken(spoken, mappings), mappings
