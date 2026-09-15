@@ -29,7 +29,7 @@ export default function PlaybackSpeed({
     >
       <input
         aria-label={`${label} slider`}
-        title="Adjust speed in 0.01 steps"
+        data-help-label="Adjust speed in 0.01 steps"
         type="range"
         min="0.25"
         max="3"
@@ -40,7 +40,7 @@ export default function PlaybackSpeed({
       />
       <input
         aria-label={label}
-        title="Type an exact speed (0.25–3.00×), to two decimal places"
+        data-help-label="Type an exact speed (0.25–3.00×), to two decimal places"
         type="number"
         min="0.25"
         max="3"

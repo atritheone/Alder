@@ -307,7 +307,7 @@ function Differences({ check }: { check: SpeechCheck }) {
             ? ` · ${new Date(check.checkedAt).toLocaleString()}`
             : ""}
           {check.modelRevision ? (
-            <span title={check.modelRevision}>
+            <span data-help-label={check.modelRevision}>
               Model {check.modelRevision.slice(0, 12)}
             </span>
           ) : null}

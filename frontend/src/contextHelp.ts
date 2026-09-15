@@ -1,4 +1,21 @@
 const descriptions: Record<string, string> = {
+  Words:
+    "Browse words by category, search their meanings, and drag them into Write or Sandbox. Double-click a word to insert it. Star a word to keep it in Favourites.",
+  Drafts:
+    "Open independent Sandbox drafts. Filter by their last edit over the past day, week, month, or year.",
+  Templates:
+    "Create a plain text document, a Word document, or a book with its own page and chapter settings.",
+  Voices:
+    "Choose or add voices, rename or test them, and manage spoken pronunciations without changing your written text.",
+  Projects: "Open a saved project or create a new document or book.",
+  "Project Assets":
+    "Images inserted in your document or Sandbox are collected here and saved with the project.",
+  "Library Filters":
+    "Narrow the library contents by category. Drafts use rolling periods based on their last edit.",
+  "Arrange pages":
+    "Drag pages into reading order, or use the arrows. Moving a page adds explicit page breaks to preserve its boundaries. Undo typing reverses the move.",
+  "Loading Reading":
+    "Preparing speech for playback. Reading begins automatically when the next passage is ready.",
   Bold: "Make the selected text bold, or turn bold on for the text you type next. Shortcut: Ctrl+B.",
   Italic:
     "Italicise the selected text, or turn italics on for the text you type next. Shortcut: Ctrl+I.",
@@ -55,22 +72,18 @@ const descriptions: Record<string, string> = {
     "Highlight only the word being read and scroll to keep it visible. Turn this off to read elsewhere while audio continues.",
   "Reading voice":
     "Choose the voice used to read this chapter. Your choice is saved with the chapter.",
-  "Reading scope":
-    "Read the current chapter, all included chapters, a text selection, or everything after the cursor.",
   Read: "Generate speech for the chosen text and begin playback when the first passage is ready.",
   "Document reader":
     "Listen to your writing, choose a voice, adjust speed and volume, or follow each spoken word on the page.",
   "Pause reading":
-    "Pause at the current spoken position. Resume continues from the same point.",
+    "Pause at the current spoken position and move the text cursor there. Play continues the same audio from that point.",
   "Resume reading": "Continue listening from the paused position.",
   "Stop reading":
-    "Stop playback and clear the word highlight. Generated audio remains available.",
+    "Stop playback, clear the word highlight, and move the text cursor to the spoken position. Play continues from there.",
   "Reading position":
     "Seek to a moment in the generated audio. Word highlighting follows the new playback position.",
-  "Reading audio format":
-    "Choose the format of the generated narration file: WAV, MP3, or FLAC.",
   "Reading bookmarks":
-    "Jump to a saved place in the text. Read from cursor to listen from that point.",
+    "Jump to a saved place in the text. Press Play to listen from that point.",
   Clipboard:
     "Insert text from the clipboard as a new chapter in this workspace.",
   Styles:
@@ -109,20 +122,21 @@ const descriptions: Record<string, string> = {
 export function helpFor(target: EventTarget | null): string {
   if (!(target instanceof Element)) return "";
   const element = target.closest(
-    "[data-help], button, input, select, textarea, [contenteditable], [aria-label]",
+    "[data-help], [data-help-label], button, input, select, textarea, [contenteditable], [aria-label]",
   );
   if (!element || element.closest(".context-help, .statusbar"))
     return element?.getAttribute("data-help") || "";
   const label =
     element.getAttribute("aria-label") ||
-    element.getAttribute("title") ||
+    element.getAttribute("data-help-label") ||
     element.closest("label")?.textContent?.trim() ||
     element.textContent?.trim() ||
     "";
   return (
     element.getAttribute("data-help") ||
     descriptions[label] ||
-    element.getAttribute("title") ||
+    element.getAttribute("data-help-label") ||
+    element.parentElement?.closest("[data-help]")?.getAttribute("data-help") ||
     (label
       ? `${label}. ${element.tagName === "SELECT" ? "Choose an option from the list." : element.tagName === "INPUT" ? "Edit this setting; changes are saved with your workspace." : ""}`
       : "")

@@ -127,12 +127,10 @@ export default function StylesManager({
       : undefined,
   };
   return (
-    <div className="styles-manager">
-      <p className="quiet">
-        Paragraph styles shape whole paragraphs. Character styles shape selected
-        words. Changes update every linked use; direct formatting takes
-        precedence. Leave a field blank to inherit it.
-      </p>
+    <div
+      className="styles-manager"
+      data-help="Paragraph styles shape whole paragraphs. Character styles shape selected words. Changes update every linked use; direct formatting takes precedence. Leave a field blank to inherit it."
+    >
       {resolutionError && (
         <p role="alert" className="style-warning">
           {resolutionError}
@@ -184,14 +182,14 @@ export default function StylesManager({
               Apply
             </button>
             <button
-              title={`Edit ${style.name}`}
+              data-help-label={`Edit ${style.name}`}
               aria-label={`Edit ${style.name}`}
               onClick={() => setEditing({ ...style })}
             >
               <Edit3 size={13} />
             </button>
             <button
-              title={`Duplicate ${style.name}`}
+              data-help-label={`Duplicate ${style.name}`}
               aria-label={`Duplicate ${style.name}`}
               onClick={() =>
                 setEditing({ ...style, id: uid(), name: `${style.name} copy` })
@@ -200,7 +198,7 @@ export default function StylesManager({
               <Copy size={13} />
             </button>
             <button
-              title={`Delete ${style.name}`}
+              data-help-label={`Delete ${style.name}`}
               aria-label={`Delete ${style.name}`}
               onClick={() => remove(style)}
             >

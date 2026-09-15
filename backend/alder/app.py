@@ -400,8 +400,23 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         return speech.capabilities() if speech else {"available": False, "message": speech_error}
 
     @app.get("/api/speech/voices")
-    def voices():
-        return {"voices": speech_service().voices()}
+    def voices(includeRemoved: bool = False):
+        return {"voices": speech_service().voices(include_removed=includeRemoved)}
+
+    @app.put("/api/speech/voices/{voice_id}")
+    async def update_voice(voice_id: str, request: Request):
+        data = await body(request)
+        try:
+            return await run_in_threadpool(speech_service().update_voice, voice_id, name=data.get("name"), removed=data.get("removed"))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/api/speech/voices/{voice_id}")
+    async def remove_voice(voice_id: str):
+        try:
+            return await run_in_threadpool(speech_service().update_voice, voice_id, removed=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.post("/api/speech/voices")
     async def add_voice(file: UploadFile = File(...), name: str = Form("Reference voice")):

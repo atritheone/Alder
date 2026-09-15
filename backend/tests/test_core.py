@@ -392,3 +392,18 @@ def test_draft_edit_dates_ignore_unrelated_project_saves(monkeypatch):
         draft.pop("updatedAt", None)
     restored = validate_project(legacy)
     assert restored["clips"][0]["updatedAt"] == previous["updatedAt"]
+
+
+def test_voice_library_api_changes_are_local_and_restorable(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from alder.app import create_app
+    monkeypatch.setattr("alder.sapi.voices", lambda: [{"id": "sapi-test", "name": "System Voice", "kind": "sapi"}])
+    with TestClient(create_app(tmp_path)) as client:
+        assert client.put("/api/speech/voices/sapi-test", json={"name": "Reading Voice"}).status_code == 200
+        assert client.delete("/api/speech/voices/sapi-test").status_code == 200
+        assert "sapi-test" not in {v["id"] for v in client.get("/api/speech/voices").json()["voices"]}
+        removed = client.get("/api/speech/voices?includeRemoved=true").json()["voices"]
+        assert next(v for v in removed if v["id"] == "sapi-test")["removed"] is True
+        assert client.put("/api/speech/voices/sapi-test", json={"removed": False}).status_code == 200
+        assert next(v for v in client.get("/api/speech/voices").json()["voices"] if v["id"] == "sapi-test")["name"] == "Reading Voice"
+        assert client.put("/api/speech/voices/sapi-test", json={"name": ""}).status_code == 422

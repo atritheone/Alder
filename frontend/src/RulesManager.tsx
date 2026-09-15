@@ -59,12 +59,10 @@ export default function RulesManager({
   };
   return (
     <>
-      <p className="quiet">
-        Create explainable rules for wording you want to notice. Matches are
-        literal text, with optional word boundaries and case matching.
-        Suggestions change your writing only when accepted.
-      </p>
-      <div className="manager-actions">
+      <div
+        className="manager-actions"
+        data-help="Create rules for wording you want to notice. Matches use literal text, optional word boundaries, and case matching. Suggestions change your writing only when accepted."
+      >
         <button
           className="accent"
           onClick={() =>
@@ -115,11 +113,16 @@ export default function RulesManager({
               “{rule.match}” {rule.replacement ? `→ “${rule.replacement}”` : ""}
             </p>
           </div>
-          <button title="Edit rule" onClick={() => setEditing({ ...rule })}>
+          <button
+            data-help-label="Edit rule"
+            aria-label="Edit rule"
+            onClick={() => setEditing({ ...rule })}
+          >
             <Edit3 size={12} />
           </button>
           <button
-            title="Remove rule"
+            data-help-label="Remove rule"
+            aria-label="Remove rule"
             onClick={() =>
               onChange((p) => {
                 p.settings.customRules = p.settings.customRules.filter(

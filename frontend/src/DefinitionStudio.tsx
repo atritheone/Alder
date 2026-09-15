@@ -464,7 +464,7 @@ export default function DefinitionStudio({
           <button
             type="button"
             aria-label="Close definition cards"
-            title="Close"
+            data-help-label="Close"
             onClick={onClose}
           >
             <X size={17} />
@@ -493,7 +493,7 @@ export default function DefinitionStudio({
               </label>
               <button
                 type="button"
-                title="New definition"
+                data-help-label="New definition"
                 aria-label="New definition"
                 onClick={() => select("draft")}
               >

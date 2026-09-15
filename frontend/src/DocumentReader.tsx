@@ -5,13 +5,21 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { BookmarkPlus, Download, Pause, Play, Square } from "lucide-react";
+import {
+  BookmarkPlus,
+  Download,
+  LoaderCircle,
+  Pause,
+  Play,
+  Square,
+} from "lucide-react";
 import { api, download, duration, mediaUrl } from "./api";
 import type { Chapter, Job, Project, Voice } from "./types";
 import type { EditorHandle } from "./Editor";
 
 import { useNarrationGain } from "./audioPlayback";
 import { spokenWord } from "./wordFollowing";
+import { readingCursorOffset } from "./readingCursor";
 import PlaybackSpeed from "./PlaybackSpeed";
 
 type Props = {
@@ -21,6 +29,7 @@ type Props = {
   flush: () => Promise<void>;
   change: (fn: (p: Project) => void) => void;
   onChapter: (id: string) => void;
+  onPlaybackChange: (playing: boolean) => void;
   onHighlight: (range: { start: number; end: number } | null) => void;
 };
 type Snapshot = {
@@ -36,14 +45,15 @@ export default function DocumentReader(p: Props) {
   const [active, setActive] = useState(false);
   const [job, setJob] = useState<Job | null>(null),
     [error, setError] = useState("");
-  const [scope, setScope] = useState("cursor"),
-    [speed, setSpeed] = useState(1),
+  const [speed, setSpeed] = useState(1),
     [volume, setVolume] = useState(2);
   const [rate, setRate] = useState(0),
     [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);
   const [follow, setFollow] = useState(true);
-  const [format, setFormat] = useState("wav");
+  const format = "wav";
+  const [buffering, setBuffering] = useState(false);
+  const [resumeAfterCancel, setResumeAfterCancel] = useState(false);
   const [chunkIndex, setChunkIndex] = useState(0);
   const fullAudio = useRef(false),
     shouldPlay = useRef(true);
@@ -68,9 +78,20 @@ export default function DocumentReader(p: Props) {
     setVoice(p.chapter.voiceId || "default");
   }, [p.chapter.id]);
   useEffect(() => {
-    api<{ voices: Voice[] }>("/api/speech/voices")
-      .then((r) => setVoices(r.voices))
-      .catch((e) => setError(e.message));
+    const refresh = () =>
+      api<{ voices: Voice[] }>("/api/speech/voices")
+        .then((r) => {
+          setVoices(r.voices);
+          setVoice((current) =>
+            r.voices.some((v) => v.id === current)
+              ? current
+              : r.voices[0]?.id || "default",
+          );
+        })
+        .catch((e) => setError(e.message));
+    void refresh();
+    window.addEventListener("alder-voices-changed", refresh);
+    return () => window.removeEventListener("alder-voices-changed", refresh);
   }, []);
   useEffect(() => {
     if (
@@ -194,26 +215,89 @@ export default function DocumentReader(p: Props) {
     chunkIndex,
   ]);
   const requestInFlight = useRef(false);
+  const playbackRequest = useRef(0);
   const [requesting, setRequesting] = useState(false);
   const lastConfiguration = useRef("");
-  const currentConfiguration = () =>
+  const currentConfiguration = (
+    cursor = p.editorRef.current?.getSelectionOffsets().start,
+  ) =>
     JSON.stringify([
       voice,
       rate,
       pitch,
       format,
-      scope,
       p.project.settings.speechOptions,
-      scope === "book" ? null : p.chapter.id,
-      scope === "book"
-        ? p.project.book?.chapters.map((c) => [c.id, c.text, c.include])
-        : p.chapter.text,
-      scope === "selection" ? p.editorRef.current?.getSelection() : null,
-      scope === "cursor"
-        ? p.editorRef.current?.getSelectionOffsets().start
-        : null,
+      p.chapter.id,
+      p.chapter.text,
+      cursor,
     ]);
-  const configuration = currentConfiguration();
+  const pendingCaret = useRef<{
+    id: string;
+    text: string;
+    offset: number;
+  } | null>(null);
+  useEffect(() => {
+    const pending = pendingCaret.current;
+    if (
+      pending &&
+      pending.id === p.chapter.id &&
+      pending.text === p.chapter.text
+    ) {
+      // A chapter switch recreates the editor in its effect. Place the caret
+      // after that view is ready rather than selecting in the old chapter.
+      const timer = setTimeout(() => {
+        pendingCaret.current = null;
+        p.editorRef.current?.selectRange(pending.offset, pending.offset);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [p.chapter.id, p.chapter.text]);
+  const parkCursor = (finished = false) => {
+    if (!active && !lastConfiguration.current) return;
+    const source = snapshot.current?.chapters[0];
+    const current = p.project.book?.chapters.find((c) => c.id === source?.id);
+    if (!job || !source || !current || current.text !== source.text) return;
+    let offset = source.base;
+    if (finished) offset = source.text.length;
+    else {
+      const elapsed = audio.current?.currentTime || 0;
+      const index = fullAudio.current
+        ? Math.max(
+            0,
+            job.chunks.reduce(
+              (found, _, i) => (chunkStart(job, i) <= elapsed ? i : found),
+              0,
+            ),
+          )
+        : chunkIndex;
+      const chunk = job.chunks[index];
+      if (!chunk) return;
+      const relative = fullAudio.current
+        ? elapsed - chunkStart(job, index)
+        : loaded.current === `${job.id}:${index}`
+          ? elapsed
+          : 0;
+      offset += utf16(
+        source.text.slice(source.base),
+        readingCursorOffset(chunk, relative),
+      );
+    }
+    if (source.id === p.chapter.id) {
+      p.editorRef.current?.selectRange(offset, offset);
+      // Our own caret movement must not be mistaken for the user choosing a
+      // new reading position. Preserve paused audio and its exact time.
+      if (finished) lastConfiguration.current = "";
+      else if (lastConfiguration.current) {
+        const saved = JSON.parse(lastConfiguration.current);
+        saved[saved.length - 1] = offset;
+        lastConfiguration.current = JSON.stringify(saved);
+      }
+    } else {
+      pendingCaret.current = { id: source.id, text: source.text, offset };
+      lastConfiguration.current = "";
+      p.onChapter(source.id);
+    }
+  };
   const rendering =
     !!job &&
     !["ready", "failed", "cancelled", "interrupted"].includes(job.status);
@@ -221,6 +305,7 @@ export default function DocumentReader(p: Props) {
   const read = async () => {
     if (requestInFlight.current) return;
     requestInFlight.current = true;
+    const request = ++playbackRequest.current;
     const requestedConfiguration = currentConfiguration();
     setRequesting(true);
     try {
@@ -233,35 +318,25 @@ export default function DocumentReader(p: Props) {
         end: 0,
       };
       await p.flush();
-      const list =
-        scope === "book"
-          ? p.project.book!.chapters.filter((c) => c.include)
-          : [p.chapter];
-      if (scope === "selection" && span.start === span.end)
-        throw new Error("Select the words to read in the chapter.");
-      let offset = 0;
+      const text = p.chapter.text.slice(span.start);
+      if (!text.trim()) return;
       snapshot.current = {
-        chapters: list.map((c) => {
-          const base =
-            scope === "selection" || scope === "cursor" ? span.start : 0;
-          const row = { id: c.id, text: c.text, offset, base };
-          offset += Array.from(c.text).length + 2;
-          return row;
-        }),
+        chapters: [
+          {
+            id: p.chapter.id,
+            text: p.chapter.text,
+            offset: 0,
+            base: span.start,
+          },
+        ],
       };
-      const text =
-        scope === "selection"
-          ? p.chapter.text.slice(span.start, span.end)
-          : scope === "cursor"
-            ? p.chapter.text.slice(span.start)
-            : undefined;
       if (rendering && job)
         await api(`/api/speech/jobs/${job.id}/cancel`, "POST");
       const next = await api<Job>(
         `/api/projects/${p.project.id}/speech`,
         "POST",
         {
-          scope: text === undefined ? scope : "selection",
+          scope: "selection",
           chapterId: p.chapter.id,
           text,
           voiceId: voice,
@@ -274,6 +349,10 @@ export default function DocumentReader(p: Props) {
           verify: false,
         },
       );
+      if (request !== playbackRequest.current) {
+        await api(`/api/speech/jobs/${next.id}/cancel`, "POST");
+        return;
+      }
       lastConfiguration.current = requestedConfiguration;
       setJob(next);
       setTime(0);
@@ -289,10 +368,72 @@ export default function DocumentReader(p: Props) {
       setRequesting(false);
     }
   };
+  const resumeReading = async () => {
+    if (!job || requestInFlight.current) return;
+    requestInFlight.current = true;
+    setRequesting(true);
+    setError("");
+    shouldPlay.current = true;
+    setActive(true);
+    try {
+      const next = await api<Job>(`/api/speech/jobs/${job.id}/resume`, "POST");
+      setJob(next);
+      if (!shouldPlay.current) return;
+      // Resume the retained audio at its paused position, including after Stop.
+      if (
+        next.chunks[chunkIndex]?.status === "ready" &&
+        loaded.current === `${job.id}:${chunkIndex}` &&
+        audio.current?.src &&
+        !audio.current.ended
+      ) {
+        await audio.current.play();
+      }
+    } catch (e) {
+      shouldPlay.current = false;
+      setActive(false);
+      setError((e as Error).message);
+    } finally {
+      requestInFlight.current = false;
+      setRequesting(false);
+    }
+  };
+  useEffect(() => {
+    if (
+      resumeAfterCancel &&
+      job &&
+      ["cancelled", "failed", "interrupted"].includes(job.status)
+    ) {
+      setResumeAfterCancel(false);
+      void resumeReading();
+    }
+  }, [resumeAfterCancel, job?.status]);
+  const loading =
+    requesting ||
+    resumeAfterCancel ||
+    buffering ||
+    (active &&
+      shouldPlay.current &&
+      rendering &&
+      !playing &&
+      job?.chunks[chunkIndex]?.status !== "ready");
+  useLayoutEffect(() => {
+    p.onPlaybackChange(
+      playing || (active && shouldPlay.current && (rendering || buffering)),
+    );
+  }, [playing, active, rendering, buffering]);
+  useEffect(() => () => p.onPlaybackChange(false), [p.onPlaybackChange]);
   const togglePlayback = () => {
     if (playing) {
       shouldPlay.current = false;
       audio.current?.pause();
+      parkCursor();
+    } else if (
+      job &&
+      lastConfiguration.current === currentConfiguration() &&
+      ["cancelled", "failed", "interrupted", "cancelling"].includes(job.status)
+    ) {
+      if (job.status === "cancelling") setResumeAfterCancel(true);
+      else void resumeReading();
     } else if (
       playable &&
       lastConfiguration.current === currentConfiguration() &&
@@ -301,12 +442,12 @@ export default function DocumentReader(p: Props) {
     ) {
       shouldPlay.current = true;
       setActive(true);
-      if (audio.current?.ended && !active) {
-        setTime(0);
-        setChunkIndex(0);
-        fullAudio.current = false;
-        loaded.current = "";
-      } else void audio.current?.play().catch((e) => setError(e.message));
+      if (
+        audio.current &&
+        !audio.current.ended &&
+        (fullAudio.current || loaded.current === `${job.id}:${chunkIndex}`)
+      )
+        void audio.current.play().catch((e) => setError(e.message));
     } else if (
       !rendering ||
       lastConfiguration.current !== currentConfiguration()
@@ -314,11 +455,14 @@ export default function DocumentReader(p: Props) {
       void read();
   };
   const stop = () => {
+    playbackRequest.current++;
+    setResumeAfterCancel(false);
+    setBuffering(false);
     setActive(false);
     shouldPlay.current = false;
     audio.current?.pause();
-    if (audio.current) audio.current.currentTime = 0;
-    setTime(0);
+    if (!requesting) parkCursor();
+    setRange(null);
     p.onHighlight(null);
     if (job && !["ready", "failed", "cancelled"].includes(job.status))
       api<Job>(`/api/speech/jobs/${job.id}/cancel`, "POST")
@@ -383,39 +527,31 @@ export default function DocumentReader(p: Props) {
               ))}
           </optgroup>
         </select>
-        <select
-          aria-label="Reading scope"
-          value={scope}
-          onChange={(e) => setScope(e.target.value)}
-        >
-          <option value="chapter">Chapter</option>
-          <option value="book">Whole book</option>
-          <option value="selection">Selection</option>
-          <option value="cursor">From cursor</option>
-        </select>
-        <select
-          aria-label="Reading audio format"
-          value={format}
-          onChange={(e) => setFormat(e.target.value)}
-        >
-          <option value="wav">WAV</option>
-          <option value="mp3">MP3</option>
-          <option value="flac">FLAC</option>
-        </select>
         <button
-          aria-label={playing ? "Pause Reading" : "Play Reading"}
-          data-help="Start reading from the text cursor by default. Press again to pause or resume. Moving the cursor or changing text or voice settings starts a fresh reading."
-          aria-busy={requesting || (rendering && !playable)}
-          disabled={
-            requesting ||
-            (rendering &&
-              !playable &&
-              lastConfiguration.current === configuration)
+          aria-label={
+            loading
+              ? "Loading Reading"
+              : playing
+                ? "Pause Reading"
+                : "Play Reading"
           }
+          data-help="Read from the text cursor. Pause or Stop moves the cursor to the spoken position; Play continues from there. Move the cursor yourself to choose a new starting point."
+          aria-busy={loading}
+          disabled={loading}
           onMouseDown={(e) => e.preventDefault()}
           onClick={togglePlayback}
         >
-          {playing ? <Pause size={12} /> : <Play size={12} />}
+          {loading ? (
+            <LoaderCircle
+              size={12}
+              className="reading-spinner"
+              aria-hidden="true"
+            />
+          ) : playing ? (
+            <Pause size={12} />
+          ) : (
+            <Play size={12} />
+          )}
         </button>
         <button aria-label="Stop reading" onClick={stop}>
           <Square size={12} />
@@ -427,7 +563,7 @@ export default function DocumentReader(p: Props) {
           Volume{" "}
           <input
             aria-label="Reading volume"
-            title={`Narration volume: ${Math.round(volume * 100)}%`}
+            data-help-label={`Narration volume: ${Math.round(volume * 100)}%`}
             type="range"
             min="0"
             max="4"
@@ -521,20 +657,6 @@ export default function DocumentReader(p: Props) {
             <option value="lrc">LRC lyrics</option>
           </select>
         )}
-        {job && ["cancelled", "failed", "interrupted"].includes(job.status) && (
-          <button
-            onClick={() =>
-              api<Job>(`/api/speech/jobs/${job.id}/resume`, "POST")
-                .then((j) => {
-                  setJob(j);
-                  setActive(true);
-                })
-                .catch((e) => setError(e.message))
-            }
-          >
-            Resume rendering
-          </button>
-        )}
       </div>
       {(job?.status === "ready" || bookmarks.length > 0) && (
         <div className="reader-progress">
@@ -588,7 +710,6 @@ export default function DocumentReader(p: Props) {
                   () => p.editorRef.current?.selectRange(b.offset, b.offset),
                   50,
                 );
-                setScope("cursor");
               }}
             >
               <option value="">Bookmarks</option>
@@ -632,14 +753,31 @@ export default function DocumentReader(p: Props) {
           resumeAudio();
           setPlaying(true);
         }}
-        onPause={() => setPlaying(false)}
+        onPlaying={() => setBuffering(false)}
+        onWaiting={() => {
+          if (shouldPlay.current && active) setBuffering(true);
+        }}
+        onPause={() => {
+          setPlaying(false);
+          setBuffering(false);
+        }}
+        onError={() => {
+          setBuffering(false);
+          setPlaying(false);
+          setError("Audio could not be played. Press Play to retry.");
+        }}
         onEnded={() => {
           setPlaying(false);
           p.onHighlight(null);
           if (job && !fullAudio.current && chunkIndex + 1 < job.chunks.length) {
             shouldPlay.current = true;
             setChunkIndex((i) => i + 1);
-          } else setActive(false);
+          } else {
+            shouldPlay.current = false;
+            parkCursor(true);
+            setRange(null);
+            setActive(false);
+          }
         }}
       />
     </section>

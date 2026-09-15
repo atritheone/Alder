@@ -290,7 +290,7 @@ class SpeechService:
         verification_available = bool(self.runtime.get("qaPythonPresent") and self.runtime.get("qaModelPresent"))
         return {"available": not missing, "engine": "chatterbox-turbo", "engines": [{"id": "chatterbox-turbo", "name": "Chatterbox Turbo", "languages": ["en"], "available": not missing}, {"id":"sapi", "name":"Windows SAPI", "available":bool(__import__("alder.sapi", fromlist=["voices"]).voices())}], "reason": " ".join(missing), "formats": ["wav", "mp3", "flac"] if self.runtime["ffmpeg"] else ["wav"], "voiceCloning": True, "referenceMinimumSeconds": 5, "referenceMaximumSeconds": 120, "wordTimestamps": verification_available, "timingMethods": ["sapi-events", "local-recognition"], "streaming": False, "chunkPlayback": True, "controls": ["voiceId", "seed", "temperature", "topP", "topK", "repetitionPenalty", "pauseSeconds", "verify", "verificationRetries"], "unsupportedControls": ["exaggeration", "cfgWeight", "minP", "ssml", "phonemes", "exactWpm"], "modelRevision": self.runtime["modelRevision"], "sourceRevision": self.runtime["sourceRevision"], "runtimeVerified": self._worker_health is not None, "worker": self._worker_health, "verification": {"available": verification_available, "model": "faster-whisper-base.en", "modelRevision": self.runtime.get("qaModelRevision"), "languages": ["en"], "device": "cpu", "maximumRetries": 2, "worker": self._qa_health, "reason": "" if verification_available else "The local speech content-check runtime or base.en model is missing."}}
 
-    def voices(self):
+    def voices(self, include_removed=False):
         from .sapi import voices as windows_voices
         result = [{"id": "default", "name": "Built-in Turbo voice", "kind": "builtin", "engine": "chatterbox-turbo"}, *windows_voices()]
         for path in sorted((self.root / "voices").glob("*/voice.json")):
@@ -300,7 +300,35 @@ class SpeechService:
                     result.append(value)
             except (ValueError, OSError, KeyError):
                 continue
-        return result
+        result = [dict(voice) for voice in result]
+        preferences_path = self.root / "voices" / "library.json"
+        preferences = json.loads(preferences_path.read_text(encoding="utf-8")) if preferences_path.exists() else {}
+        for voice in result:
+            settings = preferences.get(voice["id"], {})
+            voice["name"] = settings.get("name", voice["name"])
+            voice["removed"] = settings.get("removed", False)
+        return result if include_removed else [voice for voice in result if not voice["removed"]]
+
+    def update_voice(self, voice_id, *, name=None, removed=None):
+        with self._lock:
+            voice = self._voice(voice_id)
+            if name is not None and (not isinstance(name, str) or not name.strip() or len(name.strip()) > 100):
+                raise ValueError("Give the voice a name of 1 to 100 characters.")
+            if removed is not None and not isinstance(removed, bool):
+                raise ValueError("The removed setting must be true or false.")
+            if removed and not voice["removed"] and len(self.voices()) <= 1:
+                raise ValueError("Keep at least one voice available in Alder.")
+            path = self.root / "voices" / "library.json"
+            preferences = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            entry = preferences.setdefault(voice_id, {})
+            if name is not None:
+                entry["name"] = name.strip()
+            if removed is not None:
+                entry["removed"] = removed
+            # A library removal retains reference audio for saved documents and
+            # interrupted jobs. System voice installations are never modified.
+            _atomic_json(path, preferences)
+            return self._voice(voice_id)
 
     def add_voice(self, path: Path, name: str):
         path = Path(path)
@@ -334,7 +362,7 @@ class SpeechService:
             raise
 
     def _voice(self, voice_id):
-        voice = next((v for v in self.voices() if v["id"] == voice_id), None)
+        voice = next((v for v in self.voices(include_removed=True) if v["id"] == voice_id), None)
         if voice is None:
             raise ValueError("Unknown voice profile.")
         return voice

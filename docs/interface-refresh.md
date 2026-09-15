@@ -141,3 +141,38 @@ All includes undated drafts. Older projects seed missing draft dates from the
 project timestamp, and unrelated project saves leave draft dates unchanged.
 Sandbox word/sentence counters have no boxes. Write's page total, word/chapter
 counts, and zoom share the bottom page navigation bar; the upper count bar is gone.
+
+
+The Library order is Words, Language Tools, Styles, Templates, Voices, Drafts.
+The former description area's reserved space now shares Alder's background.
+Write's page-number field fits its digits. Switching from Pages to Write
+recalculates centering in a layout effect before paint, avoiding an off-centre
+frame caused by measuring the hidden editor at its narrower width.
+
+Write TTS uses WAV internally and no longer exposes a format selector. Play
+shows an animated loading indicator during preparation or buffering; Play also
+resumes interrupted rendering using retained chunks. There is no separate
+Resume Rendering button. Desktop verification delays a real speech response
+and presents it as interrupted to verify the spinner and reuse of the same job.
+Native feature tooltips and inline teaching paragraphs are replaced with hover
+help, preserving accessible control names. The Help menu opens the help area.
+
+
+Reading no longer has a scope selector: Play reads after the Write cursor.
+Pause and Stop place the collapsed cursor at the current spoken word (or the
+next word during an alignment gap), independently of Follow Text. Resuming
+preserves retained audio and its exact playback time; explicitly moving the
+cursor starts a fresh reading. Reaching the end leaves the cursor at the end
+of the chapter. Cursor placement uses the original text offsets and avoids
+moving into text changed since speech was prepared. Stopping during an initial
+request cancels the pending reading rather than letting it start afterwards.
+
+
+All Library sections now fill the panel height; the reserved bottom space is
+removed. During document speech, voice tests, or narration playback, Write's insertion caret is transparent, while
+word highlights and selections remain unchanged. Pause and Stop restore it.
+Voices are selectable within the Library with Rename, Test, Remove, and Restore
+controls. Tests play directly in that panel. Voice names and removals are saved
+in Alder's own library settings. Removal leaves Windows installations and saved
+reference audio intact, and at least one voice remains available. Voice list
+changes refresh the reading selectors without restarting the app.

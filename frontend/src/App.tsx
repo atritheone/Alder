@@ -1,4 +1,5 @@
 import ResizeHandle from "./ResizeHandle";
+import VoiceManager from "./VoiceManager";
 import NativeMenu from "./NativeMenu";
 import AlderLogo from "./AlderLogo";
 import { useInstalledFonts } from "./useInstalledFonts";
@@ -240,6 +241,7 @@ export default function App() {
     [jobs, setJobs] = useState<Job[]>([]),
     [capabilities, setCapabilities] = useState<any>(null);
   const [browserCategory, setBrowserCategory] = useState("Words");
+  const [voiceTestPlaying, setVoiceTestPlaying] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(
       () => localStorage.getItem("alder.browserOpen") === "true",
     ),
@@ -1063,51 +1065,32 @@ export default function App() {
     );
   const voiceManager = (
     <>
-      <p>
-        Reference voices are processed locally. Use a clean recording longer
-        than five seconds, ideally about ten seconds.
-      </p>
-      <div className="manager-actions">
-        <button className="accent" onClick={() => voiceFile.current?.click()}>
-          Add reference voice…
-        </button>
-      </div>
-      {voices.map((v) => (
-        <div className="voice-row" key={v.id}>
-          <AudioLines size={18} />
-          <strong>{v.name}</strong>
-          <span>
-            {v.id === "default"
-              ? "Included With Alder"
-              : v.id.startsWith("sapi-")
-                ? "Windows Voice"
-                : "Reference Voice"}
-          </span>
-          <button
-            onClick={() =>
-              void run(async () => {
-                const job = await api<Job>(
-                  `/api/projects/${project.id}/speech`,
-                  "POST",
-                  {
-                    scope: "selection",
-                    text: "I listen to the language and leave room for the words to breathe.",
-                    voiceId: v.id,
-                    seed,
-                  },
-                );
-                setActiveJob(job);
-                setDetailOpen(true);
-                setDetail("Narration");
-              })
-            }
-          >
-            Audition
-          </button>
-        </div>
-      ))}
-      <h3>Pronunciation dictionary</h3>
-      <p>Spoken substitutions leave the written text unchanged.</p>
+      <VoiceManager
+        onPlaybackChange={setVoiceTestPlaying}
+        projectId={project.id}
+        voices={voices}
+        onAdd={() => voiceFile.current?.click()}
+        onChange={(next, removedId) => {
+          setVoices(next);
+          if (removedId)
+            change((p) => {
+              const fallback = next[0]?.id || "default";
+              for (const row of [
+                ...p.tracks,
+                ...p.clips,
+                ...(p.book?.chapters || []),
+              ])
+                if (
+                  row.voiceId === removedId ||
+                  (!row.voiceId && removedId === "default")
+                )
+                  row.voiceId = fallback;
+            });
+        }}
+      />
+      <h3 data-help="Choose how words are spoken. Pronunciation substitutions leave the written text unchanged.">
+        Pronunciation dictionary
+      </h3>
       {project.pronunciation.map((entry) => (
         <div className="dictionary-row" key={entry.id}>
           <strong>{entry.word}</strong>
@@ -1261,10 +1244,7 @@ export default function App() {
               </div>
             ))
           ) : (
-            <p>
-              No project assets yet. Insert an image in a chapter or sandbox
-              draft to collect it with the project.
-            </p>
+            <p>No Project Assets</p>
           )}
           <button onClick={() => imageFile.current?.click()}>
             Insert image…
@@ -1273,12 +1253,9 @@ export default function App() {
       )}
       {browserCategory === "Templates" && (
         <>
-          <p>
-            Create a plain text document, a Word document, or a book with its
-            own page and chapter settings.
-          </p>
           <button
             className="accent"
+            data-help="Create a plain text document, a Word document, or a book with its own page and chapter settings."
             onClick={() => {
               setPanel(null);
               newProject();
@@ -1401,7 +1378,15 @@ export default function App() {
       { label: "Project Assets…", action: () => openPanel("assets") },
     ],
     Help: [
-      { label: "Getting started", action: () => openPanel("help") },
+      {
+        label: "Show Help Area",
+        action: () => {
+          setHelpOpen(true);
+          setHelpText(
+            "Move the pointer over an area or control to learn what it does.",
+          );
+        },
+      },
       { label: "About Alder", action: () => openPanel("about") },
     ],
   };
@@ -1480,7 +1465,8 @@ export default function App() {
             <span className="project-dot" />
             <strong>{project.name}</strong>
             <button
-              title="Rename project"
+              data-help-label="Rename project"
+              aria-label="Rename project"
               onClick={() =>
                 setForm({
                   title: "Rename project",
@@ -1505,21 +1491,21 @@ export default function App() {
           </div>
           <div className="project-actions">
             <button
-              title="Undo project change"
+              data-help-label="Undo project change"
               aria-label="Undo project change"
               onClick={() => void run(() => history("undo"))}
             >
               <Undo2 size={13} />
             </button>
             <button
-              title="Redo project change"
+              data-help-label="Redo project change"
               aria-label="Redo project change"
               onClick={() => void run(() => history("redo"))}
             >
               <Redo2 size={13} />
             </button>
             <button
-              title={
+              data-help-label={
                 ["txt", "docx"].includes(project.settings.documentKind)
                   ? "Save document"
                   : "Save project"
@@ -1618,6 +1604,7 @@ export default function App() {
             </>
           )}
           <BookWorkspace
+            externalPlayback={playing || voiceTestPlaying}
             key={project.id}
             project={project}
             change={change}
@@ -1754,28 +1741,28 @@ export default function App() {
                     ))}
                   </select>
                   <button
-                    title="Create draft version"
+                    data-help-label="Create draft version"
                     aria-label="Create draft version"
                     onClick={variant}
                   >
                     <GitBranch size={13} />
                   </button>
                   <button
-                    title="Duplicate draft"
+                    data-help-label="Duplicate draft"
                     aria-label="Duplicate draft"
                     onClick={duplicate}
                   >
                     <Copy size={13} />
                   </button>
                   <button
-                    title="Split draft"
+                    data-help-label="Split draft"
                     aria-label="Split draft"
                     onClick={splitClip}
                   >
                     <Scissors size={13} />
                   </button>
                   <button
-                    title="Combine with next draft"
+                    data-help-label="Combine with next draft"
                     aria-label="Combine drafts"
                     onClick={mergeClip}
                   >
@@ -1963,6 +1950,7 @@ export default function App() {
                   />
                   <aside
                     className="word-workbench"
+                    data-help="Select a word in Write or Sandbox to explore its meaning, forms, and alternatives. Choose a suggestion to audition or replace the selected word; use the plus button to add a dictionary entry."
                     style={{ width: workbenchWidth }}
                   >
                     <div className="word-heading">
@@ -1973,7 +1961,7 @@ export default function App() {
                         onChange={(e) => setWord(e.target.value)}
                       />
                       <button
-                        title="Add word to dictionary"
+                        data-help-label="Add word to dictionary"
                         aria-label="Add word to dictionary"
                         onClick={() => {
                           if (word)
@@ -2088,10 +2076,7 @@ export default function App() {
                             Create definition card…
                           </button>
                           {!lexicon?.definitions.length && (
-                            <p className="empty-small">
-                              No local definition. Add one to the project
-                              dictionary.
-                            </p>
+                            <p className="empty-small">No Local Definition</p>
                           )}
                         </>
                       ) : (
@@ -2152,13 +2137,6 @@ export default function App() {
                                 </div>
                               </>
                             )}
-                          {!lexicon?.synonyms.length &&
-                            !lexicon?.forms.length && (
-                              <p className="empty-small">
-                                Select a word in the editor to explore its
-                                meaning and alternatives.
-                              </p>
-                            )}
                         </>
                       )}
                     </div>
@@ -2170,7 +2148,8 @@ export default function App() {
                           <strong>{candidate}</strong>
                         </div>
                         <button
-                          title="Audition in context"
+                          data-help-label="Audition in context"
+                          aria-label="Audition in context"
                           onClick={() =>
                             void run(() =>
                               startSpeech(
@@ -2200,9 +2179,11 @@ export default function App() {
                   </aside>
                 </div>
               ) : (
-                <div className="detail-empty">
+                <div
+                  className="detail-empty"
+                  data-help="Create a Sandbox draft to experiment with wording independently of your document."
+                >
                   <FileText size={28} />
-                  <p>Create a sandbox draft to experiment with wording.</p>
                   <button
                     onClick={() => createClip(project.tracks[0]?.id || "", 0)}
                   >
@@ -2228,6 +2209,10 @@ export default function App() {
                       "device-card " + (!device.enabled ? "bypassed" : "")
                     }
                     key={device.id}
+                    data-help={
+                      deviceCatalog.find((d) => d.id === device.type)
+                        ?.description
+                    }
                   >
                     <header>
                       <button
@@ -2251,7 +2236,8 @@ export default function App() {
                           ?.name || device.type}
                       </strong>
                       <button
-                        title="Remove device"
+                        data-help-label="Remove device"
+                        aria-label="Remove device"
                         onClick={() =>
                           change((p) => {
                             const t = p.tracks.find(
@@ -2266,12 +2252,7 @@ export default function App() {
                         <X size={11} />
                       </button>
                     </header>
-                    <p>
-                      {
-                        deviceCatalog.find((d) => d.id === device.type)
-                          ?.description
-                      }
-                    </p>
+
                     <label>
                       Scope
                       <output>{track?.name || project.tracks[0]?.name}</output>
@@ -2283,7 +2264,8 @@ export default function App() {
                     <footer>
                       <button
                         disabled={index === 0}
-                        title="Move device left"
+                        data-help-label="Move device left"
+                        aria-label="Move device left"
                         onClick={() =>
                           change((p) => {
                             const d = p.tracks.find(
@@ -2332,9 +2314,11 @@ export default function App() {
                     </footer>
                   </article>
                 ))}
-                <div className="device-drop">
+                <div
+                  className="device-drop"
+                  data-help="Drop language tools here, or choose a tool from the list to add it to this collection."
+                >
                   <SlidersHorizontal size={24} />
-                  <p>Drop language devices here</p>
                   <select
                     aria-label="Add language device"
                     value=""
@@ -2387,7 +2371,10 @@ export default function App() {
                 )}
               </div>
             ) : (
-              <div className="narration-panel">
+              <div
+                className="narration-panel"
+                data-help="Audio follows a saved text revision. Completed passages are retained for resuming."
+              >
                 <div className="narration-controls">
                   <strong>Narration</strong>
                   <span className="speed-control">
@@ -2402,7 +2389,7 @@ export default function App() {
                     Volume{" "}
                     <input
                       aria-label="Narration volume"
-                      title={`${Math.round(narrationVolume * 100)}%`}
+                      data-help-label={`${Math.round(narrationVolume * 100)}%`}
                       type="range"
                       min="0"
                       max="4"
@@ -2446,10 +2433,7 @@ export default function App() {
                       })
                     }
                   />
-                  <p>
-                    Audio follows a saved text revision. Completed chunks are
-                    retained for resuming.
-                  </p>
+
                   <button
                     className="accent"
                     onClick={() =>
@@ -2474,9 +2458,7 @@ export default function App() {
                 </div>
                 <div className="job-list">
                   {!jobs.length && (
-                    <div className="empty-small">
-                      No narration jobs yet. Choose a chapter or draft to read.
-                    </div>
+                    <div className="empty-small">No Narration Yet</div>
                   )}
                   {jobs.map((job) => (
                     <div
@@ -2651,7 +2633,7 @@ export default function App() {
       <footer className="statusbar">
         <button
           aria-label="Toggle help area"
-          title="Show or hide help for the control under your pointer"
+          data-help-label="Show or hide help for the control under your pointer"
           aria-expanded={helpOpen}
           className={helpOpen ? "active" : ""}
           onClick={() => setHelpOpen((v) => !v)}
@@ -2670,11 +2652,6 @@ export default function App() {
         </span>
         <button
           className={detailOpen ? "active" : ""}
-          title={
-            detailOpen
-              ? "Hide the sandbox, language tools, and narration panel"
-              : "Show the sandbox to try draft wording, explore language, and review narration"
-          }
           data-help="Show or hide the sandbox: a separate area for draft wording, language tools, and narration. Your document remains unchanged until you insert a draft."
           aria-label="Toggle sandbox"
           aria-expanded={detailOpen}
@@ -2788,6 +2765,7 @@ export default function App() {
               setVoices(
                 (await api<{ voices: Voice[] }>("/api/speech/voices")).voices,
               );
+              window.dispatchEvent(new Event("alder-voices-changed"));
             });
           e.target.value = "";
         }}
@@ -3234,46 +3212,6 @@ export default function App() {
                     book. Space controls playback outside text fields. Ctrl+S
                     saves; Ctrl+F finds text. Chapter and page navigation are
                     keyboard accessible.
-                  </p>
-                </div>
-              )}
-              {panel === "help" && (
-                <div className="help-content">
-                  <h2>A place to work with language.</h2>
-                  <ol>
-                    <li>
-                      <strong>Write.</strong> Write continuous chapter text on
-                      the main pages. Formatting, lists, tables, images and page
-                      breaks belong to the document.
-                    </li>
-                    <li>
-                      <strong>Shape the book.</strong> Add and reorder chapters
-                      in the Book navigator. Use Pages to move the text on a
-                      page into a new reading order.
-                    </li>
-                    <li>
-                      <strong>Explore language.</strong> Select words in your
-                      chapter to explore alternatives and definitions. Keep
-                      experiments in independent sandbox drafts below.
-                    </li>
-                    <li>
-                      <strong>Read.</strong> Open a document, choose Chatterbox
-                      or a Windows SAPI voice, and follow the spoken words. Read
-                      the chapter, book, selection or from the cursor.
-                    </li>
-                    <li>
-                      <strong>Publish.</strong> Use Page Preview to inspect the
-                      final typeset output, then export a document or narration.
-                    </li>
-                  </ol>
-                  <p>
-                    Changes are saved locally as you work. Save a .alder archive
-                    to collect the project and its assets into a portable file.
-                  </p>
-                  <p>
-                    Chapters contain continuous text. Pages flow automatically.
-                    Moving pages preserves their current boundaries with page
-                    breaks. The sandbox keeps independent drafts.
                   </p>
                 </div>
               )}

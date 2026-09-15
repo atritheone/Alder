@@ -19,6 +19,7 @@ import DocumentReader from "./DocumentReader";
 
 type Props = {
   flush: () => Promise<void>;
+  externalPlayback?: boolean;
   project: Project;
   change: (fn: (p: Project) => void) => void;
   view: string;
@@ -45,6 +46,7 @@ export default function BookWorkspace(p: Props) {
   useEffect(() => setPageNumber("1"), [chapter?.id]);
   const [zoom, setZoom] = useState(0.8);
   const [structure, setStructure] = useState(false);
+  const [speechPlaying, setSpeechPlaying] = useState(false);
   const [dragged, setDragged] = useState<number | null>(null);
   const [readingRange, setReadingRange] = useState<{
     start: number;
@@ -98,7 +100,7 @@ export default function BookWorkspace(p: Props) {
     });
   return (
     <section
-      className="workspace pane book-workspace"
+      className={`workspace pane book-workspace${speechPlaying || p.externalPlayback ? " speech-playing" : ""}`}
       aria-label="Book workspace"
     >
       {isBook && (
@@ -161,7 +163,6 @@ export default function BookWorkspace(p: Props) {
           <button onClick={add}>
             <FilePlus2 size={13} /> Add chapter
           </button>
-          <p>Words → sentences → paragraphs → pages → chapters → book</p>
         </nav>
       )}
       <div className="book-main">
@@ -173,6 +174,7 @@ export default function BookWorkspace(p: Props) {
           change={p.change}
           onChapter={p.onChapter}
           onHighlight={setReadingRange}
+          onPlaybackChange={setSpeechPlaying}
         />
         {isBook && (
           <header className="chapter-toolbar">
@@ -223,12 +225,11 @@ export default function BookWorkspace(p: Props) {
         ) : (
           <>
             {p.view === "Pages" && (
-              <div className="page-arranger" aria-label="Arrange pages">
-                <p>
-                  Drag pages into reading order, or use the arrows. Moving a
-                  page adds explicit page breaks to preserve the chosen
-                  boundaries. Undo typing reverses the move.
-                </p>
+              <div
+                className="page-arranger"
+                aria-label="Arrange pages"
+                data-help="Drag pages into reading order, or use the arrows. Moving a page adds explicit page breaks to preserve its boundaries. Undo typing reverses the move."
+              >
                 <div className="page-card-grid">
                   {pages.map((page, i) => (
                     <article
@@ -294,6 +295,7 @@ export default function BookWorkspace(p: Props) {
                 annotations={p.annotations}
                 readingRange={readingRange}
                 pageLayout={layout}
+                layoutVisible={p.view === "Write"}
                 onVisiblePage={(page) => {
                   if (
                     document.activeElement?.getAttribute("aria-label") !==
@@ -340,6 +342,7 @@ export default function BookWorkspace(p: Props) {
                     max={Math.max(1, pages.length)}
                     step="1"
                     value={pageNumber}
+                    style={{ width: `${Math.max(1, pageNumber.length)}ch` }}
                     onChange={(e) => setPageNumber(e.target.value)}
                     data-help="Type a page number and press Enter to go to that page."
                   />

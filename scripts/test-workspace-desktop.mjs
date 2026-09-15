@@ -83,6 +83,35 @@ try {
     await expect(tab).toHaveText("");
     await expect(tab).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   }
+  await page.getByRole("tab", { name: "Pages", exact: true }).click();
+  await expect(page.locator(".page-arranger > p")).toHaveCount(0);
+  await page.evaluate(() => {
+    window.centerSamples = [];
+    const editor = document.querySelector(".book-editor");
+    window.centerObserver = new MutationObserver(() => {
+      if (editor.classList.contains("measuring-editor")) return;
+      const box = editor
+        .querySelector(".editor-scroll")
+        .getBoundingClientRect();
+      const sheet = editor.querySelector(".page-sheet").getBoundingClientRect();
+      window.centerSamples.push(
+        Math.abs(sheet.left - box.left - (box.right - sheet.right)),
+      );
+    });
+    window.centerObserver.observe(editor, { attributes: true, subtree: true });
+  });
+  await page.getByRole("tab", { name: "Write", exact: true }).click();
+  const returnedCenter = await page.evaluate(() => {
+    window.centerObserver.disconnect();
+    return window.centerSamples;
+  });
+  expect(returnedCenter.length).toBeGreaterThan(0);
+  expect(Math.max(...returnedCenter)).toBeLessThan(5);
+  expect(
+    (await page.getByRole("spinbutton", { name: "Go To Page" }).boundingBox())
+      .width,
+  ).toBeLessThan(30);
+  await expect(page.locator(".alder-app [title]")).toHaveCount(0);
   await page.getByRole("button", { name: "Toggle help area" }).click();
   await page.getByRole("tab", { name: "Page Preview", exact: true }).hover();
   const help = page.getByLabel("Context help", { exact: true });
@@ -149,9 +178,15 @@ try {
     nav.getByRole("button", { name: "Words", exact: true }),
   ).toBeVisible();
   await expect(browser.locator(".browser-preview")).toHaveCount(0);
+  await expect(browser.locator(".browser-bottom-space")).toHaveCount(0);
   expect(
-    (await browser.locator(".browser-bottom-space").boundingBox()).height,
-  ).toBeGreaterThan(60);
+    Math.abs(
+      (await browser.locator(".browser-main").boundingBox()).y +
+        (await browser.locator(".browser-main").boundingBox()).height -
+        ((await browser.boundingBox()).y +
+          (await browser.boundingBox()).height),
+    ),
+  ).toBeLessThan(3);
   await expect(page.locator(".book-page-tools")).toHaveCount(0);
   await expect(
     page.locator(".page-navigation").getByLabel("Page zoom"),
@@ -177,6 +212,19 @@ try {
       .evaluate((el) => getComputedStyle(el).backgroundColor),
   );
   await nav.getByRole("button", { name: "Words", exact: true }).click();
+  expect(
+    (await nav.locator("button").allTextContents())
+      .map((s) => s.trim())
+      .slice(1, 7),
+  ).toEqual([
+    "Words",
+    "Language Tools",
+    "Styles",
+    "Templates",
+    "Voices",
+    "Drafts",
+  ]);
+  await expect(browser).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const navBefore = await nav.boundingBox();
   const divider = await browser
     .getByRole("separator", { name: "Resize Collections And Content" })
@@ -221,8 +269,65 @@ try {
     browser.getByRole("region", { name: "Voice Management" }),
   ).toBeVisible();
   await expect(
-    browser.getByRole("button", { name: "Add reference voice…", exact: true }),
+    browser.getByRole("button", { name: "Add Reference Voice…", exact: true }),
   ).toBeVisible();
+  const voiceLibrary = browser.getByRole("region", { name: "Voice Library" });
+  const voiceRows = await page.evaluate(
+    async () =>
+      (await window.alder.request("GET", "/api/speech/voices")).voices,
+  );
+  const systemVoice = voiceRows.find((v) => v.kind === "sapi");
+  expect(systemVoice).toBeTruthy();
+  await voiceLibrary
+    .getByRole("button", {
+      name: `Select Voice ${systemVoice.name}`,
+      exact: true,
+    })
+    .click();
+  await voiceLibrary
+    .getByLabel("Voice Name", { exact: true })
+    .fill("Library Reading Voice");
+  await voiceLibrary
+    .getByRole("button", { name: "Rename", exact: true })
+    .click();
+  const readingVoiceOption = page
+    .getByLabel("Reading voice", { exact: true })
+    .locator(`option[value="${systemVoice.id}"]`);
+  await expect(readingVoiceOption).toHaveText("Library Reading Voice");
+  await expect(
+    voiceLibrary.getByRole("button", { name: "Audition", exact: true }),
+  ).toHaveCount(0);
+  await voiceLibrary
+    .getByRole("button", { name: "Test Voice", exact: true })
+    .click();
+  await expect
+    .poll(() => voiceLibrary.locator("audio").evaluate((a) => a.currentTime), {
+      timeout: 20000,
+    })
+    .toBeGreaterThan(0.05);
+  await expect(writing).toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await voiceLibrary
+    .getByRole("button", { name: "Stop Voice Test", exact: true })
+    .click();
+  await expect(writing).not.toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+  await voiceLibrary
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
+  await expect(readingVoiceOption).toHaveCount(0);
+  await voiceLibrary
+    .getByRole("checkbox", { name: "Show Removed Voices", exact: true })
+    .check();
+  await voiceLibrary
+    .getByRole("button", {
+      name: "Select Voice Library Reading Voice",
+      exact: true,
+    })
+    .click();
+  await voiceLibrary
+    .getByRole("button", { name: "Restore", exact: true })
+    .click();
+  await expect(readingVoiceOption).toHaveText("Library Reading Voice");
   await browser.getByLabel("Written Word Or Expression").fill("Alder");
   await browser.getByLabel("Speak As").fill("All der");
   await browser
@@ -273,7 +378,7 @@ try {
     "background-color",
     "rgba(0, 0, 0, 0)",
   );
-  await expect(page.getByLabel("Reading scope")).toHaveCSS(
+  await expect(page.getByLabel("Reading voice", { exact: true })).toHaveCSS(
     "background-color",
     "rgba(0, 0, 0, 0)",
   );

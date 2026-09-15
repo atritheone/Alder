@@ -410,6 +410,7 @@ export type EditorHandle = {
 type Props = {
   label?: string;
   pageLayout?: PageLayout;
+  layoutVisible?: boolean;
   onPages?: (pages: FlowPage[]) => void;
   onVisiblePage?: (page: number) => void;
   onFocus?: () => void;
@@ -805,7 +806,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                       spans.push(
                         Decoration.inline(from, to, {
                           class: `annotation annotation-${annotation.type}`,
-                          title: annotation.message,
+                          "data-help": annotation.message,
                         }),
                       );
                   } catch {
@@ -955,7 +956,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   useLayoutEffect(() => {
     const layout = props.pageLayout;
     const scroll = host.current?.closest<HTMLElement>(".editor-scroll");
-    if (!layout || !scroll) return;
+    if (!layout || !scroll || props.layoutVisible === false) return;
     const centrePage = () => {
       const style = getComputedStyle(scroll);
       const available =
@@ -968,7 +969,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     const observer = new ResizeObserver(centrePage);
     observer.observe(scroll);
     return () => observer.disconnect();
-  }, [props.pageLayout?.width, props.pageLayout?.zoom]);
+  }, [props.pageLayout?.width, props.pageLayout?.zoom, props.layoutVisible]);
   useLayoutEffect(() => {
     const v = view.current;
     if (!v || !props.pageLayout || blocked.current) return;
@@ -1127,7 +1128,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           ))}
         </select>
         <button
-          title="Bold (Ctrl+B)"
+          data-help-label="Bold (Ctrl+B)"
           aria-label="Bold"
           className={mark("strong") ? "active" : ""}
           onMouseDown={(e) => e.preventDefault()}
@@ -1136,7 +1137,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           <Bold />
         </button>
         <button
-          title="Italic (Ctrl+I)"
+          data-help-label="Italic (Ctrl+I)"
           aria-label="Italic"
           className={mark("em") ? "active" : ""}
           onMouseDown={(e) => e.preventDefault()}
@@ -1145,7 +1146,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           <Italic />
         </button>
         <button
-          title="Underline (Ctrl+U)"
+          data-help-label="Underline (Ctrl+U)"
           aria-label="Underline"
           className={mark("underline") ? "active" : ""}
           onMouseDown={(e) => e.preventDefault()}
@@ -1155,42 +1156,42 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         </button>
         <i />
         <button
-          title="Align left"
+          data-help-label="Align left"
           aria-label="Align left"
           onClick={() => align("left")}
         >
           <AlignLeft />
         </button>
         <button
-          title="Align centre"
+          data-help-label="Align centre"
           aria-label="Align centre"
           onClick={() => align("center")}
         >
           <AlignCenter />
         </button>
         <button
-          title="Align right"
+          data-help-label="Align right"
           aria-label="Align right"
           onClick={() => align("right")}
         >
           <AlignRight />
         </button>
         <button
-          title="Bullet list"
+          data-help-label="Bullet list"
           aria-label="Bullet list"
           onClick={() => command(wrapInList(schema.nodes.bullet_list))}
         >
           <List />
         </button>
         <button
-          title="Numbered list"
+          data-help-label="Numbered list"
           aria-label="Numbered list"
           onClick={() => command(wrapInList(schema.nodes.ordered_list))}
         >
           <ListOrdered />
         </button>
         <button
-          title="Block quote"
+          data-help-label="Block quote"
           aria-label="Block quote"
           onClick={() => command(wrapIn(schema.nodes.blockquote))}
         >
@@ -1198,36 +1199,49 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         </button>
         <i />
         <button
-          title="Insert image"
+          data-help-label="Insert image"
           aria-label="Insert image"
           onClick={props.onImage}
         >
           <ImagePlus />
         </button>
-        <button title="Insert table" aria-label="Insert table" onClick={table}>
+        <button
+          data-help-label="Insert table"
+          aria-label="Insert table"
+          onClick={table}
+        >
           <Table2 />
         </button>
-        <button title="Add table row" onClick={() => command(addRowAfter)}>
+        <button
+          data-help-label="Add table row"
+          aria-label="Add table row"
+          onClick={() => command(addRowAfter)}
+        >
           +row
         </button>
         <button
-          title="Add table column"
+          data-help-label="Add table column"
+          aria-label="Add table column"
           onClick={() => command(addColumnAfter)}
         >
           +col
         </button>
-        <button title="Delete table" onClick={() => command(deleteTable)}>
+        <button
+          data-help-label="Delete table"
+          aria-label="Delete table"
+          onClick={() => command(deleteTable)}
+        >
           −table
         </button>
         <button
-          title="Insert link"
+          data-help-label="Insert link"
           aria-label="Insert link"
           onClick={props.onLink}
         >
           <Link />
         </button>
         <button
-          title="Insert page break"
+          data-help-label="Insert page break"
           aria-label="Insert page break"
           onClick={() => {
             const v = editableView();
@@ -1244,21 +1258,21 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         <span className="toolbar-spacer" />
         <button
           className={props.showStructure ? "active" : ""}
-          title="Show structure"
+          data-help-label="Show structure"
           aria-label="Show structure"
           onClick={props.onToggleStructure}
         >
           <Pilcrow />
         </button>
         <button
-          title="Undo typing"
+          data-help-label="Undo typing"
           aria-label="Undo typing"
           onClick={() => command(undo)}
         >
           <Undo2 />
         </button>
         <button
-          title="Redo typing"
+          data-help-label="Redo typing"
           aria-label="Redo typing"
           onClick={() => command(redo)}
         >

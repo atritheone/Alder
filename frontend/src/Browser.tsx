@@ -90,12 +90,12 @@ export const deviceCatalog = [
   },
 ];
 const categories = [
-  { id: "Drafts", icon: Blocks },
   { id: "Words", icon: BookOpen },
   { id: "Language Tools", icon: SlidersHorizontal },
-  { id: "Voices", icon: AudioLines },
   { id: "Styles", icon: Type },
   { id: "Templates", icon: FileText },
+  { id: "Voices", icon: AudioLines },
+  { id: "Drafts", icon: Blocks },
 ];
 export default function Browser({
   project,
@@ -173,7 +173,11 @@ export default function Browser({
       onPanel(name === "Project Assets" ? "assets" : name.toLowerCase());
   };
   return (
-    <aside className="browser pane" aria-label="Language browser">
+    <aside
+      className="browser pane"
+      aria-label="Language browser"
+      data-help="Browse words, tools, styles, templates, voices, and drafts. Drag words into your writing or double-click to insert them."
+    >
       <div className="browser-search">
         <Search size={15} />
         <input
@@ -445,17 +449,13 @@ export default function Browser({
                 )}
                 {["Words", "Favourites"].includes(category) &&
                   !visible.length && (
-                    <p className="empty-small">
-                      No matching words. Try another filter or add your own
-                      word.
-                    </p>
+                    <p className="empty-small">No Matching Words</p>
                   )}
               </>
             )}
           </div>
         </div>
       </div>
-      {!managed && <div className="browser-bottom-space" aria-hidden="true" />}
     </aside>
   );
 }

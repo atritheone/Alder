@@ -412,3 +412,30 @@ def test_listening_review_validates_targets_and_does_not_apply_to_changed_takes(
     all_accepted = service.review(job["id"], {"accepted": True, "note": "Reviewed both selected chunks."})
     assert all_accepted["manualReviewSummary"] == {"accepted": 2, "total": 2}
     assert all_accepted["reviewStatus"] == "unreviewed"
+
+
+def test_voice_library_names_removal_and_restore_keep_saved_references(service, monkeypatch, tmp_path):
+    windows = [{"id": "sapi-test", "name": "System Voice", "kind": "sapi"}]
+    monkeypatch.setattr("alder.sapi.voices", lambda: windows)
+    reference = tmp_path / "library-reference.wav"
+    write_fixture(reference, 6)
+    voice = service.add_voice(reference, "Reference Voice")
+    service.update_voice(voice["id"], name="Reading Voice")
+    assert service._voice(voice["id"])["name"] == "Reading Voice"
+    service.update_voice(voice["id"], removed=True)
+    assert voice["id"] not in {v["id"] for v in service.voices()}
+    assert service._voice(voice["id"])["removed"] is True
+    assert (service.root / "voices" / voice["id"] / "reference.wav").is_file()
+    service.update_voice("sapi-test", name="Windows Alias", removed=True)
+    assert windows[0]["name"] == "System Voice"
+    assert "removed" not in windows[0]
+    with pytest.raises(ValueError, match="at least one"):
+        service.update_voice("default", removed=True)
+    service.update_voice(voice["id"], removed=False)
+    assert voice["id"] in {v["id"] for v in service.voices()}
+    preferences = json.loads((service.root / "voices" / "library.json").read_text())
+    assert preferences[voice["id"]] == {"name": "Reading Voice", "removed": False}
+    with pytest.raises(ValueError):
+        service.update_voice(voice["id"], name=" ")
+    with pytest.raises(ValueError):
+        service.update_voice("../outside", removed=True)

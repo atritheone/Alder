@@ -3318,9 +3318,6 @@ input[type="range"]:disabled {
 .alder-app .browser-filters {
   background: #b7b7b7;
 }
-.browser-bottom-space {
-  flex: 0 0 91px;
-}
 .library-word-row {
   display: flex;
   min-width: 0;
@@ -3349,4 +3346,84 @@ input[type="range"]:disabled {
 }
 .page-navigation .writing-zoom {
   margin-left: auto;
+}
+
+.alder-app .browser {
+  background: transparent;
+}
+.page-navigation input[type="number"] {
+  box-sizing: content-box;
+  min-width: 1ch;
+  padding: 2px 3px;
+  appearance: textfield;
+}
+.page-navigation input[type="number"]::-webkit-inner-spin-button,
+.page-navigation input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.reading-spinner {
+  animation: reading-spin 0.8s linear infinite;
+}
+@keyframes reading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.book-workspace.speech-playing .ProseMirror {
+  caret-color: transparent;
+}
+.voice-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0;
+}
+.voice-selector button {
+  display: flex;
+  width: 100%;
+  gap: 7px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+}
+.voice-selector button span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.voice-selector button small {
+  font-size: 9px;
+  color: #666;
+}
+.voice-selector button[aria-pressed="true"] {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+.voice-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 18px;
+}
+.voice-actions label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.voice-actions input {
+  width: 100%;
+  min-width: 0;
+}
+.voice-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.voice-manager .removed-voices-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
 }
