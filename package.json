@@ -2,7 +2,7 @@
   "name": "alder",
   "version": "0.1.0",
   "private": true,
-  "description": "Alder - an organic language engine",
+  "description": "Alder",
   "main": "dist-electron/main.cjs",
   "author": "Alder",
   "scripts": {

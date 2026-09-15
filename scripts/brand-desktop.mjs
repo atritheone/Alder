@@ -45,6 +45,7 @@ export async function brandDesktop() {
     .update(await fs.readFile(source))
     .update(await fs.readFile(iconPath))
     .update(pkg.version)
+    .update("Alder")
     .digest("hex");
   const stampPath = path.join(directory, "dist/alder-branding.sha256");
   if (
@@ -61,7 +62,7 @@ export async function brandDesktop() {
     productVersion: pkg.version,
     versionStrings: {
       ProductName: "Alder",
-      FileDescription: "Alder · Organic Language Engine",
+      FileDescription: "Alder",
       InternalName: "Alder",
       OriginalFilename: "Alder.exe",
       CompanyName: "Alder",

@@ -71,7 +71,34 @@ export type Idea = {
   tags: string[];
 };
 export type Asset = { id: string; name: string; mime: string; path?: string };
+export type PatternPart = {
+  kind: string;
+  value?: string;
+  from?: string;
+  to?: string;
+  negate?: boolean;
+  capture?: boolean;
+  group?: number;
+  min?: number;
+  max?: number | null;
+  greedy?: boolean;
+  children?: PatternPart[];
+  options?: PatternPart[][];
+};
+export type ReplacementPart = {
+  kind: "text" | "group";
+  text?: string;
+  group?: number;
+  case?: string;
+};
 export type Pronunciation = {
+  syntax?: "rex";
+  matchMode?: "whole" | "start" | "end" | "anywhere" | "pattern";
+  enabled?: boolean;
+  dictionary?: string;
+  patternParts?: PatternPart[];
+  replacementParts?: ReplacementPart[];
+  rexOriginal?: string;
   regex?: boolean;
   id: string;
   word: string;

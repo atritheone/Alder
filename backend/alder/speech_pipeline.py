@@ -15,6 +15,7 @@ import wave
 
 from .speech import SpeechService, _hash, _now, _atomic_json, _replace, _wav_info, compare_transcript
 from .speech_metrics import SpeechMetrics
+from .pronunciation import compare_pronounced
 from .sapi import NATIVE_TIMING_VERSION, native_timings
 from .speech_quality import QUALITY_VERSION, inspect_pcm, projected_sections, valid_timings, speech_projection
 from .reading import word_timings, TIMING_VERSION
@@ -356,7 +357,7 @@ class SpeechPipeline(SpeechService):
 
     def _check_locked(self, job, chunk, cache):
         audio_hash = hashlib.sha256(cache.read_bytes()).hexdigest()
-        identity = _hash({"audio": audio_hash, "text": chunk["spokenText"], "version": QUALITY_VERSION,
+        identity = _hash({"audio": audio_hash, "text": chunk["spokenText"], "pronunciation": chunk.get("pronunciationMap", []), "pronunciationComparison": 1, "version": QUALITY_VERSION,
                           "model": self.runtime.get("qaModelRevision"), "secondary": self.runtime.get("qaSecondaryRevision"), "voice": chunk["voiceId"], "comparison": COMPARISON_VERSION, **({"nativeTimings": NATIVE_TIMING_VERSION} if chunk["voiceId"].startswith("sapi-") else {})})
         path = self.root / "cache" / (identity + ".check.json")
         try:
@@ -364,7 +365,7 @@ class SpeechPipeline(SpeechService):
             if (check.get("audioHash") == audio_hash and check.get("status") in {"matched", "needs_review"}
                 and check.get("acoustic", {}).get("version") == QUALITY_VERSION
                 and isinstance(check.get("words"), list)
-                and check.get("matched") is compare_transcript(chunk["spokenText"], check.get("transcript", ""))["matched"]):
+                and check.get("matched") is compare_pronounced(chunk, check.get("transcript", ""))["matched"]):
                 os.utime(path, None)
                 return check, True
         except (OSError, ValueError):
@@ -402,7 +403,7 @@ class SpeechPipeline(SpeechService):
                 raise RuntimeError((response or {}).get("error", "The speech checker could not finish."))
             transcript = response["transcript"]
             model = "faster-whisper-base.en"
-        check = compare_transcript(chunk["spokenText"], transcript)
+        check = compare_pronounced(chunk, transcript)
         if not check["matched"] and model != "sapi-events" and self.runtime.get("qaSecondaryModel"):
             if self._cancelled(job):
                 raise InterruptedError("Reading stopped.")
@@ -410,7 +411,7 @@ class SpeechPipeline(SpeechService):
                 with self._qa_serial:
                     alternative = self._invoke_qa_worker({"operation": "transcribe", "path": str(cache), "secondaryModel": self.runtime["qaSecondaryModel"]}, timeout=20)
                 if alternative.get("ok"):
-                    second_check = compare_transcript(chunk["spokenText"], alternative["transcript"])
+                    second_check = compare_pronounced(chunk, alternative["transcript"])
                     if second_check["matched"]:
                         second_check["primaryCheck"] = check
                         check, response, model = second_check, alternative, "faster-whisper-small.en"

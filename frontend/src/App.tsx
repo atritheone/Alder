@@ -2,6 +2,7 @@ import { useSpeechTransport } from "./useSpeechTransport";
 import { useSpeechJob } from "./useSpeechJob";
 import ResizeHandle from "./ResizeHandle";
 import VoiceManager from "./VoiceManager";
+import PronunciationManager from "./PronunciationManager";
 import NativeMenu from "./NativeMenu";
 import AlderLogo from "./AlderLogo";
 import { useInstalledFonts } from "./useInstalledFonts";
@@ -1102,7 +1103,8 @@ export default function App() {
       </>
     );
   const voiceManager = (
-    <>
+    <div className="voice-dictionary-panel">
+      <h3>Voices</h3>
       <VoiceManager
         onPlaybackChange={setVoiceTestPlaying}
         projectId={project.id}
@@ -1126,68 +1128,15 @@ export default function App() {
             });
         }}
       />
-      <h3 data-help="Choose how words are spoken. Pronunciation substitutions leave the written text unchanged.">
-        Pronunciation dictionary
-      </h3>
-      {project.pronunciation.map((entry) => (
-        <div className="dictionary-row" key={entry.id}>
-          <strong>{entry.word}</strong>
-          <ArrowRight size={13} />
-          <span>{entry.spoken}</span>
-          <button
-            aria-label={`Remove Pronunciation For ${entry.word}`}
-            onClick={() =>
-              change((p) => {
-                p.pronunciation = p.pronunciation.filter(
-                  (x) => x.id !== entry.id,
-                );
-              })
-            }
-          >
-            <Trash2 size={12} />
-          </button>
-        </div>
-      ))}
-      <form
-        className="voice-pronunciation"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const form = event.currentTarget;
-          const fields = new FormData(form);
-          const word = String(fields.get("word") || "").trim();
-          const spoken = String(fields.get("spoken") || "").trim();
-          if (!word || !spoken) return;
-          change((p) =>
-            p.pronunciation.push({
-              id: uid(),
-              word,
-              spoken,
-              regex: fields.get("mode") === "regex",
-              caseSensitive: false,
-              voiceId: null,
-            }),
-          );
-          form.reset();
-        }}
-      >
-        <label>
-          Written Word Or Expression
-          <input name="word" required />
-        </label>
-        <label>
-          Speak As
-          <input name="spoken" required />
-        </label>
-        <label>
-          Match
-          <select name="mode">
-            <option value="literal">Literal Wording</option>
-            <option value="regex">Regular Expression</option>
-          </select>
-        </label>
-        <button type="submit">Add Pronunciation</button>
-      </form>
-    </>
+      <h3 className="dictionary-section-heading">Dictionaries</h3>
+      <PronunciationManager
+        project={project}
+        voices={voices}
+        change={change}
+        flush={flush}
+        onPlaybackChange={setVoiceTestPlaying}
+      />
+    </div>
   );
   const libraryManager = (
     <>

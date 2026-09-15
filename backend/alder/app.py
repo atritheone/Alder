@@ -395,6 +395,72 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             raise KeyError("Export file is missing.")
         return FileResponse(path, media_type=result["mime"], filename=result["filename"])
 
+    @app.post("/api/pronunciation/import")
+    async def import_pronunciation(file: UploadFile = File(...)):
+        from .pronunciation import import_rex
+        if not (file.filename or "").lower().endswith(".rex"):
+            raise HTTPException(422, "Choose a REX pronunciation dictionary.")
+        try:
+            return await run_in_threadpool(import_rex, await uploaded(file, 2 * 1024 * 1024), Path(file.filename).name)
+        except (ValueError, UnicodeError) as exc: raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/pronunciation/editor")
+    async def pronunciation_editor(request: Request):
+        from .pronunciation import explain_pattern, replacement_parts
+        data = await body(request)
+        rule = data["rule"]
+        if rule.get("syntax") != "rex":
+            rule["syntax"] = "rex"
+            rule["matchMode"] = "pattern" if rule.get("regex") else "whole"
+            if rule.get("regex"):
+                try:
+                    rule["patternParts"] = explain_pattern(rule["word"])
+                    replacement = re.sub(r"\\(?:g<(\d+)>|(\d+))", lambda m: "$"+(m[1] or m[2]), rule["spoken"])
+                    rule["replacementParts"] = replacement_parts(replacement)
+                except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+        return rule
+
+    @app.post("/api/pronunciation/validate")
+    async def validate_pronunciation(request: Request):
+        from .pronunciation import validate_rule
+        try: return validate_rule((await body(request))["rule"])
+        except (ValueError, KeyError, TypeError) as exc: raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/pronunciation/preview")
+    async def preview_pronunciation(request: Request):
+        from .pronunciation import validate_rule
+        from .speech import pronunciation_projection
+        data = await body(request)
+        try:
+            text = data.get("text", "")
+            if not isinstance(text,str) or len(text)>10000: raise ValueError("Test up to 10,000 characters.")
+            rules = data.get("rules", [])
+            for rule in rules: validate_rule(rule)
+            spoken, mappings = await run_in_threadpool(pronunciation_projection, text, rules, data.get("voiceId", "default"))
+            return {"spoken":spoken,"mappings":mappings}
+        except (ValueError, KeyError, TypeError) as exc: raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/api/projects/{project_id}/pronunciation/rex")
+    def export_pronunciation(project_id: str, dictionary: str = ""):
+        from .pronunciation import export_rex
+        rules = store.get(project_id)["pronunciation"]
+        if dictionary: rules = [r for r in rules if r.get("dictionary", "My Rules") == dictionary]
+        return Response(export_rex(rules), media_type="text/plain; charset=utf-8", headers={"Content-Disposition":'attachment; filename="pronunciation.rex"'})
+
+    @app.post("/api/projects/{project_id}/pronunciation/test")
+    async def test_pronunciation(project_id: str, request: Request):
+        from .pronunciation import validate_rule
+        data = await body(request)
+        try:
+            project = store.get(project_id)
+            rules = data.get("rules", [])
+            for rule in rules: validate_rule(rule)
+            project["pronunciation"] = rules
+            text = data.get("text", "")
+            if not isinstance(text,str) or not text.strip() or len(text)>1000: raise ValueError("Test between 1 and 1,000 characters.")
+            return await run_in_threadpool(speech_service().submit, project, {"scope":"selection", "text":text,"voiceId":data.get("voiceId","default"),"format":"wav"})
+        except (ValueError, KeyError, TypeError) as exc: raise HTTPException(422, str(exc)) from exc
+
     @app.get("/api/speech/capabilities")
     def speech_capabilities():
         return speech.capabilities() if speech else {"available": False, "message": speech_error}

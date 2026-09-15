@@ -1,0 +1,231 @@
+.pronunciation-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+.pronunciation-manager label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.pronunciation-manager input,
+.pronunciation-manager select,
+.pronunciation-manager textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+.pronunciation-actions,
+.pronunciation-switches,
+.pattern-part-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.pronunciation-switches label,
+.pattern-part-controls label {
+  flex-direction: row;
+  align-items: center;
+}
+.pronunciation-rules {
+  overflow: auto;
+  max-height: 240px;
+  min-height: 50px;
+  border-block: 1px solid var(--border, #aaa);
+}
+.pronunciation-rules button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  text-align: left;
+  padding: 5px;
+}
+.pronunciation-rules button[aria-selected="true"] {
+  background: var(--accent, #294766);
+  color: white;
+}
+.pronunciation-rules small {
+  grid-column: 1/-1;
+  opacity: 0.75;
+}
+.pronunciation-editor,
+.pronunciation-test {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, #aaa);
+}
+.pronunciation-test textarea {
+  height: 90px;
+  resize: vertical;
+}
+.pronunciation-test output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  background: #eee;
+}
+.pronunciation-error {
+  white-space: pre-wrap;
+  color: #792d25;
+}
+.pronunciation-pattern {
+  border-left: 1px solid #aaa;
+  padding-left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pattern-part {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pattern-part-controls input[type="number"] {
+  width: 52px;
+}
+.pattern-part-controls input {
+  flex: 1;
+}
+.pattern-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+}
+
+.pattern-part-controls input:not([type="checkbox"]):not([type="number"]) {
+  flex: 1 1 120px;
+}
+.replacement-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pronunciation-rules span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.pronunciation-dialog {
+  width: min(1200px, calc(100vw - 48px));
+  height: min(850px, calc(100vh - 48px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--border, #999);
+  background: var(--panel, #dedede);
+  color: var(--text, #333);
+  font: inherit;
+}
+.pronunciation-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.pronunciation-dialog::backdrop {
+  background: rgb(0 0 0 / 30%);
+}
+.pronunciation-dialog > header,
+.pronunciation-dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  flex: none;
+}
+.pronunciation-dialog > header {
+  border-bottom: 1px solid var(--border, #aaa);
+}
+.pronunciation-dialog > header button {
+  font-size: 20px;
+}
+.pronunciation-dialog-footer {
+  border-top: 1px solid var(--border, #aaa);
+}
+.pronunciation-dialog-footer span {
+  font-size: 12px;
+}
+.pronunciation-dialog-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(320px, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0;
+  padding: 0;
+}
+.pronunciation-list-panel,
+.pronunciation-detail-panel {
+  min-width: 0;
+  min-height: 0;
+  padding: 14px;
+}
+.pronunciation-list-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pronunciation-detail-panel {
+  overflow: auto;
+  border-left: 1px solid var(--border, #aaa);
+}
+.pronunciation-list-panel .pronunciation-rules {
+  flex: 1;
+  max-height: none;
+}
+.pronunciation-detail-panel .pronunciation-editor {
+  border-top: 0;
+  padding-top: 0;
+}
+.pronunciation-detail-panel .pronunciation-test {
+  margin-top: 16px;
+}
+.pronunciation-dialog-status {
+  grid-column: 1 / -1;
+  max-height: 90px;
+  overflow: auto;
+  padding-inline: 14px;
+}
+.pronunciation-dialog-status p {
+  margin-block: 6px;
+}
+@media (max-width: 650px) {
+  .pronunciation-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+  }
+  .pronunciation-dialog-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(160px, 1fr) minmax(0, 2fr) auto;
+  }
+  .pronunciation-detail-panel {
+    border-left: 0;
+    border-top: 1px solid var(--border, #aaa);
+  }
+}
+
+.voice-dictionary-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.voice-dictionary-panel .pronunciation-library {
+  padding: 0;
+}
+.voice-dictionary-panel > h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.voice-dictionary-panel > .dictionary-section-heading {
+  border-top: 1px solid var(--border, #aaa);
+  padding-top: 12px;
+}

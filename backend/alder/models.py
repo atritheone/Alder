@@ -170,6 +170,11 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         sample.setdefault("examples", [])
         sample.setdefault("tags", [])
     for pronunciation in p["pronunciation"]:
+        if pronunciation.get("syntax") == "rex":
+            from .pronunciation import validate_rule
+            try: validate_rule(pronunciation)
+            except (ValueError, KeyError, TypeError) as exc: raise ValidationError(str(exc)) from exc
+            continue
         if not isinstance(pronunciation.get("word"), str) or not pronunciation["word"].strip() or not isinstance(pronunciation.get("spoken"), str):
             raise ValidationError("Pronunciations require a source word and a spoken form.")
         if not isinstance(pronunciation.get("regex", False), bool):

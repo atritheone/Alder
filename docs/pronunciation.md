@@ -1,0 +1,15 @@
+# Pronunciation Dictionaries
+
+Open **Library → Voices**. Voice and dictionary selection share one panel. Choose a dictionary and **Edit Dictionary…** to open the large popup editor, with the rule list on the left and matching options and tests on the right. Import a Balabolka `.rex` file, select a rule, edit it, and choose **Save Rule**. Close the popup with **Close** or Escape; reopening it retains your pending edits while the Voices panel stays open. Rules are saved with the project and apply to both Windows SAPI and Chatterbox playback. Import errors identify the line; valid rules remain available. The original file is never overwritten.
+
+Use **Whole Word Or Phrase**, **Starts A Word**, **Ends A Word**, or **Anywhere In Text** to control boundaries. **Match Capitalisation** requires the written uppercase/lowercase spelling. **Speak As** holds a phonetic respelling or replacement; an empty value omits the matched text. Rules can be disabled, moved, deleted, grouped into named dictionaries, and assigned to all voices or one voice.
+
+REX rules run in their displayed order, including across imported dictionaries. Later rules can modify earlier replacements. For example, `rat=mouse` followed by `mouse=hamster` speaks “hamster” for “rat”. Existing Alder rules retain their previous longest-match, nonrecursive behavior until edited in the new editor; they run before imported REX rules.
+
+Complex patterns are presented as matching parts: text, boundaries, character sets/ranges, digits, spaces, tabs, line breaks, alternatives, repetitions, captured groups, references and surrounding-text conditions. Spoken parts can insert captured text and change its capitalisation. Captured groups are numbered in opening order; part zero means the entire match. Unsupported expressions are reported rather than silently changed. Inline regex option changes and engine-specific phoneme/IPA markup are not implemented by this editor. REX word/digit classes use ASCII semantics.
+
+**Show Spoken Text** previews either the selected rule or the full ordered list, including unsaved edits. **Test Voice** synthesizes that sample through the regular speech pipeline. Speech recognition may restore ordinary spelling from a phonetic respelling; the checker allows that spelling only at mapped replacement spans and still checks the surrounding content. This does not certify the engine’s phonemes, stress or delivery.
+
+**Export REX** exports the selected dictionary, or all rules when no dictionary is selected. Case flags, boundaries, captures and replacement case operators are encoded automatically. Disabled rules and voice assignments are preserved in Alder comment records; other REX readers ignore those comments and cannot enforce Alder voice assignments. Balabolka’s installed English help (`REX.htm`, `correct.htm`) is the format reference; its [official site](https://www.cross-plus-a.com/balabolka.htm) describes pronunciation correction support.
+
+Verification scripts use isolated data under ignored `work/`. Private imported dictionaries, generated audio, screenshots and test reports are not source files and are not included in the repository.

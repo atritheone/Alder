@@ -19,7 +19,7 @@ import {
   Play,
   Square,
 } from "lucide-react";
-import { api, download, duration, mediaUrl } from "./api";
+import { api, download, mediaUrl } from "./api";
 import type { Chapter, Job, Project, Voice } from "./types";
 import type { EditorHandle } from "./Editor";
 
@@ -59,8 +59,7 @@ export default function DocumentReader(p: Props) {
   const [speed, setSpeed] = useState(1),
     [volume, setVolume] = useState(2);
   const volumeSlider = useWheelSlider(volume, setVolume, 0, 4, 0.05);
-  const [rate, setRate] = useState(0),
-    [time, setTime] = useState(0),
+  const [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);
   const [follow, setFollow] = useState(true);
   const format = "wav";
@@ -78,7 +77,6 @@ export default function DocumentReader(p: Props) {
         0,
       );
   const playable = !!job?.chunks.some((c) => c.playbackEligible);
-  const [pitch, setPitch] = useState(0);
   const audio = useRef<HTMLAudioElement>(null),
     snapshot = useRef<Snapshot | null>(null),
     loaded = useRef("");
@@ -271,8 +269,6 @@ export default function DocumentReader(p: Props) {
   ) =>
     JSON.stringify([
       voice,
-      rate,
-      pitch,
       format,
       p.project.settings.speechOptions,
       p.chapter.id,
@@ -399,8 +395,8 @@ export default function DocumentReader(p: Props) {
           text,
           voiceId: voice,
           follow: true,
-          sapiRate: rate,
-          sapiPitch: pitch,
+          sapiRate: 0,
+          sapiPitch: 0,
           sapiVolume: 100,
           ...(p.project.settings.speechOptions || {}),
           format,
@@ -727,32 +723,6 @@ export default function DocumentReader(p: Props) {
             onChange={(e) => setVolume(Number(e.target.value))}
           />
         </label>
-        {voice.startsWith("sapi-") && (
-          <label>
-            Voice rate{" "}
-            <input
-              aria-label="SAPI voice rate"
-              type="number"
-              min="-10"
-              max="10"
-              value={rate}
-              onChange={(e) => setRate(Number(e.target.value))}
-            />
-          </label>
-        )}
-        {voice.startsWith("sapi-") && (
-          <label>
-            Pitch{" "}
-            <input
-              aria-label="SAPI pitch"
-              type="number"
-              min="-10"
-              max="10"
-              value={pitch}
-              onChange={(e) => setPitch(Number(e.target.value))}
-            />
-          </label>
-        )}
         <label>
           <input
             type="checkbox"
@@ -796,87 +766,35 @@ export default function DocumentReader(p: Props) {
             <Download size={13} />
           </button>
         )}
-        {job?.status === "ready" && (
+        {bookmarks.length > 0 && (
           <select
-            aria-label="Export timed text"
+            aria-label="Reading bookmarks"
             value=""
             onChange={(e) => {
-              void download(
-                `/api/speech/jobs/${job.id}/subtitles?format=${e.target.value}`,
-                `${p.project.name}.${e.target.value}`,
-              ).catch((e) => setError(e.message));
+              const b = bookmarks[Number(e.target.value)],
+                c = p.project.book!.chapters.find((c) => c.id === b.chapterId);
+              if (!c || c.text.slice(b.offset, b.offset + 60) !== b.context) {
+                setError(
+                  "This bookmark's wording has changed. Create a new bookmark at the desired position.",
+                );
+                return;
+              }
+              p.onChapter(c.id);
+              setTimeout(
+                () => p.editorRef.current?.selectRange(b.offset, b.offset),
+                50,
+              );
             }}
           >
-            <option value="">Timed text…</option>
-            <option value="srt">SRT subtitles</option>
-            <option value="lrc">LRC lyrics</option>
+            <option value="">Bookmarks</option>
+            {bookmarks.map((b, i) => (
+              <option key={i} value={i}>
+                {b.name}
+              </option>
+            ))}
           </select>
         )}
       </div>
-      {(job?.status === "ready" || bookmarks.length > 0) && (
-        <div className="reader-progress">
-          {job?.status === "ready" && <span>{duration(time)}</span>}
-          {job?.status === "ready" && (
-            <input
-              aria-label="Reading position"
-              type="range"
-              min="0"
-              max={job.seconds || 0}
-              step=".05"
-              value={time}
-              onChange={(e) => {
-                if (audio.current && job.audioUrl) {
-                  const element = audio.current,
-                    position = Number(e.target.value),
-                    resume = playing;
-                  if (!fullAudio.current) {
-                    fullAudio.current = true;
-                    element.onloadedmetadata = () => {
-                      element.currentTime = position;
-                      if (resume) void element.play();
-                      element.onloadedmetadata = null;
-                    };
-                    element.src = mediaUrl(job.audioUrl);
-                  } else element.currentTime = position;
-                  setActive(true);
-                  setTime(position);
-                }
-              }}
-            />
-          )}
-          <span>{job?.seconds ? duration(job.seconds) : ""}</span>
-          {bookmarks.length > 0 && (
-            <select
-              aria-label="Reading bookmarks"
-              value=""
-              onChange={(e) => {
-                const b = bookmarks[Number(e.target.value)],
-                  c = p.project.book!.chapters.find(
-                    (c) => c.id === b.chapterId,
-                  );
-                if (!c || c.text.slice(b.offset, b.offset + 60) !== b.context) {
-                  setError(
-                    "This bookmark's wording has changed. Create a new bookmark at the desired position.",
-                  );
-                  return;
-                }
-                p.onChapter(c.id);
-                setTimeout(
-                  () => p.editorRef.current?.selectRange(b.offset, b.offset),
-                  50,
-                );
-              }}
-            >
-              <option value="">Bookmarks</option>
-              {bookmarks.map((b, i) => (
-                <option key={i} value={i}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
       {error && <p role="alert">{error}</p>}
       {job?.status === "ready" && job.chunks.some((c) => c.timingError) && (
         <p>

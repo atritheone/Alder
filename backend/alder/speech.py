@@ -146,6 +146,15 @@ def split_narration(text: str, max_chars=240, max_words=45):
 
 
 def pronunciation_projection(text, entries, voice_id="default"):
+    from .pronunciation import sequential_projection
+    active = [e for e in entries if e.get("enabled", True)]
+    rex = [e for e in active if e.get("syntax") == "rex"]
+    legacy = [e for e in active if e.get("syntax") != "rex"]
+    initial = _legacy_pronunciation_projection(text, legacy, voice_id)
+    return sequential_projection(text, rex, voice_id, initial) if rex else initial
+
+
+def _legacy_pronunciation_projection(text, entries, voice_id="default"):
     """Return spoken text and a map without changing authored text.
 
     All substitutions match the original text once, longest phrase first;

@@ -340,12 +340,30 @@ try {
       exact: true,
     }),
   ).toHaveCount(0);
-  await browser.getByLabel("Written Word Or Expression").fill("Alder");
-  await browser.getByLabel("Speak As").fill("All der");
   await browser
-    .getByRole("button", { name: "Add Pronunciation", exact: true })
+    .getByRole("button", { name: "Edit Dictionary…", exact: true })
     .click();
-  await expect(browser.locator(".dictionary-row")).toContainText("All der");
+  const pronunciationDialog = page.getByRole("dialog", {
+    name: /Pronunciation/,
+  });
+  await pronunciationDialog
+    .getByRole("button", { name: "New Rule", exact: true })
+    .click();
+  await pronunciationDialog
+    .getByLabel("Written Text", { exact: true })
+    .fill("Alder");
+  await pronunciationDialog
+    .getByLabel("Speak As", { exact: true })
+    .fill("All der");
+  await pronunciationDialog
+    .getByRole("button", { name: "Save Rule", exact: true })
+    .click();
+  await expect(
+    pronunciationDialog.getByRole("listbox", { name: "Pronunciation Rules" }),
+  ).toContainText("All der");
+  await pronunciationDialog
+    .getByRole("button", { name: "Close Dictionary Editor", exact: true })
+    .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(browser.getByText("Manage voices", { exact: true })).toHaveCount(
     0,

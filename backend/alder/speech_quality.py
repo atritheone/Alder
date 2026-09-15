@@ -70,6 +70,8 @@ def projected_sections(text, entries, voice_id, max_chars=220, max_words=40):
     while pending:
         part = pending.pop(0)
         spoken, mapping = speech_projection(part["text"], entries, voice_id)
+        if not spoken.strip():
+            continue
         if len(spoken) <= max_chars and len(spoken.split()) <= max_words:
             result.append({**part, "spokenText": spoken, "pronunciationMap": mapping})
             continue
