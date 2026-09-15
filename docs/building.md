@@ -73,3 +73,10 @@ Speed dragging and wheel adjustment use 0.05 steps; typed speed retains two-deci
 precision. Volume wheel adjustment uses five percentage points per step.
 `node scripts/test-playback-sliders-desktop.mjs` checks both Write and Narration,
 including controls that are hidden and reopened.
+
+
+## Windows installer
+
+Run `npm run installer` to build the self-contained Windows x64 application and an offline installer under `release/Alder-0.1.0-Windows-x64/` (using the package version). The installer and its `.7z` data file must stay together. The separate data file avoids the embedded payload size limit with Alder's large speech resources. Setup verifies SHA-256 before extracting, installs for the current Windows user, creates a Start menu shortcut and registers an uninstaller with Windows Settings. It requires Windows 10 or later. No files are downloaded during installation.
+
+The build uses the checksum-pinned NSIS and 7-Zip toolsets provided by electron-builder. `node scripts/build-installer.mjs --compile-only` rebuilds just the installer wrapper against an existing payload, for installer-script changes only. The uninstaller removes the shipped file manifest and associated Python bytecode; unrelated files and user data are preserved. Internal `/TEST` setup mode skips shortcuts and registry changes for isolated installation/uninstallation checks. Generated files, logs and test installations stay in ignored `release/` and `work/` directories. Builds are unsigned until a distributor supplies a signing identity.

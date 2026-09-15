@@ -13,7 +13,8 @@
     "test": "vitest run",
     "package": "npm run build && node scripts/prepare-javascript-notices.mjs && node scripts/verify-resources.mjs && electron-builder --win --dir",
     "format": "prettier --write frontend electron scripts/*.mjs *.json *.ts",
-    "branding": "electron scripts/prepare-branding.cjs"
+    "branding": "electron scripts/prepare-branding.cjs",
+    "installer": "npm run package && node scripts/build-installer.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -64,7 +65,9 @@
         "to": "backend",
         "filter": [
           "**/*.py",
-          "**/*.ttf"
+          "**/*.ttf",
+          "!tests/**",
+          "!**/__pycache__/**"
         ]
       },
       {
