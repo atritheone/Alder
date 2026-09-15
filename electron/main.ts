@@ -470,6 +470,8 @@ app.whenReady().then(async () => {
         sandbox: true,
         nodeIntegration: false,
         spellcheck: false,
+        // Word highlighting follows the audio clock even when reading in the background.
+        backgroundThrottling: false,
       },
     });
     window.on("close", (event) => {

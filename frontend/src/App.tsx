@@ -1,3 +1,4 @@
+import ResizeHandle from "./ResizeHandle";
 import NativeMenu from "./NativeMenu";
 import AlderLogo from "./AlderLogo";
 import { useInstalledFonts } from "./useInstalledFonts";
@@ -238,7 +239,7 @@ export default function App() {
     ]),
     [jobs, setJobs] = useState<Job[]>([]),
     [capabilities, setCapabilities] = useState<any>(null);
-  const [browserCategory, setBrowserCategory] = useState("Ideas");
+  const [browserCategory, setBrowserCategory] = useState("Words");
   const [browserOpen, setBrowserOpen] = useState(
       () => localStorage.getItem("alder.browserOpen") === "true",
     ),
@@ -286,6 +287,9 @@ export default function App() {
     [detailHeight, setDetailHeight] = useState(() =>
       savedNumber("alder.bookSandboxHeight", 230, 180, 700),
     );
+  const [workbenchWidth, setWorkbenchWidth] = useState(() =>
+    savedNumber("alder.workbenchWidth", 254, 160, 600),
+  );
   const [chapterId, setChapterId] = useState<string | null>(null);
   const [writingFocus, setWritingFocus] = useState(true);
   const bookEditor = useRef<EditorHandle>(null);
@@ -710,9 +714,8 @@ export default function App() {
     }
     if (name === "ideas") {
       setForm({
-        title: "Add an idea sample",
-        description:
-          "Ideas are reusable language samples. Categories describe concepts independently of grammar.",
+        title: "Add a Word",
+        description: "Add a word or expression to your library.",
         fields: [
           { name: "word", label: "Word or expression", required: true },
           {
@@ -1352,7 +1355,7 @@ export default function App() {
           ]
         : []),
 
-      { label: "Idea sample…", action: () => openPanel("ideas") },
+      { label: "Word…", action: () => openPanel("ideas") },
       { label: "Definition card…", action: () => openPanel("definitions") },
     ],
     Read: [
@@ -1943,7 +1946,25 @@ export default function App() {
                     styles={project.styles}
                     fontFamily={project.settings.fontFamily}
                   />
-                  <aside className="word-workbench">
+                  <ResizeHandle
+                    label="Resize Sandbox Word Panel"
+                    orientation="vertical"
+                    value={workbenchWidth}
+                    min={160}
+                    max={600}
+                    reverse
+                    onChange={(width) => {
+                      setWorkbenchWidth(width);
+                      localStorage.setItem(
+                        "alder.workbenchWidth",
+                        String(width),
+                      );
+                    }}
+                  />
+                  <aside
+                    className="word-workbench"
+                    style={{ width: workbenchWidth }}
+                  >
                     <div className="word-heading">
                       <BookOpen size={13} />
                       <input

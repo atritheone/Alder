@@ -77,9 +77,12 @@ export function newClip(
   trackId: string,
   slot: number,
   text = "",
-  title = "Untitled clip",
+  title = "Untitled Draft",
 ): Clip {
+  const timestamp = new Date().toISOString();
   return {
+    createdAt: timestamp,
+    updatedAt: timestamp,
     id: uid(),
     trackId,
     slot,

@@ -24,7 +24,7 @@ import wave
 from datetime import datetime, timezone
 
 
-SEGMENT_VERSION = 2
+SEGMENT_VERSION = 3
 TERMINAL = {"ready", "failed", "cancelled", "interrupted"}
 ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e", "no", "fig", "inc"}
 QA_COMPARISON_VERSION = 1
@@ -101,17 +101,20 @@ def split_narration(text: str, max_chars=240, max_words=45):
             for token in tokens:
                 if len(token.group()) > max_chars:
                     raise ValueError(f"A word exceeds {max_chars} characters; check pasted URLs or missing spaces.")
-                if group and (len(" ".join(t.group() for t in group)) + 1 + len(token.group()) > max_chars or len(group) >= max_words):
+                if group and (token.end() - group[0].start() > max_chars or len(group) >= max_words):
                     a = paragraph.start() + sentence_start + group[0].start()
                     b = paragraph.start() + sentence_start + group[-1].end()
-                    paragraph_chunks.append({"text": " ".join(t.group() for t in group), "sourceStart": a, "sourceEnd": b, "paragraphEnd": False})
+                    paragraph_chunks.append({"text": text[a:b], "sourceStart": a, "sourceEnd": b, "paragraphEnd": False})
                     group = []
                 group.append(token)
             if group:
                 a = paragraph.start() + sentence_start + group[0].start()
                 b = paragraph.start() + sentence_start + group[-1].end()
-                paragraph_chunks.append({"text": " ".join(t.group() for t in group), "sourceStart": a, "sourceEnd": b, "paragraphEnd": False})
+                paragraph_chunks.append({"text": text[a:b], "sourceStart": a, "sourceEnd": b, "paragraphEnd": False})
             sentence_start = end
+        # A cursor can sit immediately before sentence punctuation. Do not send
+        # a punctuation-only chunk to a voice that produces an empty WAV for it.
+        paragraph_chunks = [chunk for chunk in paragraph_chunks if any(char.isalnum() for char in chunk["text"])]
         if paragraph_chunks:
             paragraph_chunks[-1]["paragraphEnd"] = True
             chunks.extend(paragraph_chunks)

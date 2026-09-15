@@ -555,6 +555,22 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           const at = map.findIndex((p) => p >= position);
           return at < 0 ? text.length : at;
         };
+        // Native cursor movement can precede ProseMirror's selectionchange
+        // observer. Read the live caret before a toolbar action takes focus.
+        const live = v.dom.ownerDocument.getSelection();
+        if (
+          live?.anchorNode &&
+          live.focusNode &&
+          v.dom.contains(live.anchorNode) &&
+          v.dom.contains(live.focusNode)
+        ) {
+          const anchor = v.posAtDOM(live.anchorNode, live.anchorOffset);
+          const focus = v.posAtDOM(live.focusNode, live.focusOffset);
+          return {
+            start: offset(Math.min(anchor, focus)),
+            end: offset(Math.max(anchor, focus)),
+          };
+        }
         return {
           start: offset(v.state.selection.from),
           end: offset(v.state.selection.to),

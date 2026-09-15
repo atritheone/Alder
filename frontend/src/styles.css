@@ -3238,3 +3238,115 @@ input[type="range"]:disabled {
   appearance: none;
   margin: 0;
 }
+
+/* Quiet chrome with one-pixel dividers and larger invisible drag targets. */
+.alder-app .workspace-topline {
+  background: transparent;
+  justify-content: flex-start;
+}
+.project-actions {
+  margin-left: 10px;
+}
+.project-actions + .view-tabs {
+  margin-left: auto;
+}
+.library-resizer,
+.vertical-resizer,
+.horizontal-resizer {
+  position: relative;
+  z-index: 2;
+}
+.library-resizer.vertical,
+.vertical-resizer {
+  width: 1px;
+}
+.library-resizer.horizontal,
+.horizontal-resizer {
+  height: 1px;
+}
+.library-resizer::after,
+.vertical-resizer::after,
+.horizontal-resizer::after {
+  content: "";
+  position: absolute;
+}
+.library-resizer.vertical::after,
+.vertical-resizer::after {
+  inset: 0 -4px;
+  cursor: col-resize;
+}
+.library-resizer.horizontal::after,
+.horizontal-resizer::after {
+  inset: -4px 0;
+  cursor: row-resize;
+}
+.browser-nav,
+.word-workbench {
+  border: 0;
+}
+.alder-app .word-workbench {
+  max-width: 45%;
+  min-width: 160px;
+}
+/* Retain text/active glyph colour and keyboard focus without boxed controls. */
+.alder-app
+  :is(.book-workspace, .detail-pane, .workspace-topline)
+  :is(button, select, input[type="number"]) {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.alder-app
+  :is(.book-workspace, .detail-pane, .workspace-topline)
+  :is(button, select, input[type="number"]):focus-visible {
+  outline: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.alder-app .book-workspace .reading-word {
+  background: #e5c59a;
+  color: #1f1f1f;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Keep the filter surface continuous down to its resize border. */
+.alder-app .browser-filters {
+  background: #b7b7b7;
+}
+.browser-bottom-space {
+  flex: 0 0 91px;
+}
+.library-word-row {
+  display: flex;
+  min-width: 0;
+}
+.library-word-row .library-item {
+  flex: 1;
+  min-width: 0;
+}
+.library-word-row .word-favourite {
+  flex: none;
+  border: 0;
+  background: transparent;
+  padding: 0 5px;
+}
+.word-favourite[aria-pressed="true"] {
+  color: var(--accent);
+}
+.alder-app .clip-properties output {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.page-navigation .writing-counts {
+  margin-left: 12px;
+  white-space: nowrap;
+}
+.page-navigation .writing-zoom {
+  margin-left: auto;
+}

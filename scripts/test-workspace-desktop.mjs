@@ -72,7 +72,9 @@ try {
       }),
     )
     .toBeLessThan(5);
-  await writing.fill("");
+  await writing.press("Control+A");
+  await writing.press("Backspace");
+  await expect(writing).toHaveText("");
   await page
     .locator(".paginated-editor .editor-scroll")
     .evaluate((el) => el.scrollTo(0, 0));
@@ -117,9 +119,7 @@ try {
   await expect(page.locator(".window-brand, .writing-commandbar")).toHaveCount(
     0,
   );
-  await expect(page.locator(".window-document")).not.toContainText(
-    "Organic Language Engine",
-  );
+  await expect(page.locator(".window-document")).toHaveCount(0);
   await expect(page.locator(".reader-progress")).toHaveCount(0);
   await expect(
     browser
@@ -134,12 +134,49 @@ try {
     ),
   ).toBe(false);
   await writing.fill("Three simple words");
-  await expect(page.locator(".book-page-tools")).toContainText("3 Words");
-  await expect(page.locator(".book-page-tools")).not.toContainText("Chapters");
-  await writing.fill("");
+  await expect(page.locator(".page-navigation")).toContainText("3 Words");
+  await expect(page.locator(".page-navigation")).not.toContainText("Chapters");
+  await writing.press("Control+A");
+  await writing.press("Backspace");
+  await expect(writing).toHaveText("");
   const nav = browser.getByRole("navigation", {
     name: "Collections And Library",
   });
+  await expect(
+    nav.getByRole("button", { name: "Ideas", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    nav.getByRole("button", { name: "Words", exact: true }),
+  ).toBeVisible();
+  await expect(browser.locator(".browser-preview")).toHaveCount(0);
+  expect(
+    (await browser.locator(".browser-bottom-space").boundingBox()).height,
+  ).toBeGreaterThan(60);
+  await expect(page.locator(".book-page-tools")).toHaveCount(0);
+  await expect(
+    page.locator(".page-navigation").getByLabel("Page zoom"),
+  ).toBeVisible();
+
+  await nav.getByRole("button", { name: "Drafts", exact: true }).click();
+  const draftFilters = browser.getByRole("region", { name: "Library Filters" });
+  await expect(draftFilters.locator(".filter-chips button")).toHaveText([
+    "All",
+    "Past Day",
+    "Past Week",
+    "Past Month",
+    "Past Year",
+  ]);
+  await draftFilters
+    .getByRole("button", { name: "Past Day", exact: true })
+    .click();
+  await expect(browser.locator(".library-list .library-item")).toHaveCount(1);
+  await expect(draftFilters).toHaveCSS(
+    "background-color",
+    await draftFilters
+      .locator(".filter-area")
+      .evaluate((el) => getComputedStyle(el).backgroundColor),
+  );
+  await nav.getByRole("button", { name: "Words", exact: true }).click();
   const navBefore = await nav.boundingBox();
   const divider = await browser
     .getByRole("separator", { name: "Resize Collections And Content" })
@@ -211,6 +248,35 @@ try {
     exact: true,
   });
   await expect(sandbox).toBeVisible();
+  await expect(page.locator(".clip-properties output").first()).toHaveCSS(
+    "border-top-width",
+    "0px",
+  );
+  const wordPanel = page.locator(".word-workbench");
+  const wordBefore = await wordPanel.boundingBox();
+  const wordHandle = page.getByRole("separator", {
+    name: "Resize Sandbox Word Panel",
+  });
+  await expect(wordHandle).toHaveCSS("width", "1px");
+  const wh = await wordHandle.boundingBox();
+  await page.mouse.move(wh.x, wh.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(wh.x - 60, wh.y + 20, { steps: 8 });
+  await page.mouse.up();
+  expect((await wordPanel.boundingBox()).width).toBeGreaterThan(
+    wordBefore.width + 40,
+  );
+  const projectName = await page.locator(".project-label").boundingBox();
+  const actions = await page.locator(".project-actions").boundingBox();
+  expect(actions.x - (projectName.x + projectName.width)).toBeLessThan(20);
+  await expect(page.locator(".workspace-topline")).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await expect(page.getByLabel("Reading scope")).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
   for (const word of ["I", "want", "to", "write"]) {
     const transfer = await page.evaluateHandle((word) => {
       const dt = new DataTransfer();

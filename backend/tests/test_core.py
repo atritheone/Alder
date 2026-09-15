@@ -369,3 +369,26 @@ def test_speech_review_api_passes_manual_decision_and_reports_conflicts(tmp_path
         assert received == [("finished", decision)]
         assert client.post("/api/speech/jobs/pending/review", json=decision, headers=headers).status_code == 409
         assert client.post("/api/speech/jobs/missing/review", json=decision, headers=headers).status_code == 404
+
+
+def test_draft_edit_dates_ignore_unrelated_project_saves(monkeypatch):
+    import alder.models as models
+    monkeypatch.setattr(models, "now", lambda: "2026-09-01T12:00:00Z")
+    previous = create_project()
+    original = previous["clips"][0]
+    assert original["createdAt"] == original["updatedAt"] == "2026-09-01T12:00:00Z"
+    monkeypatch.setattr(models, "now", lambda: "2026-09-15T12:00:00Z")
+    changed = deepcopy(previous)
+    changed["name"] = "Renamed project"
+    unchanged = validate_project(changed, previous)
+    assert unchanged["clips"][0]["updatedAt"] == original["updatedAt"]
+    changed["clips"][0]["title"] = "Renamed draft"
+    updated = validate_project(changed, previous)
+    assert updated["clips"][0]["updatedAt"] == "2026-09-15T12:00:00Z"
+    assert updated["clips"][0]["createdAt"] == original["createdAt"]
+    legacy = deepcopy(previous)
+    for draft in legacy["clips"]:
+        draft.pop("createdAt", None)
+        draft.pop("updatedAt", None)
+    restored = validate_project(legacy)
+    assert restored["clips"][0]["updatedAt"] == previous["updatedAt"]

@@ -222,28 +222,6 @@ export default function BookWorkspace(p: Props) {
           />
         ) : (
           <>
-            <div className="book-page-tools">
-              <span>
-                {pages.length || 1} {pages.length === 1 ? "page" : "pages"} ·{" "}
-                {words(chapters.map((c) => c.text).join(" "))} Words
-                {isBook && ` · ${chapters.length} Chapters`}
-              </span>
-
-              <label>
-                Zoom{" "}
-                <select
-                  aria-label="Page zoom"
-                  value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
-                >
-                  {[0.5, 0.65, 0.8, 1, 1.25].map((z) => (
-                    <option key={z} value={z}>
-                      {Math.round(z * 100)}%
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
             {p.view === "Pages" && (
               <div className="page-arranger" aria-label="Arrange pages">
                 <p>
@@ -338,7 +316,7 @@ export default function BookWorkspace(p: Props) {
                 styles={p.project.styles}
               />
             </div>
-            {p.view === "Write" && (
+            {["Write", "Pages"].includes(p.view) && (
               <form
                 className="page-navigation"
                 aria-label="Chapter Pages"
@@ -367,6 +345,24 @@ export default function BookWorkspace(p: Props) {
                   />
                 </label>
                 <span>of {Math.max(1, pages.length)}</span>
+                <span className="writing-counts">
+                  {words(chapters.map((c) => c.text).join(" "))} Words
+                  {isBook && ` · ${chapters.length} Chapters`}
+                </span>
+                <label className="writing-zoom">
+                  Zoom{" "}
+                  <select
+                    aria-label="Page zoom"
+                    value={zoom}
+                    onChange={(e) => setZoom(Number(e.target.value))}
+                  >
+                    {[0.5, 0.65, 0.8, 1, 1.25].map((z) => (
+                      <option key={z} value={z}>
+                        {Math.round(z * 100)}%
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </form>
             )}
           </>

@@ -74,6 +74,29 @@ def test_long_sentence_splits_without_losing_words():
         split_narration("x" * 241)
 
 
+def test_word_offsets_preserve_spaces_line_breaks_and_unicode():
+    from alder.reading import word_timings
+    import re
+    text = "🌲 Start   here\tand continue\nwithout drifting.  " * 8
+    for chunk in split_narration(text):
+        assert chunk["text"] == text[chunk["sourceStart"]:chunk["sourceEnd"]]
+        assert len(chunk["text"]) <= 240
+        words = [{"text": m.group(), "startSeconds": i, "endSeconds": i + .8}
+                 for i, m in enumerate(re.finditer(r"\w+", chunk["text"]))]
+        timings = word_timings(chunk["text"], chunk["text"], words)
+        for word in timings:
+            start = chunk["sourceStart"] + word["sourceStart"]
+            end = chunk["sourceStart"] + word["sourceEnd"]
+            assert text[start:end] == word["text"]
+
+
+def test_cursor_before_punctuation_skips_empty_speech_chunks():
+    text = ".  Alder starts here."
+    chunks = split_narration(text)
+    assert [chunk["text"] for chunk in chunks] == ["Alder starts here."]
+    assert chunks[0]["sourceStart"] == 3
+
+
 def test_pronunciation_is_nonrecursive_and_voice_specific():
     text = "OLE stays OLE; whole stays whole."
     entries = [{"word": "OLE", "spoken": "Alder"}, {"word": "Alder", "spoken": "tree"}, {"word": "whole", "spoken": "hole", "voiceId": "other"}]

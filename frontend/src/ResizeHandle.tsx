@@ -7,6 +7,7 @@ type Props = {
   min: number;
   max: number;
   onChange: (value: number) => void;
+  reverse?: boolean;
 };
 
 export default function ResizeHandle({
@@ -16,6 +17,7 @@ export default function ResizeHandle({
   min,
   max,
   onChange,
+  reverse = false,
 }: Props) {
   const drag = useRef<{ start: number; value: number; scale: number } | null>(
     null,
@@ -51,7 +53,8 @@ export default function ResizeHandle({
         if (drag.current)
           update(
             drag.current.value +
-              ((vertical ? e.clientX : e.clientY) - drag.current.start) /
+              ((reverse ? -1 : 1) *
+                ((vertical ? e.clientX : e.clientY) - drag.current.start)) /
                 drag.current.scale,
           );
       }}
@@ -68,7 +71,7 @@ export default function ResizeHandle({
           : ["ArrowUp", "ArrowDown"];
         if (keys.includes(e.key)) {
           e.preventDefault();
-          update(value + (e.key === keys[0] ? -10 : 10));
+          update(value + (reverse ? -1 : 1) * (e.key === keys[0] ? -10 : 10));
         }
       }}
     />

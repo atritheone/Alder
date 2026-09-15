@@ -226,7 +226,14 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         if clip.setdefault("activeVariantId", None) is not None and clip["activeVariantId"] not in variants:
             raise ValidationError("Active variant does not exist in this draft.")
         old = old_clips.get(clip["id"])
+        baseline = now() if previous and not old else ((previous or p).get("updatedAt") or (previous or p).get("createdAt") or now())
+        clip.setdefault("createdAt", (old or {}).get("createdAt") or baseline)
+        clip.setdefault("updatedAt", (old or {}).get("updatedAt") or baseline)
         if old:
+            clip["createdAt"] = old.get("createdAt") or clip["createdAt"]
+            edited = any(clip.get(k) != old.get(k) for k in ("title", "document", "activeVariantId", "variants", "voiceId", "language", "tags"))
+            clip["updatedAt"] = now() if edited else old.get("updatedAt", clip["updatedAt"])
+
             changed = any(clip.get(k) != old.get(k) for k in ("document", "activeVariantId", "variants", "voiceId", "language"))
             clip["revision"] = old.get("revision", 1) + int(changed)
         else:

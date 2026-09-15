@@ -67,7 +67,7 @@ isolated desktop profile, alongside 27 TypeScript checks.
 Alder branding uses the supplied transparent black tree on light UI surfaces
 and transparent white tree on dark surfaces. Fixed desktop icons use the
 supplied white tree with a transparent background; interface accents use dark slate blue (#293f5e). The start screen, About panel, favicon, window,
-tray, and Windows executable share these assets. `npm run branding` regenerates
+and Windows executable share these assets. `npm run branding` regenerates
 PNG and ICO assets from `frontend/public/branding/alder-icon-source.png`. Windows builds
 create a branded `Alder.exe` beside the development Electron runtime, used by
 `Start-Alder.cmd` and `npm run desktop`; the dependency executable is preserved.
@@ -94,7 +94,7 @@ continuous editor. Page navigation uses a number field and Enter; the field
 also follows scrolling. Scrollbars are hidden throughout the app and reading
 preview while native vertical and horizontal scrolling remain available.
 Controls and panels use square corners. Sliders have square thumbs and straight
-tracks; the reading-speed slider is 80px wide with fine steps and tick marks.
+tracks; the reading-speed slider is 80px wide with fine steps.
 Generic narration status messages no longer create a strip under the controls;
 ready-audio seeking, bookmarks, and actionable errors remain available.
 
@@ -114,3 +114,30 @@ fits its value. Play starts a new reading, pauses/resumes existing audio, and
 refreshes it after wording or voice settings change. Desktop checks exercise
 native menu visibility and action routing, inline Styles, the compact speed
 field, Play/Pause, reading revised text, and actual one-word speech highlights.
+
+
+Write reading defaults to From Cursor. Play resumes paused audio if its text,
+voice settings, and cursor are unchanged; moving the cursor starts a fresh
+reading. Chunking preserves original whitespace so source offsets cannot drift
+across repeated spaces, tabs, and line breaks. Punctuation-only leading chunks
+are skipped. Word highlights use the playing audio chunk's own clock, sampled
+every 25 ms independently of animation-frame scheduling. The complementary
+amber highlight has no padding or shadow that could offset its word rectangle.
+
+The project toolbar shares the workspace background, with Undo, Redo, and Save
+immediately after the project rename arrow. Write and Sandbox buttons, dropdowns,
+and numeric fields have transparent borders and backgrounds, retaining glyph
+state colours and an underlined keyboard focus indicator. Panel dividers are
+one pixel wide with larger invisible drag targets. The Sandbox word panel can
+be resized at its left edge or with arrow keys; its width persists between runs.
+Desktop checks cover these controls and live cursor-based SAPI word following.
+
+
+The library exposes Words as its single word collection, with favourites on
+individual rows. Its old description panel is removed and its 91px footprint
+remains empty. Filter backgrounds continue to the resize border. Drafts filter
+by last edit over rolling day, week, month (30 days), or year (365 days) periods;
+All includes undated drafts. Older projects seed missing draft dates from the
+project timestamp, and unrelated project saves leave draft dates unchanged.
+Sandbox word/sentence counters have no boxes. Write's page total, word/chapter
+counts, and zoom share the bottom page navigation bar; the upper count bar is gone.

@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Library,
-  Lightbulb,
   BookOpen,
   AudioLines,
   Blocks,
@@ -15,9 +14,9 @@ import {
   FileText,
   Star,
   Plus,
-  GripVertical,
 } from "lucide-react";
 import ResizeHandle from "./ResizeHandle";
+import { draftPeriods, matchesDraftPeriod } from "./draftFilters";
 import type { Project, Idea } from "./types";
 type Props = {
   project: Project;
@@ -91,7 +90,6 @@ export const deviceCatalog = [
   },
 ];
 const categories = [
-  { id: "Ideas", icon: Lightbulb },
   { id: "Drafts", icon: Blocks },
   { id: "Words", icon: BookOpen },
   { id: "Language Tools", icon: SlidersHorizontal },
@@ -244,7 +242,7 @@ export default function Browser({
           </button>
           <button onClick={() => onPanel("ideas")}>
             <Plus size={15} />
-            Add an idea…
+            Add a Word…
           </button>
         </nav>
         <ResizeHandle
@@ -275,7 +273,9 @@ export default function Browser({
                   <div className="filter-chips">
                     {(category === "Language Tools"
                       ? ["All", "Analysis", "Transform", "Speech"]
-                      : ideaCats
+                      : category === "Drafts"
+                        ? draftPeriods
+                        : ideaCats
                     ).map((f) => (
                       <button
                         key={f}
@@ -318,37 +318,57 @@ export default function Browser({
               </section>
             ) : (
               <>
-                {["Ideas", "Words", "Favourites"].includes(category) ? (
+                {["Words", "Favourites"].includes(category) ? (
                   visible.map((idea) => (
-                    <button
-                      key={idea.id}
-                      className={
-                        "library-item " +
-                        (selected?.id === idea.id ? "selected" : "")
-                      }
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData(
-                          "application/x-alder-idea",
-                          JSON.stringify(idea),
-                        );
-                        e.dataTransfer.effectAllowed = "copy";
-                      }}
-                      onClick={() => {
-                        setSelected(idea);
-                        onHint(idea.definition);
-                      }}
-                      onDoubleClick={() => onInsert(idea)}
-                    >
-                      <span className="idea-glyph">
-                        {idea.category === "Prime" ? "◈" : "◇"}
-                      </span>
-                      <span>{idea.word}</span>
-                      <small>{idea.pos}</small>
-                    </button>
+                    <div className="library-word-row" key={idea.id}>
+                      <button
+                        className={
+                          "library-item " +
+                          (selected?.id === idea.id ? "selected" : "")
+                        }
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData(
+                            "application/x-alder-idea",
+                            JSON.stringify(idea),
+                          );
+                          e.dataTransfer.effectAllowed = "copy";
+                        }}
+                        onClick={() => {
+                          setSelected(idea);
+                          onHint(idea.definition);
+                        }}
+                        onDoubleClick={() => onInsert(idea)}
+                      >
+                        <span className="idea-glyph">
+                          {idea.category === "Prime" ? "◈" : "◇"}
+                        </span>
+                        <span>{idea.word}</span>
+                        <small>{idea.pos}</small>
+                      </button>
+                      <button
+                        className="word-favourite"
+                        aria-label={`${favourites.includes(idea.id) ? "Remove" : "Add"} ${idea.word} ${favourites.includes(idea.id) ? "From" : "To"} Favourites`}
+                        aria-pressed={favourites.includes(idea.id)}
+                        onClick={() => favourite(idea.id)}
+                      >
+                        <Star
+                          size={12}
+                          fill={
+                            favourites.includes(idea.id)
+                              ? "currentColor"
+                              : "none"
+                          }
+                        />
+                      </button>
+                    </div>
                   ))
                 ) : category === "Drafts" ? (
                   project.clips
+                    .filter((c) => matchesDraftPeriod(c, filter))
+                    .sort((a, b) =>
+                      (b.updatedAt || "").localeCompare(a.updatedAt || ""),
+                    )
                     .filter((c) =>
                       `${c.title} ${c.text}`
                         .toLowerCase()
@@ -423,11 +443,11 @@ export default function Browser({
                     </button>
                   </div>
                 )}
-                {["Ideas", "Words", "Favourites"].includes(category) &&
+                {["Words", "Favourites"].includes(category) &&
                   !visible.length && (
                     <p className="empty-small">
-                      No matching samples. Try another filter or add your own
-                      idea.
+                      No matching words. Try another filter or add your own
+                      word.
                     </p>
                   )}
               </>
@@ -435,44 +455,7 @@ export default function Browser({
           </div>
         </div>
       </div>
-      {!managed && (
-        <div className="browser-preview">
-          {selected ? (
-            <>
-              <div>
-                <strong>{selected.word}</strong>
-                <span>
-                  {selected.category} · {selected.pos}
-                </span>
-                <button
-                  aria-label="Favourite idea"
-                  className={
-                    favourites.includes(selected.id) ? "favourited" : ""
-                  }
-                  onClick={() => favourite(selected.id)}
-                >
-                  <Star size={13} />
-                </button>
-              </div>
-              <p>{selected.definition}</p>
-              <div>
-                <button onClick={() => onInsert(selected)}>
-                  Insert sample
-                </button>
-                <span className="quiet">Drag into a draft</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <strong>Ideas are language samples</strong>
-              <p>
-                Browse a category, then drag a word into your writing.
-                Double-click to insert.
-              </p>
-            </>
-          )}
-        </div>
-      )}
+      {!managed && <div className="browser-bottom-space" aria-hidden="true" />}
     </aside>
   );
 }

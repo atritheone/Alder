@@ -28,7 +28,7 @@ try {
   await page
     .getByRole("textbox", { name: "Chapter text editor", exact: true })
     .fill(
-      "Alder reads each word clearly. The voice follows the writing at a precise speed.",
+      "Skip these words. Alder   reads each word clearly. The voice   follows the writing at a precise speed.",
     );
   await expect(page.locator(".save-status")).toHaveText("Saved");
   const families = await page.evaluate(
@@ -76,6 +76,15 @@ try {
     throw new Error("Desktop verification requires an installed SAPI voice");
   await page.getByLabel("Reading voice").selectOption(voices[0]);
   await page.getByLabel("Reading speed", { exact: true }).fill("0.93");
+  await expect(page.getByLabel("Reading scope")).toHaveValue("cursor");
+  const writing = page.getByRole("textbox", {
+    name: "Chapter text editor",
+    exact: true,
+  });
+  await writing.press("Control+Home");
+  for (let i = 0; i < "Skip these words. ".length; i++)
+    await writing.press("ArrowRight");
+
   await page
     .locator(".document-reader")
     .getByRole("button", { name: "Play Reading", exact: true })
@@ -110,24 +119,47 @@ try {
     );
     throw error;
   }
+  const speech = await page.evaluate(async () => {
+    const id = document
+      .querySelector(".document-reader audio")
+      .src.match(/speech\/jobs\/([^/]+)/)[1];
+    const job = await window.alder.request("GET", `/api/speech/jobs/${id}`);
+    window.testSpeech = job;
+    return job;
+  });
+  expect(speech.text).toMatch(/^Alder   reads/);
   const observed = await page.evaluate(async () => {
     let maximumWords = 0,
-      highlights = 0;
+      highlights = 0,
+      mismatches = [];
     for (let i = 0; i < 80; i++) {
       const text = document.querySelector(".reading-word")?.textContent?.trim();
       if (text) {
         highlights++;
         maximumWords = Math.max(maximumWords, text.split(/\s+/).length);
       }
+      const audio = document.querySelector(".document-reader audio");
+      const chunk = window.testSpeech.chunks.find((c) =>
+        audio.src.endsWith(`/chunks/${c.id}`),
+      );
+      const expected = chunk?.wordTimings?.find(
+        (w) =>
+          audio.currentTime > w.startSeconds + 0.08 &&
+          audio.currentTime < w.endSeconds - 0.08,
+      );
+      if (text && expected && text !== expected.text)
+        mismatches.push({ text, expected: expected.text });
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     return {
       maximumWords,
       highlights,
+      mismatches,
       gain: window.playbackProbe.gain.gain.value,
       speed: document.querySelector(".document-reader audio").playbackRate,
     };
   });
+  expect(observed.mismatches).toEqual([]);
   expect(observed.maximumWords).toBe(1);
   expect(observed.highlights).toBeGreaterThan(10);
   expect(observed.gain).toBeCloseTo(2);
@@ -158,11 +190,14 @@ try {
   await reader
     .getByRole("button", { name: "Pause Reading", exact: true })
     .click();
-  await page
-    .getByRole("textbox", { name: "Chapter text editor", exact: true })
-    .fill(
-      "This is new wording. Play should read the revised document, with no separate Read button.",
-    );
+  await writing.press("Control+a");
+  await page.keyboard.insertText(
+    "This is new wording. Play should read the revised document, with no separate Read button.",
+  );
+  await expect(writing).toHaveText(
+    "This is new wording. Play should read the revised document, with no separate Read button.",
+  );
+  await writing.press("Control+Home");
   await reader
     .getByRole("button", { name: "Play Reading", exact: true })
     .click();

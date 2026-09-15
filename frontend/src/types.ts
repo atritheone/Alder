@@ -29,6 +29,8 @@ export type Variant = {
   createdAt: string;
 };
 export type Clip = {
+  createdAt?: string;
+  updatedAt?: string;
   id: string;
   trackId: string;
   slot: number;
