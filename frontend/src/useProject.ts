@@ -15,18 +15,7 @@ export function useProject() {
   const load = useCallback((p: Project) => {
     let converted = !p.book;
     p = migrateBook(p);
-    // Replace Alder's previous default, preserving deliberately chosen fonts.
-    if (p.settings.fontFamily === "Sitka Text") {
-      p = structuredClone(p);
-      p.settings.fontFamily = "Cambria";
-      for (const style of p.styles)
-        if (
-          ["Body", "Heading"].includes(style.name) &&
-          style.fontFamily === "Sitka Text"
-        )
-          style.fontFamily = "Cambria";
-      converted = true;
-    }
+    // Font substitution is a display decision. Never rewrite authored choices on open.
     current.current = p;
     revision.current = p.revision;
     dirty.current = converted;

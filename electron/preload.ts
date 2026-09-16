@@ -20,6 +20,13 @@ contextBridge.exposeInMainWorld("alder", {
   mediaBase: "alder://local",
   platform: process.platform,
   version: "0.1.0",
+  onOpenFiles: (callback: (paths: string[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, paths: string[]) =>
+      callback(paths);
+    ipcRenderer.on("alder:open-files", handler);
+    void ipcRenderer.invoke("alder:files-ready");
+    return () => ipcRenderer.removeListener("alder:open-files", handler);
+  },
   onCloseRequest: (callback: () => Promise<void>) => {
     const handler = (_event: Electron.IpcRendererEvent, id: string) => {
       Promise.resolve(callback())

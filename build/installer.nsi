@@ -16,7 +16,7 @@ ShowUninstDetails show
 BrandingText "Alder"
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey /LANG=1033 "ProductName" "Alder"
-VIAddVersionKey /LANG=1033 "FileDescription" "Alder Installer"
+VIAddVersionKey /LANG=1033 "FileDescription" "Alder Organic Language Engine for Windows"
 VIAddVersionKey /LANG=1033 "FileVersion" "${VERSION}"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (c) 6AE slayer"
 !define MUI_ICON "${ICON}"

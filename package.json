@@ -2,19 +2,33 @@
   "name": "alder",
   "version": "0.1.0",
   "private": true,
-  "description": "Alder",
+  "description": "Alder Organic Language Engine for Windows",
+  "homepage": "https://atritheone.com/alder",
+  "alderSetup": {
+    "dataCompatibility": 1,
+    "descriptions": {
+      "win32": "Alder Organic Language Engine for Windows",
+      "linux": "Alder Organic Language Engine for Linux",
+      "darwin": "Alder Organic Language Engine for Mac"
+    }
+  },
   "main": "dist-electron/main.cjs",
-  "author": "Alder",
+  "author": {
+    "name": "Alder",
+    "email": "edward@atritheone.com"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build && node scripts/build-electron.mjs",
     "desktop": "node scripts/start-desktop.mjs",
     "test": "vitest run",
-    "package": "npm run build && node scripts/prepare-javascript-notices.mjs && node scripts/verify-resources.mjs && electron-builder --win --dir",
+    "package": "npm run build && node scripts/prepare-javascript-notices.mjs && node scripts/package-desktop.mjs",
     "format": "prettier --write frontend electron scripts/*.mjs *.json *.ts",
     "branding": "electron scripts/prepare-branding.cjs",
-    "installer": "npm run package && node scripts/build-installer.mjs"
+    "installer": "npm run package && node scripts/build-installer.mjs",
+    "package:linux": "npm run package -- --linux",
+    "package:mac": "npm run package -- --mac"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -65,6 +79,7 @@
         "to": "backend",
         "filter": [
           "**/*.py",
+          "**/*.json",
           "**/*.ttf",
           "!tests/**",
           "!**/__pycache__/**"
@@ -93,7 +108,41 @@
       "icon": "build/alder.ico",
       "signExecutable": false
     },
-    "copyright": "Copyright (c) 6AE slayer"
+    "copyright": "Copyright (c) 6AE slayer",
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "14.0",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "notarize": false,
+      "icon": "build/alder.icns"
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "tar.gz"
+      ],
+      "category": "Office",
+      "icon": "build/icons",
+      "maintainer": "Alder <edward@atritheone.com>",
+      "executableName": "alder",
+      "desktop": {
+        "entry": {
+          "MimeType": "application/x-alder;"
+        }
+      }
+    },
+    "fileAssociations": [
+      {
+        "ext": "alder",
+        "name": "Alder project",
+        "mimeType": "application/x-alder",
+        "role": "Editor"
+      }
+    ]
   },
   "allowScripts": {
     "esbuild@0.25.12": true,

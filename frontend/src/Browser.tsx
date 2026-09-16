@@ -182,7 +182,11 @@ export default function Browser({
         <Search size={15} />
         <input
           aria-label="Search library"
-          placeholder="Search Library (Ctrl+F)"
+          placeholder={
+            window.alder?.platform === "darwin"
+              ? "Search Library (⌘+F)"
+              : "Search Library (Ctrl+F)"
+          }
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

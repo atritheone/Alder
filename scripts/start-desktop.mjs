@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { desktopExecutable } from "./desktop-paths.mjs";
 const executable = path.resolve(
   process.platform === "win32"
     ? "node_modules/electron/dist/Alder.exe"
-    : "node_modules/.bin/electron",
+    : desktopExecutable(),
 );
 const child = spawn(executable, [".", ...process.argv.slice(2)], {
   stdio: "inherit",

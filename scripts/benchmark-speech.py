@@ -75,7 +75,7 @@ def resources(s):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--data',required=True)
-    p.add_argument('--device',choices=['cuda','cpu'],default='cuda')
+    p.add_argument('--device',choices=['cuda','cpu','mps'],default='cpu')
     p.add_argument('--samples',type=int,default=10)
     p.add_argument('--sustained-seconds',type=float,default=0)
     p.add_argument('--skip-corpus',action='store_true',help='Isolate queue throughput after the correctness corpus has been tested.')

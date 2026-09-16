@@ -1,0 +1,21 @@
+# Native target resolution is recorded in speech-pip-report.json and frozen in the bundle.
+# Chatterbox source is shipped separately; no development web UI is needed.
+torch==2.6.0
+torchaudio==2.6.0
+numpy==1.26.4
+librosa==0.11.0
+transformers==5.2.0
+tokenizers==0.22.2
+diffusers==0.29.0
+resemble-perth @ git+https://github.com/resemble-ai/Perth.git@ff1c8ac55a976971245cdd53c18d6131ca00d993
+conformer==0.3.2
+safetensors==0.5.3
+s3tokenizer==0.3.0
+pykakasi==2.3.0
+spacy-pkuseg==1.0.1
+pyloudnorm==0.2.0
+omegaconf==2.3.1
+soundfile==0.14.0
+# Later Numba releases no longer publish Intel Mac wheels. Keep the compatible pair.
+numba==0.61.2; sys_platform == "darwin" and platform_machine == "x86_64"
+llvmlite==0.44.0; sys_platform == "darwin" and platform_machine == "x86_64"

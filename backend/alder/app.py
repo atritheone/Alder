@@ -23,15 +23,10 @@ from starlette.concurrency import run_in_threadpool
 from . import __version__, language
 from .models import ValidationError, now, text_document, uid
 from .store import ConflictError, Store
+from .platform_runtime import default_data_dir
 
 
 ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173", "alder://app"}
-
-
-def default_data_dir() -> Path:
-    if os.environ.get("ALDER_DATA_DIR"):
-        return Path(os.environ["ALDER_DATA_DIR"])
-    return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local" / "share"))) / "Alder"
 
 
 def create_app(data_dir: Path | str | None = None, project_root: Path | str | None = None, session_token: str | None = None) -> FastAPI:
@@ -159,8 +154,18 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
 
     @app.get("/api/fonts")
     def fonts():
-        from .fonts import installed_families
-        return {"families": installed_families()}
+        from .fonts import font_catalogue
+        return font_catalogue()
+
+    @app.get("/api/fonts/bundled/{filename}")
+    def bundled_font(filename: str):
+        from .fonts import bundled_directory
+        if not re.fullmatch(r'LiberationSerif-(Regular|Bold|Italic|BoldItalic)\.ttf', filename):
+            raise HTTPException(404, 'Unknown bundled font')
+        target = bundled_directory() / filename
+        if not target.is_file():
+            raise HTTPException(404, 'The bundled document font is missing')
+        return FileResponse(target, media_type='font/ttf')
 
     @app.get("/api/projects")
     def projects():

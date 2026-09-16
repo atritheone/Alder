@@ -38,7 +38,7 @@ if (!process.argv.includes("--compile-only"))
     productVersion: pkg.version,
     versionStrings: {
       ProductName: "Alder",
-      FileDescription: "Alder",
+      FileDescription: pkg.alderSetup.descriptions.win32,
       InternalName: "Alder",
       OriginalFilename: "Alder.exe",
       CompanyName: "Alder",

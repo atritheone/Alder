@@ -1,27 +1,37 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import {
+  DOCUMENT_FONT,
+  fontIsAvailable,
+  loadDocumentFont,
+  restoreInstalledFonts,
+  type FontCatalogue,
+} from "./fontCatalogue";
 
-const fallback = ["Cambria", "Aptos", "Segoe UI", "Arial", "Times New Roman"];
-let cached: string[] | null = null;
-let pending: Promise<string[]> | null = null;
+const fallback = [DOCUMENT_FONT];
+let cached: FontCatalogue | null = null;
+let pending: Promise<FontCatalogue> | null = null;
 function readFonts() {
   if (!pending)
-    pending = api<{ families: string[] }>("/api/fonts")
-      .then(({ families }) => (cached = families))
+    pending = api<FontCatalogue>("/api/fonts")
+      .then((catalogue) => {
+        restoreInstalledFonts(catalogue);
+        return (cached = catalogue);
+      })
       .finally(() => {
         pending = null;
       });
   return pending;
 }
 
-export function useInstalledFonts(current?: string | null) {
-  const [fonts, setFonts] = useState(cached || fallback);
+export function useFontCatalogue(current?: string | null) {
+  const [catalogue, setCatalogue] = useState<FontCatalogue | null>(cached);
   useEffect(() => {
     let alive = true;
     const refresh = () => {
       void readFonts()
         .then((next) => {
-          if (alive) setFonts(next);
+          if (alive) setCatalogue(next);
         })
         .catch(() => {});
     };
@@ -32,7 +42,26 @@ export function useInstalledFonts(current?: string | null) {
       window.removeEventListener("focus", refresh);
     };
   }, []);
-  return [...new Set([current || "Cambria", ...fonts])].sort((a, b) =>
-    a.localeCompare(b),
+  const missing = Boolean(
+    current && catalogue && !fontIsAvailable(current, catalogue),
   );
+  useEffect(() => {
+    void loadDocumentFont().catch(() => {});
+    if (missing && current) void loadDocumentFont(current).catch(() => {});
+  }, [current, missing]);
+  return {
+    families: [
+      ...new Set([
+        current || DOCUMENT_FONT,
+        ...(catalogue?.families || fallback),
+      ]),
+    ].sort((a, b) => a.localeCompare(b)),
+    missing,
+    catalogue,
+    ready: catalogue !== null,
+    fallback: catalogue?.fallback || DOCUMENT_FONT,
+  };
+}
+export function useInstalledFonts(current?: string | null) {
+  return useFontCatalogue(current).families;
 }

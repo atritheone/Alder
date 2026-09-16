@@ -1,0 +1,37 @@
+# Linux setup
+
+The native adapter targets glibc 2.35+ x64 Linux (not musl/Alpine). Ubuntu 24.04 and Kali rolling are the initial
+validation distributions; other distributions need equivalent libraries and native
+acceptance. Run setup from a normal graphical desktop account, never root.
+
+The bootstrap needs bash, curl, tar, a SHA-256 utility and a writable local state
+directory. Debian-family prerequisite examples (only this command uses sudo):
+
+```sh
+sudo apt-get update
+sudo apt-get install -y curl ca-certificates tar build-essential git pkg-config \
+  libasound2t64 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 \
+  libgtk-3-0 libnss3 libxss1 libxkbcommon0 libxrandr2 libxcb-cursor0 \
+  libegl1 libopengl0
+```
+
+APT may select `t64` replacements. FUSE is not required. Doctor identifies missing
+libraries; use your distribution's actual package names rather than changing the
+repository. Then run `bash setup.sh doctor` and `bash setup.sh install`.
+
+State defaults to `$XDG_STATE_HOME/alder-setup` or `~/.local/state/alder-setup`.
+Installed versions live under `$XDG_DATA_HOME/alder/app` or
+`~/.local/share/alder/app`. A desktop entry, PNG icons in the standard hicolor
+sizes, a per-user MIME definition and `~/.local/bin/alder` are installed. Setup
+does not change the default application for existing file associations.
+
+Keep generated state on a native local filesystem. The source itself may be
+read-only or shared; the installer creates its own local build workspace.
+Use `--state-dir /absolute/path` if another disk has more space. Disk and filesystem
+sizes differ: increasing a VM's VDI alone does not expand its Linux filesystem.
+The installer diagnoses capacity but never changes partitions.
+
+Electron requires a working sandbox and desktop session. Setup will not add
+`--no-sandbox`, change system security settings or run Electron as root. Headless
+assembly can leave verification pending; run `bash setup.sh verify` after logging
+into the graphical desktop.

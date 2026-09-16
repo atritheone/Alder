@@ -1,9 +1,10 @@
+import { desktopExecutable } from "./desktop-paths.mjs";
 import { _electron as electron, expect } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
 const dictionary = process.argv[2];
 const app = await electron.launch({
-  executablePath: path.resolve("node_modules/electron/dist/Alder.exe"),
+  executablePath: desktopExecutable(),
   args: [
     ".",
     "--headless-test",
@@ -45,7 +46,7 @@ try {
     page.getByLabel("Written Text", { exact: true }),
   ).not.toBeVisible();
   await page
-    .getByRole("button", { name: "Edit Dictionary…", exact: true })
+    .getByRole("button", { name: "Edit Dictionaryâ€¦", exact: true })
     .click();
   const dialog = page.getByRole("dialog", { name: /Pronunciation/ });
   await expect(dialog).toBeVisible();
@@ -176,7 +177,7 @@ try {
     page.getByRole("region", { name: "Voice Library", exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: "Edit Dictionary…", exact: true })
+    .getByRole("button", { name: "Edit Dictionaryâ€¦", exact: true })
     .click();
   await expect(manager.getByLabel("Pronunciation Test Text")).toHaveValue(
     "ABC-12",

@@ -1,4 +1,4 @@
-import { useInstalledFonts } from "./useInstalledFonts";
+import { useFontCatalogue } from "./useInstalledFonts";
 import { useState, type CSSProperties } from "react";
 import { Plus, Trash2, Edit3, Copy } from "lucide-react";
 import type { NamedStyle, Project, StyleKind, StyleProperties } from "./types";
@@ -62,9 +62,10 @@ export default function StylesManager({
   onError,
 }: Props) {
   const [editing, setEditing] = useState<NamedStyle | null>(null);
-  const installedFonts = useInstalledFonts(
+  const catalogue = useFontCatalogue(
     editing?.fontFamily || project.settings.fontFamily,
   );
+  const installedFonts = catalogue.families;
   const styles = project.styles;
   const save = () => {
     if (!editing) return;
@@ -302,6 +303,12 @@ export default function StylesManager({
                   <option key={font} value={font} />
                 ))}
               </datalist>
+              {catalogue.missing && (
+                <small role="status">
+                  This font is unavailable here. Write uses {catalogue.fallback}
+                  ; the saved font choice is preserved.
+                </small>
+              )}
             </label>
             {fields
               .filter(

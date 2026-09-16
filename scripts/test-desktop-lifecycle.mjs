@@ -2,6 +2,14 @@ import { _electron as electron, expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { desktopExecutable } from "./desktop-paths.mjs";
+const layout = JSON.parse(
+  fs.readFileSync(
+    new URL("../backend/alder/runtime-layout.json", import.meta.url),
+    "utf8",
+  ),
+)[process.platform];
+const executable = desktopExecutable(process.argv.includes("--packaged"));
 
 // Exercise the actual close/save handshake, then inspect the committed SQLite
 // snapshot after the service has stopped. No installed Python or tools are used.
@@ -11,27 +19,27 @@ const output = path.resolve(
 );
 fs.mkdirSync(output, { recursive: true });
 const resources = path.resolve(
-  packaged ? "release/win-unpacked/resources" : "work/bundle-resources",
+  packaged
+    ? path.resolve(
+        path.dirname(executable),
+        process.platform === "darwin" ? "../Resources" : "resources",
+      )
+    : process.env.ALDER_RESOURCES_DIR || "work/bundle-resources",
 );
 const env = {
   ...process.env,
   ALDER_DATA_DIR: output,
-  PATH: `${process.env.SystemRoot}/System32`,
+  PATH:
+    process.platform === "win32"
+      ? `${process.env.SystemRoot}/System32`
+      : "/usr/bin:/bin",
   PYTHONNOUSERSITE: "1",
 };
-for (const key of [
-  "PYTHONHOME",
-  "PYTHONPATH",
-  "ALDER_RESOURCES_DIR",
-  "ELECTRON_RUN_AS_NODE",
-])
+for (const key of ["PYTHONHOME", "PYTHONPATH", "ELECTRON_RUN_AS_NODE"])
   delete env[key];
+if (!packaged) env.ALDER_RESOURCES_DIR = resources;
 const app = await electron.launch({
-  executablePath: path.resolve(
-    packaged
-      ? "release/win-unpacked/Alder.exe"
-      : "node_modules/electron/dist/electron.exe",
-  ),
+  executablePath: executable,
   args: packaged ? ["--headless-test"] : [".", "--headless-test"],
   env,
   timeout: 60_000,
@@ -44,6 +52,20 @@ try {
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.locator(".save-status")).toHaveText("Saved");
   await page.getByRole("tab", { name: "Write", exact: true }).click();
+  await expect.poll(() => app.evaluate(({ Menu }) =>
+    Menu.getApplicationMenu()?.items.map(item => item.label.replaceAll("&", "")) || []
+  )).toContain("File");
+  const nativeMenu = await app.evaluate(({ Menu }) => {
+    const items = Menu.getApplicationMenu().items;
+    return { labels: items.map(item => item.label.replaceAll("&", "")),
+      roles: items.map(item => item.role),
+      fileRoles: items.find(item => item.label.replaceAll("&", "") === "File")?.submenu?.items.map(item => item.role) || [] };
+  });
+  expect(nativeMenu.labels).toContain("Edit");
+  if (process.platform === "darwin") {
+    expect(nativeMenu.roles[0]?.toLowerCase()).toBe("appmenu");
+    expect(nativeMenu.fileRoles).not.toContain("quit");
+  }
   const projectId = await page.evaluate(() =>
     localStorage.getItem("alder.project"),
   );
@@ -113,7 +135,7 @@ try {
           format: "png",
           entry: {
             word: "Voyager",
-            ipa: "/ˈvɔɪ.ɪ.dʒər/",
+            ipa: "/ËˆvÉ”Éª.Éª.dÊ’É™r/",
             partOfSpeech: "Noun",
             definition: "A Priest of Lucidity and the Manifest Reality.",
           },
@@ -213,31 +235,54 @@ try {
   }
   const text = `Alder preserves the last edit before closing. ${Date.now()}`;
   const appPid = await app.evaluate(() => process.pid);
-  const processTree = spawnSync(
-    "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
-    [
-      "-NoProfile",
-      "-Command",
-      `Get-CimInstance Win32_Process -Filter 'ParentProcessId = ${appPid}' | Select-Object ProcessId,Name | ConvertTo-Json -Compress`,
-    ],
-    { encoding: "utf8", windowsHide: true },
-  );
-  const children = JSON.parse(processTree.stdout || "[]");
-  const backend = (Array.isArray(children) ? children : [children]).find(
-    (p) => p.Name === "python.exe",
-  );
+  let backend;
+  if (process.platform === "win32") {
+    const processTree = spawnSync(
+      "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        `Get-CimInstance Win32_Process -Filter 'ParentProcessId = ${appPid}' | Select-Object ProcessId,Name | ConvertTo-Json -Compress`,
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+    const children = JSON.parse(processTree.stdout || "[]");
+    backend = (Array.isArray(children) ? children : [children]).find(
+      (p) => p.Name === "python.exe",
+    );
+  } else {
+    const table = spawnSync("/bin/ps", ["-eo", "pid=,ppid=,comm="], {
+      encoding: "utf8",
+    });
+    if (table.status !== 0)
+      throw new Error("Cannot inspect backend processes: " + table.stderr);
+    backend = table.stdout
+      .split("\n")
+      .map((line) => {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        return match
+          ? {
+              ProcessId: Number(match[1]),
+              ParentId: Number(match[2]),
+              Name: match[3],
+            }
+          : null;
+      })
+      .find((row) => row?.ParentId === appPid && /python/i.test(row.Name));
+  }
   if (!backend)
     throw new Error("Desktop did not start its owned Python service.");
   await page.getByRole("textbox", { name: "Chapter text editor" }).fill(text);
   // Close immediately, before the 500 ms autosave debounce can complete.
   const finished = app.waitForEvent("close", { timeout: 25_000 });
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0].close();
+  await app.evaluate(({ BrowserWindow, app }) => {
+    if (process.platform === "darwin") app.quit();
+    else BrowserWindow.getAllWindows()[0].close();
   });
   await finished;
   closed = true;
   const check = spawnSync(
-    path.join(resources, "python/python.exe"),
+    path.join(resources, layout.python),
     [
       "-I",
       "-c",
@@ -251,17 +296,29 @@ try {
   const saved = JSON.parse(check.stdout);
   if (!saved.texts.includes(text))
     throw new Error("The final edit was not preserved by close.");
-  const remaining = spawnSync(
-    "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
-    [
-      "-NoProfile",
-      "-Command",
-      `$p = Get-Process -Id ${backend.ProcessId} -ErrorAction SilentlyContinue; if ($p) { exit 1 }; exit 0`,
-    ],
-    { encoding: "utf8", windowsHide: true },
-  );
-  if (remaining.status !== 0)
-    throw new Error("The owned Python service survived desktop close.");
+  if (process.platform === "win32") {
+    const remaining = spawnSync(
+      "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        `$p = Get-Process -Id ${backend.ProcessId} -ErrorAction SilentlyContinue; if ($p) { exit 1 }; exit 0`,
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+    if (remaining.status !== 0)
+      throw new Error("The owned Python service survived desktop close.");
+  } else {
+    let alive = false;
+    try {
+      process.kill(backend.ProcessId, 0);
+      alive = true;
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+    if (alive)
+      throw new Error("The owned Python service survived desktop quit.");
+  }
   const report = {
     status: "passed",
     packaged,
@@ -271,6 +328,7 @@ try {
     projectId,
     revision: saved.revision,
     features,
+    nativeMenu,
   };
   fs.writeFileSync(
     path.join(output, "report.json"),

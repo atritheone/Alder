@@ -21,6 +21,7 @@ import time
 import unicodedata
 import uuid
 import wave
+from .platform_runtime import resource_executable
 from datetime import datetime, timezone
 
 
@@ -207,7 +208,7 @@ def discover_runtime(project_root: Path):
     local = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local/share"))) / "chatterbox"
     resources = Path(os.environ["ALDER_RESOURCES_DIR"]) / "speech" if os.environ.get("ALDER_RESOURCES_DIR") else None
     configured = os.environ.get("ALDER_SPEECH_PYTHON")
-    bundled_python = resources / "python" / ("python.exe" if os.name == "nt" else "bin/python3") if resources else None
+    bundled_python = resource_executable(resources.parent, "speechPython") if resources else None
     python = Path(configured) if configured else bundled_python if bundled_python else local / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     hf_home = Path(os.environ.get("HF_HOME", str(local / "huggingface")))
     model = None
@@ -228,7 +229,7 @@ def discover_runtime(project_root: Path):
     model_present = model is not None and all((model / name).is_file() for name in required)
     if model_present:
         model_present = (model / "tokenizer.json").is_file() or all((model / name).is_file() for name in ("vocab.json", "merges.txt"))
-    ffmpeg = os.environ.get("ALDER_FFMPEG") or (str(resources / "ffmpeg" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")) if resources else shutil.which("ffmpeg"))
+    ffmpeg = os.environ.get("ALDER_FFMPEG") or (str(resource_executable(resources.parent, "ffmpeg")) if resources else shutil.which("ffmpeg"))
     if not ffmpeg and not resources:
         ffmpeg = next((str(p) for p in sorted((local / "ffmpeg").glob("*/bin/ffmpeg.exe"), reverse=True)), None)
     source = project_root / "chatterbox/src"
@@ -242,7 +243,7 @@ def discover_runtime(project_root: Path):
     model_revision = model.name if model else None
     if model and (model / "revision.txt").is_file():
         model_revision = (model / "revision.txt").read_text().strip()
-    qa_python = Path(os.environ["ALDER_QA_PYTHON"]) if os.environ.get("ALDER_QA_PYTHON") else resources / "qa/python" / ("python.exe" if os.name == "nt" else "bin/python3") if resources else local / "qa-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    qa_python = Path(os.environ["ALDER_QA_PYTHON"]) if os.environ.get("ALDER_QA_PYTHON") else resource_executable(resources.parent, "qaPython") if resources else local / "qa-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     qa_model = None
     if os.environ.get("ALDER_QA_MODEL"):
         qa_model = Path(os.environ["ALDER_QA_MODEL"])

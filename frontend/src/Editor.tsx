@@ -1,6 +1,8 @@
 import { spacedWord } from "./wordInsertion";
 import { persistentCaret } from "./persistentCaret";
-import { useInstalledFonts } from "./useInstalledFonts";
+import { useFontCatalogue } from "./useInstalledFonts";
+import { shortcutLabel } from "./platform";
+import { fontIsAvailable, loadDocumentFont } from "./fontCatalogue";
 import {
   forwardRef,
   useEffect,
@@ -523,8 +525,25 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const currentFont =
     (view.current && selectedTextStyle(view.current.state).fontFamily) ||
     props.fontFamily ||
-    "Cambria";
-  const installedFonts = useInstalledFonts(currentFont);
+    "Liberation Serif";
+  const fontCatalogue = useFontCatalogue(currentFont);
+  const installedFonts = fontCatalogue.families;
+  useEffect(() => {
+    if (!fontCatalogue.catalogue) return;
+    const families = new Set<string>([props.fontFamily || "Liberation Serif"]);
+    for (const style of props.styles || [])
+      if (style.fontFamily) families.add(style.fontFamily);
+    const visit = (node: DocNode) => {
+      if (node.attrs?.fontFamily) families.add(String(node.attrs.fontFamily));
+      for (const mark of node.marks || [])
+        if (mark.attrs?.fontFamily) families.add(String(mark.attrs.fontFamily));
+      for (const child of node.content || []) visit(child);
+    };
+    visit(props.document);
+    for (const family of families)
+      if (!fontIsAvailable(family, fontCatalogue.catalogue))
+        void loadDocumentFont(family).catch(() => {});
+  }, [props.document, props.styles, props.fontFamily, fontCatalogue.catalogue]);
   latest.current = props;
   decos.current = props.annotations || [];
   const command = (cmd: any) => {
@@ -918,8 +937,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             parent = s.$from.parent.textContent,
             at = s.from - start;
           const left =
-              parent.slice(0, at).match(/[\p{L}\p{N}’'-]+$/u)?.[0] || "",
-            right = parent.slice(at).match(/^[\p{L}\p{N}’'-]+/u)?.[0] || "";
+              parent.slice(0, at).match(/[\p{L}\p{N}â€™'-]+$/u)?.[0] || "",
+            right = parent.slice(at).match(/^[\p{L}\p{N}â€™'-]+/u)?.[0] || "";
           word = left + right;
           if (word)
             selection.current = {
@@ -1124,11 +1143,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     if (viewport) observer.observe(viewport);
     v.dom.addEventListener("load", measure, true);
     document.fonts.addEventListener("loadingdone", measure);
+    window.addEventListener("alder-fonts-changed", measure);
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
       v.dom.removeEventListener("load", measure, true);
       document.fonts.removeEventListener("loadingdone", measure);
+      window.removeEventListener("alder-fonts-changed", measure);
     };
   }, [
     documentVersion,
@@ -1250,11 +1271,21 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             </select>
             <select
               aria-label="Font family"
+              title={
+                fontCatalogue.missing
+                  ? `${currentFont} is unavailable. Displaying ${fontCatalogue.fallback}; the saved font choice is preserved.`
+                  : "Font family"
+              }
               value={currentFont}
               onChange={(e) => setFont("fontFamily", e.target.value)}
             >
               {installedFonts.map((f) => (
-                <option key={f}>{f}</option>
+                <option key={f} value={f}>
+                  {f}
+                  {f === currentFont && fontCatalogue.missing
+                    ? " (unavailable)"
+                    : ""}
+                </option>
               ))}
             </select>
             <select
@@ -1267,7 +1298,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               ))}
             </select>
             <button
-              data-help-label="Bold (Ctrl+B)"
+              data-help-label={shortcutLabel("Bold (Ctrl+B)")}
               aria-label="Bold"
               className={mark("strong") ? "active" : ""}
               onMouseDown={(e) => e.preventDefault()}
@@ -1276,7 +1307,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               <Bold />
             </button>
             <button
-              data-help-label="Italic (Ctrl+I)"
+              data-help-label={shortcutLabel("Italic (Ctrl+I)")}
               aria-label="Italic"
               className={mark("em") ? "active" : ""}
               onMouseDown={(e) => e.preventDefault()}
@@ -1285,7 +1316,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               <Italic />
             </button>
             <button
-              data-help-label="Underline (Ctrl+U)"
+              data-help-label={shortcutLabel("Underline (Ctrl+U)")}
               aria-label="Underline"
               className={mark("underline") ? "active" : ""}
               onMouseDown={(e) => e.preventDefault()}
@@ -1370,7 +1401,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               aria-label="Delete table"
               onClick={() => command(deleteTable)}
             >
-              −table
+              âˆ’table
             </button>
             <button
               data-help-label="Insert link"
@@ -1450,7 +1481,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           props.onVisiblePage?.(page);
         }}
         style={{
-          fontFamily: props.fontFamily || "Cambria",
+          fontFamily: props.fontFamily || "Liberation Serif",
           fontSize: `${props.fontSize || 15}px`,
         }}
       >

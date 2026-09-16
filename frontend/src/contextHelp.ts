@@ -119,6 +119,8 @@ const descriptions: Record<string, string> = {
   "Redo project change": "Reapply the most recently undone project change.",
 };
 
+import { shortcutLabel } from "./platform";
+
 export function helpFor(target: EventTarget | null): string {
   if (!(target instanceof Element)) return "";
   const element = target.closest(
@@ -132,13 +134,15 @@ export function helpFor(target: EventTarget | null): string {
     element.closest("label")?.textContent?.trim() ||
     element.textContent?.trim() ||
     "";
-  return (
+  return shortcutLabel(
     element.getAttribute("data-help") ||
-    descriptions[label] ||
-    element.getAttribute("data-help-label") ||
-    element.parentElement?.closest("[data-help]")?.getAttribute("data-help") ||
-    (label
-      ? `${label}. ${element.tagName === "SELECT" ? "Choose an option from the list." : element.tagName === "INPUT" ? "Edit this setting; changes are saved with your workspace." : ""}`
-      : "")
+      descriptions[label] ||
+      element.getAttribute("data-help-label") ||
+      element.parentElement
+        ?.closest("[data-help]")
+        ?.getAttribute("data-help") ||
+      (label
+        ? `${label}. ${element.tagName === "SELECT" ? "Choose an option from the list." : element.tagName === "INPUT" ? "Edit this setting; changes are saved with your workspace." : ""}`
+        : ""),
   );
 }

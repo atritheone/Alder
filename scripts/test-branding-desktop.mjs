@@ -4,6 +4,12 @@ import path from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const resource = require("resedit");
+if (process.platform !== "win32") {
+  console.log(
+    "Windows PE icon-resource test: not applicable to this platform.",
+  );
+  process.exit(0);
+}
 const executable = path.resolve("node_modules/electron/dist/Alder.exe");
 const resources = resource.NtExecutableResource.from(
   resource.NtExecutable.from(fs.readFileSync(executable)),
@@ -21,7 +27,7 @@ const version = resource.Resource.VersionInfo.fromEntries(
   resources.entries,
 )[0].getStringValues({ lang: 1033, codepage: 1200 });
 expect(version.ProductName).toBe("Alder");
-expect(version.FileDescription).toContain("Alder");
+expect(version.FileDescription).toBe("Alder Organic Language Engine for Windows");
 const app = await electron.launch({
   executablePath: executable,
   args: [
@@ -95,7 +101,7 @@ try {
   await app.evaluate(({ Menu }) => {
     Menu.getApplicationMenu()
       .items.find((item) => item.label === "Options")
-      .submenu.items.find((item) => item.label === "Styles…")
+      .submenu.items.find((item) => item.label === "Stylesâ€¦")
       .click();
   });
   await expect(

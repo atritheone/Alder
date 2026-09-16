@@ -552,6 +552,19 @@ export default function App() {
   }, [word, project?.id, project?.dictionary]);
   useEffect(() => window.alder?.onCloseRequest(flush), [flush]);
   useEffect(() => {
+    let pending = Promise.resolve();
+    return window.alder?.onOpenFiles?.((paths) => {
+      for (const path of paths)
+        pending = pending
+          .then(async () => {
+            await flush();
+            load(await api("/api/projects/open", "POST", { path }));
+            setPanel(null);
+          })
+          .catch((error) => setError(String(error.message || error)));
+    });
+  }, [flush, load]);
+  useEffect(() => {
     for (const [key, value] of Object.entries({
       view,
       detail,
@@ -3211,9 +3224,11 @@ export default function App() {
                   </label>
                   <p>
                     Use the Write and Pages views to write and arrange your
-                    book. Space controls playback outside text fields. Ctrl+S
-                    saves; Ctrl+F finds text. Chapter and page navigation are
-                    keyboard accessible.
+                    book. Space controls playback outside text fields.{" "}
+                    {window.alder?.platform === "darwin"
+                      ? "⌘+S saves; ⌘+F finds text."
+                      : "Ctrl+S saves; Ctrl+F finds text."}{" "}
+                    Chapter and page navigation are keyboard accessible.
                   </p>
                 </div>
               )}

@@ -7,7 +7,10 @@ const root = process.cwd();
 const lock = JSON.parse(
   fs.readFileSync(path.join(root, "package-lock.json"), "utf8"),
 );
-const output = path.join(root, "work/bundle-resources/notices/javascript");
+const output = path.join(
+  process.env.ALDER_RESOURCES_DIR || path.join(root, "work/bundle-resources"),
+  "notices/javascript",
+);
 fs.mkdirSync(output, { recursive: true });
 const records = [];
 const notices = [];

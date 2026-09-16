@@ -127,7 +127,7 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         raise ValidationError("This project uses an unsupported schema version. Its source has been preserved.")
     p["schemaVersion"] = 1
     if not isinstance(p.get("name"), str) or not p["name"].strip() or len(p["name"]) > 300:
-        raise ValidationError("Project name must contain 1–300 characters.")
+        raise ValidationError("Project name must contain 1â€“300 characters.")
     p["language"] = p.get("language") or "en"
     if not isinstance(p["language"], str) or len(p["language"]) > 40:
         raise ValidationError("Invalid language tag.")
@@ -268,7 +268,7 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     if not isinstance(p.setdefault("settings", {}), dict):
         raise ValidationError("Project settings must be an object.")
     defaults = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22,
-                "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True}
+                "fontFamily": "Liberation Serif", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True}
     for k, v in defaults.items():
         p["settings"].setdefault(k, v)
     for prop, low, high in (("marginMm", 0, 100), ("fontSize", 6, 96), ("lineHeight", 0.8, 4)):
@@ -329,7 +329,7 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         for chapter in chapters:
             register(chapter, "chapter")
             if not isinstance(chapter.get("title"), str) or not chapter["title"].strip() or len(chapter["title"]) > 300:
-                raise ValidationError("A chapter requires a title of 1–300 characters.")
+                raise ValidationError("A chapter requires a title of 1â€“300 characters.")
             if "rawSource" in chapter:
                 source = chapter["rawSource"]
                 if not isinstance(source, dict) or source.get("format") not in {"markdown", "html"} or not isinstance(source.get("text"), str):
@@ -374,7 +374,7 @@ def create_project(name: str | None = None, template: str = "demo") -> dict:
 
     placements = []
     if template == "demo":
-        add(0, 0, "I · a prime idea", "I")
+        add(0, 0, "I Â· a prime idea", "I")
         add(0, 1, "A place to begin", "Every thought begins somewhere. A word becomes a phrase; a phrase becomes a world.")
         first = add(1, 0, "The shape of a thought", "I keep a small collection of beginnings. A sentence overheard on the train. A name without a character. The colour of the sky before rain.\nHere, language is material: something to gather, arrange, listen to, and shape.")
         first["variants"] = [{"id": uid("variant_"), "name": "A quieter opening", "document": text_document("I collect beginnings. A voice on the train, a name without a story, the sky before rain.\nLanguage takes shape when we give it room."), "createdAt": now()}]
@@ -388,10 +388,10 @@ def create_project(name: str | None = None, template: str = "demo") -> dict:
     else:
         first = add(1, 0, "First passage", "")
         placements = [{"id": uid("placement_"), "clipId": first["id"], "sectionId": sections[0]["id"], "order": 0}]
-    return validate_project({"id": project_id, "name": name or {"demo": "Alder · First Light", "blank": "Untitled", "essay": "New essay", "book": "New book"}[template],
+    return validate_project({"id": project_id, "name": name or {"demo": "Alder Â· First Light", "blank": "Untitled", "essay": "New essay", "book": "New book"}[template],
                              "revision": 1, "schemaVersion": 1, "createdAt": now(), "updatedAt": now(), "language": "en",
                              "tracks": tracks, "clips": clips, "placements": placements, "sections": sections,
                              "ideas": [], "dictionary": [], "pronunciation": [], "assets": [],
-                             "styles": [{"id": uid("style_"), "name": "Body", "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "spaceAfter": 8},
-                                        {"id": uid("style_"), "name": "Heading", "fontFamily": "Cambria", "fontSize": 24, "lineHeight": 1.2, "spaceAfter": 14}],
+                             "styles": [{"id": uid("style_"), "name": "Body", "fontFamily": "Liberation Serif", "fontSize": 12, "lineHeight": 1.6, "spaceAfter": 8},
+                                        {"id": uid("style_"), "name": "Heading", "fontFamily": "Liberation Serif", "fontSize": 24, "lineHeight": 1.2, "spaceAfter": 14}],
                              "settings": {"description": "A language workstation for ideas, drafts, and finished work."}})

@@ -19,6 +19,7 @@ import tarfile
 import time
 import urllib.request
 import zipfile
+import sys
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -272,7 +273,8 @@ db = sqlite3.connect(':memory:')
 assert db.execute('select 1').fetchone() == (1,)
 print(json.dumps({'status':'passed','python':sys.version.split()[0],'sysPath':paths,'modules':modules,'wordnet':wordnet.get_version(),'omw':'2.0','additionalLemmaLanguage':'spa','userSiteEnabled':site.ENABLE_USER_SITE,'externalPath':'','networkConnections':'blocked during audit'}))
 '''
-    result = subprocess.run([str(output / "python/python.exe"), "-I", "-B", "-c", code, str(output)], capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment, timeout=120, **subprocess_options())
+    executable = output / ('python/python.exe' if sys.platform == 'win32' else 'python/bin/python3')
+    result = subprocess.run([str(executable), "-I", "-B", "-c", code, str(output)], capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment, timeout=120, **subprocess_options())
     if result.returncode:
         raise RuntimeError("Portable core runtime audit failed:\n" + result.stdout + result.stderr)
     return json.loads(result.stdout)

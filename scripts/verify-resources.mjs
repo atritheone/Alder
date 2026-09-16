@@ -2,18 +2,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-const root = path.resolve(process.argv[2] || "work/bundle-resources");
+const root = path.resolve(
+  process.argv[2] || process.env.ALDER_RESOURCES_DIR || "work/bundle-resources",
+);
+const layout = JSON.parse(
+  fs.readFileSync(
+    new URL("../backend/alder/runtime-layout.json", import.meta.url),
+    "utf8",
+  ),
+)[process.platform];
+if (!layout) throw new Error(`Unsupported platform: ${process.platform}`);
 const required = [
-  "python/python.exe",
-  "python/Lib/site-packages/fastapi/__init__.py",
-  "speech/python/python.exe",
+  ...Object.values(layout),
   "speech/chatterbox/src/chatterbox/tts_turbo.py",
   "speech/models/turbo/t3_turbo_v1.safetensors",
   "speech/models/turbo/s3gen_meanflow.safetensors",
   "speech/models/turbo/ve.safetensors",
-  "speech/ffmpeg/ffmpeg.exe",
-  "speech/ffmpeg/ffprobe.exe",
-  "speech/qa/python/python.exe",
   "fonts/LiberationSerif-Regular.ttf",
   "tools/tika/tika-app-3.3.2.jar",
 ];
@@ -33,8 +37,8 @@ if (!fs.existsSync(root))
 walk(root);
 const missing = required.filter((f) => !fs.existsSync(path.join(root, f)));
 for (const [name, test] of [
-  ["Calibre", /tools\/calibre\/.*ebook-convert\.exe$/i],
-  ["Java", /tools\/(java|jre)\/.*java\.exe$/i],
+  ["Calibre", /tools\/calibre\/.*ebook-convert(?:\.exe)?$/i],
+  ["Java", /tools\/(java|jre)\/.*java(?:\.exe)?$/i],
   ["EPUBCheck", /tools\/epubcheck\/.*epubcheck\.jar$/i],
   ["WordNet", /nltk_data\/corpora\/wordnet(\.zip|\/)/i],
   ["QA model", /speech\/qa\/models\/.*model\.bin$/i],
@@ -57,7 +61,7 @@ for (const name of [
   if (!fs.existsSync(path.join(root, name)))
     throw new Error(`Required verified resource missing: ${name}`);
 const audit = spawnSync(
-  path.join(root, "python/python.exe"),
+  path.join(root, layout.python),
   [
     "-I",
     path.resolve("scripts/prepare-core-resources.py"),

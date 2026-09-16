@@ -1,8 +1,9 @@
+import { desktopExecutable } from "./desktop-paths.mjs";
 import { _electron as electron, expect } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
 const app = await electron.launch({
-  executablePath: path.resolve("node_modules/electron/dist/electron.exe"),
+  executablePath: desktopExecutable(),
   args: [
     ".",
     "--headless-test",
@@ -269,7 +270,10 @@ try {
     browser.getByRole("region", { name: "Voice Management" }),
   ).toBeVisible();
   await expect(
-    browser.getByRole("button", { name: "Add Reference Voice…", exact: true }),
+    browser.getByRole("button", {
+      name: "Add Reference Voiceâ€¦",
+      exact: true,
+    }),
   ).toBeVisible();
   const voiceLibrary = browser.getByRole("region", { name: "Voice Library" });
   const voiceRows = await page.evaluate(
@@ -341,7 +345,7 @@ try {
     }),
   ).toHaveCount(0);
   await browser
-    .getByRole("button", { name: "Edit Dictionary…", exact: true })
+    .getByRole("button", { name: "Edit Dictionaryâ€¦", exact: true })
     .click();
   const pronunciationDialog = page.getByRole("dialog", {
     name: /Pronunciation/,

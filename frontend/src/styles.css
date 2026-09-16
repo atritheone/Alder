@@ -71,7 +71,7 @@
   font-display: swap;
 }
 :root {
-  font-family: "Aptos", Arial, sans-serif;
+  font-family: "Aptos", system-ui, Arial, sans-serif;
   color: #272727;
   background: #888888;
   font-size: 12px;
@@ -1256,7 +1256,7 @@ button.danger {
   margin: 15px 0;
 }
 .show-structure .ProseMirror p:after {
-  content: " Â¶";
+  content: " Ã‚Â¶";
   font:
     11px "Aptos",
     Arial,
@@ -1346,7 +1346,7 @@ button.danger {
   margin-bottom: 12px;
 }
 .word-chips button {
-  font-family: "Aptos", sans-serif;
+  font-family: "Aptos", system-ui, sans-serif;
   font-size: 12px;
   min-height: 24px;
   padding: 2px 7px;
@@ -1358,7 +1358,7 @@ button.danger {
   border-color: #939393;
 }
 .definition {
-  font-family: "Aptos", sans-serif;
+  font-family: "Aptos", system-ui, sans-serif;
   font-size: 13px;
   margin: 5px 0 12px;
   line-height: 1.55;
@@ -1857,7 +1857,7 @@ button.danger {
   font-size: 8px;
 }
 .arrangement-clip p {
-  font-family: "Aptos", sans-serif;
+  font-family: "Aptos", system-ui, sans-serif;
   font-size: 10px;
   margin: 4px 6px;
   line-height: 1.4;

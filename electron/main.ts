@@ -18,13 +18,35 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { executable, dataDirectory, platformMenu } from "./platform";
 
 app.setAppUserModelId("org.alder.language");
+if (process.platform === "linux")
+  app.commandLine.appendSwitch("enable-features", "GlobalShortcutsPortal");
 if (!app.requestSingleInstanceLock()) app.exit(0);
-app.on("second-instance", () => {
-  window?.restore();
-  window?.focus();
+app.on("second-instance", (_event, argv) => {
+  queueFiles(argv);
+  void reopenWindow();
 });
+const pendingFiles: string[] = [];
+let rendererReady = false;
+app.on("open-file", (event, file) => {
+  event.preventDefault();
+  queueFiles([file]);
+  if (app.isReady()) void reopenWindow();
+});
+function queueFiles(files: string[]) {
+  pendingFiles.push(
+    ...files.filter(
+      (file) => path.isAbsolute(file) && file.toLowerCase().endsWith(".alder"),
+    ),
+  );
+  sendFiles();
+}
+function sendFiles() {
+  if (rendererReady && window && !window.isDestroyed() && pendingFiles.length)
+    window.webContents.send("alder:open-files", pendingFiles.splice(0));
+}
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "alder",
@@ -44,6 +66,8 @@ let window: BrowserWindow | null = null,
   log: fs.WriteStream | null = null;
 let closeAllowed = false,
   closeInFlight = false;
+let quitting = false;
+let reopening: Promise<void> | null = null;
 const flushRequests = new Map<
   string,
   (value: { ok: boolean; message?: string }) => void
@@ -53,7 +77,8 @@ const root = path.resolve(__dirname, "..");
 const packaged = app.isPackaged && !process.defaultApp;
 const resources = packaged
   ? process.resourcesPath
-  : path.join(root, "work", "bundle-resources");
+  : process.env.ALDER_RESOURCES_DIR ||
+    path.join(root, "work", "bundle-resources");
 const backendRoot = packaged
   ? path.join(resources, "backend")
   : path.join(root, "backend");
@@ -108,16 +133,14 @@ async function freePort(): Promise<number> {
   });
 }
 async function startBackend() {
-  const python = path.join(resources, "python", "python.exe");
+  const python = executable(resources, "python");
   if (!fs.existsSync(python))
     throw new Error(
       "Alder’s bundled language runtime is missing. Restore the complete Alder application folder.",
     );
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
-  const data =
-    process.env.ALDER_DATA_DIR ||
-    path.join(process.env.LOCALAPPDATA || app.getPath("appData"), "Alder");
+  const data = dataDirectory();
   fs.mkdirSync(data, { recursive: true });
   log = fs.createWriteStream(path.join(data, "service.log"), { flags: "a" });
   const env: NodeJS.ProcessEnv = {
@@ -125,6 +148,8 @@ async function startBackend() {
     PYTHONPATH: backendRoot,
     PYTHONNOUSERSITE: "1",
     PYTHONUNBUFFERED: "1",
+    PYTHONDONTWRITEBYTECODE: "1",
+    PYTHONUTF8: "1",
     ALDER_DATA_DIR: data,
     ALDER_RESOURCES_DIR: resources,
     ALDER_PROJECT_ROOT: root,
@@ -138,6 +163,7 @@ async function startBackend() {
       cwd: backendRoot,
       env,
       windowsHide: true,
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -210,7 +236,7 @@ async function registerProtocols() {
       const headers = new Headers(response.headers);
       headers.set(
         "Content-Security-Policy",
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: alder:; media-src 'self' blob: alder:; frame-src alder://local; connect-src 'self' alder://local; object-src 'none'",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' alder://local; img-src 'self' data: blob: alder:; media-src 'self' blob: alder:; frame-src alder://local; connect-src 'self' alder://local; object-src 'none'",
       );
       return new Response(response.body, { status: response.status, headers });
     } catch {
@@ -219,6 +245,11 @@ async function registerProtocols() {
   });
 }
 function registerIPC() {
+  ipcMain.handle("alder:files-ready", (event) => {
+    trusted(event);
+    rendererReady = true;
+    sendFiles();
+  });
   ipcMain.handle("alder:set-menu", (event, menus: unknown) => {
     trusted(event);
     if (menus === null) {
@@ -276,7 +307,7 @@ function registerIPC() {
         return { label: group.label, submenu };
       },
     );
-    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+    Menu.setApplicationMenu(Menu.buildFromTemplate(platformMenu(template)));
     window?.setMenuBarVisibility(true);
   });
   ipcMain.handle("alder:clipboard-text", async (e) => {
@@ -385,55 +416,137 @@ function registerIPC() {
 }
 function setMenu() {
   Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      {
-        label: "File",
-        submenu: [
-          {
-            label: "New project",
-            accelerator: "CmdOrCtrl+N",
-            click: () => command("new"),
-          },
-          {
-            label: "Open project",
-            accelerator: "CmdOrCtrl+O",
-            click: () => command("open"),
-          },
-          {
-            label: "Save project",
-            accelerator: "CmdOrCtrl+S",
-            click: () => command("save"),
-          },
-          { label: "Export", click: () => command("export") },
-          { type: "separator" },
-          { role: "quit" },
-        ],
-      },
-      {
-        label: "Edit",
-        submenu: [
-          { role: "undo" },
-          { role: "redo" },
-          { type: "separator" },
-          { role: "cut" },
-          { role: "copy" },
-          { role: "paste" },
-          { role: "selectAll" },
-        ],
-      },
-      {
-        label: "View",
-        submenu: [
-          { role: "reload" },
-          { role: "resetZoom" },
-          { role: "zoomIn" },
-          { role: "zoomOut" },
-          { role: "togglefullscreen" },
-          ...(!packaged ? [{ role: "toggleDevTools" as const }] : []),
-        ],
-      },
-    ]),
+    Menu.buildFromTemplate(
+      platformMenu([
+        {
+          label: "File",
+          submenu: [
+            {
+              label: "New project",
+              accelerator: "CmdOrCtrl+N",
+              click: () => command("new"),
+            },
+            {
+              label: "Open project",
+              accelerator: "CmdOrCtrl+O",
+              click: () => command("open"),
+            },
+            {
+              label: "Save project",
+              accelerator: "CmdOrCtrl+S",
+              click: () => command("save"),
+            },
+            { label: "Export", click: () => command("export") },
+            { type: "separator" },
+            { role: "quit" },
+          ],
+        },
+        {
+          label: "Edit",
+          submenu: [
+            { role: "undo" },
+            { role: "redo" },
+            { type: "separator" },
+            { role: "cut" },
+            { role: "copy" },
+            { role: "paste" },
+            { role: "selectAll" },
+          ],
+        },
+        {
+          label: "View",
+          submenu: [
+            { role: "reload" },
+            { role: "resetZoom" },
+            { role: "zoomIn" },
+            { role: "zoomOut" },
+            { role: "togglefullscreen" },
+            ...(!packaged ? [{ role: "toggleDevTools" as const }] : []),
+          ],
+        },
+      ]),
+    ),
   );
+}
+async function createWindow() {
+  rendererReady = false;
+  setMenu();
+  const appIcon = nativeImage.createFromPath(
+    path.join(appRoot, "branding", "alder-icon.png"),
+  );
+  if (appIcon.isEmpty())
+    throw new Error(
+      "The Alder application icon is missing. Rebuild the application.",
+    );
+  window = new BrowserWindow({
+    icon: appIcon,
+    width: 1550,
+    height: 980,
+    minWidth: 900,
+    minHeight: 680,
+    backgroundColor: "#e6e6e6",
+    title: "Alder",
+    show:
+      !process.argv.includes("--smoke-test") &&
+      !process.argv.includes("--headless-test"),
+    autoHideMenuBar: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      spellcheck: false,
+      // Word highlighting follows the audio clock even when reading in the background.
+      backgroundThrottling: false,
+    },
+  });
+  window.on("close", (event) => {
+    if (!closeAllowed) {
+      event.preventDefault();
+      void closeApplication(process.platform !== "darwin");
+    }
+  });
+  window.on("closed", () => {
+    window = null;
+    rendererReady = false;
+  });
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event, url) => {
+    if (url !== "alder://app/index.html") event.preventDefault();
+  });
+  await window.loadURL("alder://app/index.html");
+  if (
+    !process.argv.includes("--headless-test") &&
+    !process.argv.includes("--smoke-test")
+  ) {
+    for (const [key, action] of [
+      ["CommandOrControl+Alt+Space", "reading-toggle"],
+      ["CommandOrControl+Alt+R", "reading-read"],
+      ["CommandOrControl+Alt+S", "reading-stop"],
+    ])
+      if (!globalShortcut.register(key, () => command(action)))
+        console.warn(`Reading shortcut unavailable: ${key}`);
+  }
+  if (process.argv.includes("--smoke-test")) {
+    await new Promise((r) => setTimeout(r, 4000));
+    const text = await window.webContents.executeJavaScript(
+      "document.body.innerText",
+    );
+    const result = {
+      ok:
+        text.includes("Alder") && text.includes("New") && text.includes("Open"),
+      title: window.getTitle(),
+      text: text.slice(0, 1000),
+      resources,
+      python: executable(resources, "python"),
+    };
+    fs.writeFileSync(
+      process.env.ALDER_SMOKE_OUTPUT ||
+        path.join(app.getPath("userData"), "smoke-result.json"),
+      JSON.stringify(result, null, 2),
+    );
+    app.quit();
+  }
 }
 app.whenReady().then(async () => {
   try {
@@ -444,81 +557,8 @@ app.whenReady().then(async () => {
       (_wc, _permission, callback) => callback(false),
     );
     session.defaultSession.setPermissionCheckHandler(() => false);
-    setMenu();
-    const appIcon = nativeImage.createFromPath(
-      path.join(appRoot, "branding", "alder-icon.png"),
-    );
-    if (appIcon.isEmpty())
-      throw new Error(
-        "The Alder application icon is missing. Rebuild the application.",
-      );
-    window = new BrowserWindow({
-      icon: appIcon,
-      width: 1550,
-      height: 980,
-      minWidth: 900,
-      minHeight: 680,
-      backgroundColor: "#e6e6e6",
-      title: "Alder",
-      show:
-        !process.argv.includes("--smoke-test") &&
-        !process.argv.includes("--headless-test"),
-      autoHideMenuBar: false,
-      webPreferences: {
-        preload: path.join(__dirname, "preload.cjs"),
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-        spellcheck: false,
-        // Word highlighting follows the audio clock even when reading in the background.
-        backgroundThrottling: false,
-      },
-    });
-    window.on("close", (event) => {
-      if (!closeAllowed) {
-        event.preventDefault();
-        void closeApplication();
-      }
-    });
-    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    window.webContents.on("will-navigate", (event, url) => {
-      if (url !== "alder://app/index.html") event.preventDefault();
-    });
-    await window.loadURL("alder://app/index.html");
-    if (
-      !process.argv.includes("--headless-test") &&
-      !process.argv.includes("--smoke-test")
-    ) {
-      for (const [key, action] of [
-        ["CommandOrControl+Alt+Space", "reading-toggle"],
-        ["CommandOrControl+Alt+R", "reading-read"],
-        ["CommandOrControl+Alt+S", "reading-stop"],
-      ])
-        if (!globalShortcut.register(key, () => command(action)))
-          console.warn(`Reading shortcut unavailable: ${key}`);
-    }
-    if (process.argv.includes("--smoke-test")) {
-      await new Promise((r) => setTimeout(r, 4000));
-      const text = await window.webContents.executeJavaScript(
-        "document.body.innerText",
-      );
-      const result = {
-        ok:
-          text.includes("Alder") &&
-          text.includes("New") &&
-          text.includes("Open"),
-        title: window.getTitle(),
-        text: text.slice(0, 1000),
-        resources,
-        python: path.join(resources, "python", "python.exe"),
-      };
-      fs.writeFileSync(
-        process.env.ALDER_SMOKE_OUTPUT ||
-          path.join(app.getPath("userData"), "smoke-result.json"),
-        JSON.stringify(result, null, 2),
-      );
-      app.quit();
-    }
+    queueFiles(process.argv);
+    await createWindow();
   } catch (e) {
     if (process.argv.includes("--smoke-test")) {
       console.error(e);
@@ -529,7 +569,35 @@ app.whenReady().then(async () => {
     }
   }
 });
-app.on("window-all-closed", () => app.quit());
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+app.on("activate", () => {
+  void reopenWindow();
+});
+async function reopenWindow() {
+  if (!app.isReady() || closeInFlight || quitting) return;
+  if (window && !window.isDestroyed()) {
+    window.show();
+    window.restore();
+    window.focus();
+    sendFiles();
+    return;
+  }
+  if (!reopening)
+    reopening = (async () => {
+      await startBackend();
+      await createWindow();
+    })()
+      .catch((error) => {
+        dialog.showErrorBox("Alder could not reopen", String(error));
+        app.quit();
+      })
+      .finally(() => {
+        reopening = null;
+      });
+  await reopening;
+}
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
 });
@@ -539,7 +607,8 @@ app.on("before-quit", (event) => {
     void closeApplication();
   }
 });
-async function closeApplication() {
+async function closeApplication(quit = true) {
+  quitting ||= quit;
   if (closeInFlight || closeAllowed) return;
   closeInFlight = true;
   try {
@@ -572,6 +641,7 @@ async function closeApplication() {
         });
         if (answer.response === 0) {
           closeInFlight = false;
+          quitting = false;
           return;
         }
       }
@@ -599,12 +669,29 @@ async function closeApplication() {
           killer.on("exit", () => resolve());
           killer.on("error", () => resolve());
         });
-      } else backend.kill();
+      } else {
+        // The backend owns a separate process group, including speech/converters.
+        // Never signal Alder's or the launching terminal's process group.
+        try {
+          process.kill(-pid, "SIGTERM");
+        } catch {}
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {}
+      }
     }
     log?.end();
+    backend = null;
+    globalShortcut.unregisterAll();
     closeAllowed = true;
     window?.destroy();
-    app.quit();
+    if (quitting) app.quit();
+    else {
+      closeAllowed = false;
+      closeInFlight = false;
+      setMenu();
+    }
   } catch (e) {
     console.error(e);
     closeInFlight = false;

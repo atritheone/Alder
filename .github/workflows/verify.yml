@@ -4,7 +4,11 @@ on:
   pull_request:
 jobs:
   source:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,6 +19,9 @@ jobs:
         with:
           python-version: '3.11'
       - run: npm ci
+      - run: python -B scripts/setup/cli.py validate
+      - run: python -B -m unittest discover -s tests/setup -v
+      - run: node scripts/validate-setup-metadata.mjs
       - run: npm run build
       - run: npm test
       - run: python -m pip install -r requirements-core.lock.txt

@@ -1,6 +1,9 @@
 # Building Alder
 
-The end-user release is self-contained. The development tools described here are for building the application, not requirements for an Alder user.
+This guide describes the developer build workflow. End users should follow
+[SETUP.md](../SETUP.md): setup provisions, builds and installs Alder on their own
+machine without editing the checkout. It uses an external workspace and the
+hashed native locks under `resources/locks/`. The finished app runs offline.
 
 ## Development
 
@@ -29,7 +32,9 @@ Run `work/venv/Scripts/python.exe scripts/prepare-reading-resources.py` to provi
 
 Use `scripts/prepare-core-resources.py` for the portable core interpreter, the exact application packages, and checksum-verified WordNet/OMW dictionaries. It supports explicit source paths, `--archive-base`, `--offline` and `--verify-only`; use `--help` for build-machine configuration. Use `scripts/prepare-speech-resources.py` to assemble and verify speech resources from the pinned development installation and cached official models. Use `scripts/prepare-publishing-tools.ps1` for pinned, checksum-verified publishing tools and fonts. These are build-time operations. Runtime resource verification is mandatory before packaging and errors if any required component is missing; it also runs an isolated core import and offline dictionary audit.
 
-The large models are deliberately absent from Git. Builders provide model artifacts through the resource provisioning process; end users receive them in the completed release. No API key is bundled or required.
+The large models are deliberately absent from Git. Existing builders provide model
+artifacts through resource provisioning; repository setup retrieves pinned
+artifacts directly on the user's machine. No API key is bundled or required.
 
 ## Verification and packaging
 

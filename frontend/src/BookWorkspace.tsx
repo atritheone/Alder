@@ -385,7 +385,7 @@ export default function BookWorkspace(p: Props) {
               onImage={p.onImage}
               onLink={p.onLink}
               onComplete={p.onComplete}
-              fontFamily={showRaw ? "Consolas" : p.project.settings.fontFamily}
+              fontFamily={showRaw ? "monospace" : p.project.settings.fontFamily}
               fontSize={(p.project.settings.fontSize * 96) / 72}
               styles={p.project.styles}
             />

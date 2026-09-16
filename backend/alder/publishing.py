@@ -203,7 +203,7 @@ def _prepare_publication(project, options=None, warnings=None):
             blocks = []
             for entry in sorted(entries, key=lambda item: str(item["word"]).casefold()):
                 blocks.append({"type": "heading", "attrs": {"level": 3}, "content": [{"type": "text", "text": str(entry["word"]).strip()}]})
-                details = " · ".join(str(entry.get(key) or "").strip() for key in ("ipa", "partOfSpeech") if entry.get(key))
+                details = " Â· ".join(str(entry.get(key) or "").strip() for key in ("ipa", "partOfSpeech") if entry.get(key))
                 if not details and entry.get("pos"):
                     details = str(entry["pos"])
                 if details:
@@ -221,14 +221,14 @@ def _prepare_publication(project, options=None, warnings=None):
 
 
 def _settings(project, options=None):
-    values = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22, "fontFamily": "Cambria",
+    values = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22, "fontFamily": "Liberation Serif",
               "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True, "includeTitle": True, "includeToc": False}
     values.update(project.get("settings", {}))
     values.update(options or {})
     values["fontSize"] = _number(values.get("fontSize"), 12, 6, 72)
     values["lineHeight"] = _number(values.get("lineHeight"), 1.6, 1, 3)
     values["marginMm"] = _number(values.get("marginMm"), 22, 5, 65)
-    values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Cambria")))[:100] or "Cambria"
+    values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Liberation Serif")))[:100] or "Liberation Serif"
     values["pageSize"] = values.get("pageSize") if values.get("pageSize") in ("A4", "A5", "Letter", "Legal", "6x9") else "A4"
     values["orientation"] = "landscape" if values.get("orientation") == "landscape" else "portrait"
     values["firstPageNumber"] = int(_number(values.get("firstPageNumber"), 1, 1, 9999))
@@ -513,8 +513,9 @@ def _bundled_root():
 
 
 def _java():
+    from .platform_runtime import resource_executable
     bundle = _bundled_root()
-    candidates = [bundle / "java/bin/java.exe", bundle / "java/bin/java", bundle / "jre/bin/java.exe", bundle / "jre/bin/java"]
+    candidates = [resource_executable(bundle.parent, "java"), bundle / "java/bin/java.exe", bundle / "java/bin/java", bundle / "jre/bin/java.exe", bundle / "jre/bin/java"]
     candidates.extend(bundle.glob("java/*/bin/java.exe"))
     candidates.extend(bundle.glob("jre/*/bin/java.exe"))
     bundled = next((str(p) for p in candidates if p.is_file()), None)
@@ -542,8 +543,9 @@ def _epubcheck_command():
 
 
 def capabilities() -> dict:
+    from .platform_runtime import resource_executable
     bundle = _bundled_root()
-    bundled = next((str(p) for p in [bundle / "calibre/ebook-convert.exe", bundle / "calibre/Calibre/ebook-convert.exe", bundle / "calibre/Calibre Portable/Calibre/ebook-convert.exe", bundle / "calibre/ebook-convert"] if p.is_file()), None)
+    bundled = next((str(p) for p in [resource_executable(bundle.parent, "calibre"), bundle / "calibre/ebook-convert.exe", bundle / "calibre/Calibre/ebook-convert.exe", bundle / "calibre/Calibre Portable/Calibre/ebook-convert.exe", bundle / "calibre/ebook-convert"] if p.is_file()), None)
     calibre = bundled if bundled and not os.environ.get("ALDER_EBOOK_CONVERT") else _find_tool("ebook-convert", "ALDER_EBOOK_CONVERT", [Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Calibre2/ebook-convert.exe"])
     return {"formats": list(SUPPORTED_FORMATS[:-1]) + (["azw3"] if calibre else []), "imports": ["txt", "md", "html", "docx", "epub", "pdf", "rtf", "doc", "odt", "ods", "odp", "ppt", "pptx", "xls", "xlsx", "eml", "mobi", "azw3", "fb2", "text"],
             "epubcheck": {"available": bool(_epubcheck_command())}, "azw3": {"available": bool(calibre), "converter": calibre}}
@@ -798,7 +800,7 @@ def _docx(project, path, settings, warnings):
             start = int(_number(attrs.get("order", attrs.get("start")), 1, 1, 100000))
             for i, item in enumerate(node.get("content", [])):
                 for j, child in enumerate(item.get("content", [])):
-                    block(container, child, indent+1, (f"{start+i}. " if kind == "ordered_list" else "• ") if j == 0 else "")
+                    block(container, child, indent+1, (f"{start+i}. " if kind == "ordered_list" else "â€¢ ") if j == 0 else "")
             return
         if kind == "blockquote":
             for child in node.get("content", []):
@@ -1014,7 +1016,7 @@ def _pdf(project, path, settings, warnings):
             start = int(_number(attrs.get("order", attrs.get("start")), 1, 1, 100000))
             for i, item in enumerate(node.get("content", [])):
                 for j, child in enumerate(item.get("content", [])):
-                    output.extend(block(child, available, indent+12, (f"{start+i}. " if kind == "ordered_list" else "• ") if j == 0 else ""))
+                    output.extend(block(child, available, indent+12, (f"{start+i}. " if kind == "ordered_list" else "â€¢ ") if j == 0 else ""))
             return output
         if kind == "blockquote":
             return sum((block(child, available, indent+16) for child in node.get("content", [])), [])
@@ -1072,7 +1074,7 @@ def _pdf(project, path, settings, warnings):
         if settings.get("header"):
             header = str(settings["header"])
             while pdfmetrics.stringWidth(header, font, 9) > width and len(header) > 1:
-                header = header[:-2] + "…"
+                header = header[:-2] + "â€¦"
             canvas.drawString(margin, pagesize[1]-margin/2, header)
         if settings.get("footer"):
             canvas.drawCentredString(pagesize[0]/2, margin/2, str(doc.page + settings["firstPageNumber"] - 1))

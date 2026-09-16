@@ -11,6 +11,7 @@ import random
 import sys
 import time
 import traceback
+from platform_runtime import speech_device
 
 
 def main():
@@ -35,9 +36,7 @@ def main():
                 from chatterbox.tts_turbo import ChatterboxTurboTTS
                 if model is None:
                     started = time.perf_counter()
-                    device = os.environ.get("ALDER_SPEECH_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
-                    if device not in ("cpu", "cuda", "mps"):
-                        raise ValueError("ALDER_SPEECH_DEVICE must be cpu, cuda, or mps.")
+                    device = speech_device(torch, os.environ.get("ALDER_SPEECH_DEVICE"))
                     model = ChatterboxTurboTTS.from_local(Path(args.model), device=device)
                     default_conditionals = model.conds
                     revision_file = Path(args.model) / "revision.txt"

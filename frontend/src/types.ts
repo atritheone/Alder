@@ -348,6 +348,7 @@ declare global {
       onCommand: (callback: (command: string) => void) => () => void;
       platform: string;
       version: string;
+      onOpenFiles?: (callback: (paths: string[]) => void) => () => void;
     };
   }
 }

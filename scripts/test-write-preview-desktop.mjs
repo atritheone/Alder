@@ -1,7 +1,8 @@
+import { desktopExecutable } from "./desktop-paths.mjs";
 import { _electron as electron, expect } from "@playwright/test";
 import path from "node:path";
 const app = await electron.launch({
-  executablePath: path.resolve("node_modules/electron/dist/electron.exe"),
+  executablePath: desktopExecutable(),
   args: [
     ".",
     "--headless-test",

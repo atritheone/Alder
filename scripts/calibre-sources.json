@@ -1,0 +1,14 @@
+{
+  "linux-x64": {
+    "name": "calibre-9.14.0-x86_64.txz",
+    "url": "https://github.com/kovidgoyal/calibre/releases/download/v9.14.0/calibre-9.14.0-x86_64.txz",
+    "sha256": "7f53a0863ed6d32407bc72053b966e39d5b64813f2592bd9c741504c01c0e7f3",
+    "checksumSource": "https://api.github.com/repos/kovidgoyal/calibre/releases/tags/v9.14.0"
+  },
+  "darwin": {
+    "name": "calibre-9.14.0.dmg",
+    "url": "https://github.com/kovidgoyal/calibre/releases/download/v9.14.0/calibre-9.14.0.dmg",
+    "sha256": "a2f825138645ea29d9f77a78c177216c0db855fa0c7b993a16ace230c04fe3d4",
+    "checksumSource": "https://api.github.com/repos/kovidgoyal/calibre/releases/tags/v9.14.0"
+  }
+}

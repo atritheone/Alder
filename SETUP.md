@@ -1,0 +1,55 @@
+# Install Alder from this repository
+
+Open a normal desktop terminal in the checkout. No global Node or Python is
+required. First setup downloads verified private runtimes, dependencies, language
+data and speech models. Internet access and roughly 45 GiB of free workspace are
+required; setup checks the actual disk and install destination before large work.
+The repository can be read-only. Nothing is generated or patched in it.
+
+Windows x64 (PowerShell):
+
+```powershell
+.\setup.ps1 doctor
+.\setup.ps1 install
+```
+
+Linux x64 or macOS (Terminal):
+
+```sh
+bash ./setup.sh doctor
+bash ./setup.sh install
+```
+
+If PowerShell blocks a local script, use a process-scoped invocation:
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 install`.
+Do not change machine execution policy or run setup elevated.
+
+You can instead ask your coding agent:
+
+> Install Alder on this machine. Read AGENTS.md, run setup doctor, complete the
+> native install and verification, and give me the launcher location and any
+> remaining limitations. Do not edit the repository or supply missing metadata.
+
+Setup downloads only this machine's native resources, builds in private local
+state and installs a complete application directory. No `.deb`, DMG or archive
+needs to be built. Normal operation is offline. macOS uses local ad-hoc signing;
+no Apple Developer membership is required. Setup provisions CPU Torch on Windows
+and Linux, and native Torch on Mac, and tests CPU narration. This installation
+path does not currently provision a CUDA runtime. Mac acceleration depends on the
+native wheel and available hardware. Use at least 8 GiB RAM; 16 GiB is recommended.
+
+Use the same command again after an interruption. Successful components are
+content checked and reused. `--state-dir /absolute/local/path` selects a larger
+disk; `--install-dir` selects a dedicated application directory. Both must be
+outside the source checkout. Use `--json` for agent-readable output.
+
+Commands: `doctor`, `install`, `verify`, `repair`, `update`, `rollback`, `uninstall`,
+`clean-cache`. `clean-cache` previews; add `--yes` to apply. `--offline` uses cached
+resources and an already verified assembled application for the same revision.
+It fails explicitly when required cached material is missing.
+
+See [Windows](docs/setup/windows.md), [Linux](docs/setup/linux.md),
+[macOS](docs/setup/macos.md), [maintenance](docs/setup/maintenance.md), and
+[troubleshooting](docs/setup/troubleshooting.md). Native validation status is
+recorded in [platform support](docs/cross-platform.md); availability of a setup
+adapter does not imply that it has passed a clean native acceptance run.

@@ -55,7 +55,7 @@ export function NewDocument({
             Object.assign(project.settings, {
               documentKind: kind,
               preferredFormat: kind === "book" ? "pdf" : kind,
-              fontFamily: "Cambria",
+              fontFamily: "Liberation Serif",
               pageSize: values.pageSize || "A4",
               orientation: values.orientation || "portrait",
               marginMm: Number(values.marginMm || 22),
@@ -148,7 +148,7 @@ export function NewDocument({
                   <option>A5</option>
                   <option>Letter</option>
                   <option>Legal</option>
-                  <option value="6x9">6 × 9 in</option>
+                  <option value="6x9">6 Ã— 9 in</option>
                 </select>
               </label>
               <label>
@@ -209,7 +209,7 @@ export function NewDocument({
             Cancel
           </button>
           <button type="submit" className="accent" disabled={busy}>
-            {busy ? "Creating…" : "Create"}
+            {busy ? "Creatingâ€¦" : "Create"}
           </button>
         </footer>
       </form>
@@ -272,7 +272,7 @@ export default function StartScreen({
         <section className="start-open" aria-label="Open document">
           <div className="manager-actions">
             <button disabled={busy} onClick={() => file.current?.click()}>
-              Open document file…
+              Open document fileâ€¦
             </button>
             {window.alder && (
               <button
@@ -289,7 +289,7 @@ export default function StartScreen({
                   })
                 }
               >
-                Open .alder archive…
+                Open .alder archiveâ€¦
               </button>
             )}
           </div>
@@ -311,7 +311,7 @@ export default function StartScreen({
           ))}
         </section>
       )}
-      {busy && <p role="status">Opening…</p>}
+      {busy && <p role="status">Openingâ€¦</p>}
       {error && <p role="alert">{error}</p>}
       <input
         ref={file}

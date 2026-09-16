@@ -1,6 +1,8 @@
 """Discover the running user's font collection without copying font files."""
 import os
 import struct
+import subprocess
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -30,7 +32,60 @@ def _font_paths():
         for directory in (Path('/Library/Fonts'), Path('/System/Library/Fonts'), Path.home()/'Library/Fonts', Path('/usr/share/fonts'), Path.home()/'.local/share/fonts', Path.home()/'.fonts'):
             if directory.is_dir():
                 paths.update(p for p in directory.rglob('*') if p.suffix.lower() in {'.ttf', '.otf', '.ttc', '.otc'})
+        if sys.platform.startswith('linux'):
+            try:
+                result = subprocess.run(['fc-list', '--format=%{file}\\n'], capture_output=True, text=True, timeout=10, check=True)
+                paths.update(Path(line) for line in result.stdout.splitlines() if line)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        elif sys.platform == 'darwin':
+            paths.update(_coretext_paths())
+    paths.update(bundled_directory().glob('*.ttf'))
     return paths
+
+
+def bundled_directory():
+    root = Path(os.environ.get('ALDER_RESOURCES_DIR', str(Path(__file__).resolve().parents[2] / 'work/bundle-resources')))
+    return root / 'fonts'
+
+
+def _coretext_paths():
+    """Include fonts activated outside the standard macOS directories."""
+    import ctypes as ct
+    paths = set()
+    try:
+        core = ct.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+        text = ct.CDLL('/System/Library/Frameworks/CoreText.framework/CoreText')
+        text.CTFontManagerCopyAvailableFontURLs.restype = ct.c_void_p
+        core.CFArrayGetCount.argtypes = [ct.c_void_p]
+        core.CFArrayGetCount.restype = ct.c_long
+        core.CFArrayGetValueAtIndex.argtypes = [ct.c_void_p, ct.c_long]
+        core.CFArrayGetValueAtIndex.restype = ct.c_void_p
+        core.CFURLGetFileSystemRepresentation.argtypes = [ct.c_void_p, ct.c_bool, ct.c_void_p, ct.c_long]
+        core.CFURLGetFileSystemRepresentation.restype = ct.c_bool
+        core.CFRelease.argtypes = [ct.c_void_p]
+        urls = text.CTFontManagerCopyAvailableFontURLs()
+        if urls:
+            try:
+                for index in range(core.CFArrayGetCount(urls)):
+                    buffer = ct.create_string_buffer(32768)
+                    if core.CFURLGetFileSystemRepresentation(core.CFArrayGetValueAtIndex(urls, index), True, buffer, len(buffer)):
+                        paths.add(Path(os.fsdecode(buffer.value)))
+            finally:
+                core.CFRelease(urls)
+    except (OSError, AttributeError):
+        pass
+    return paths
+
+
+def font_catalogue():
+    faces = installed_faces()
+    families = sorted(_windows_families() | {face['family'] for face in faces}, key=str.casefold)
+    bundled = {face['family'] for face in faces if Path(face['path']).parent == bundled_directory()}
+    return {'families': families, 'fallback': 'Liberation Serif', 'bundled': sorted(bundled),
+            'fonts': [{'family': family, 'bundled': family in bundled,
+                       'styles': sorted({f['style'] for f in faces if f['family'] == family}),
+                       'pdfEmbedding': 'restricted' if any(f.get('embedding', 0) & (0x0002 | 0x0100 | 0x0200) for f in faces if f['family'] == family) else 'checked-on-export'} for family in families]}
 
 
 @lru_cache(maxsize=2048)
@@ -144,6 +199,7 @@ def register_pdf_font(family, faces=None):
     from reportlab.pdfbase.ttfonts import TTFont
     import hashlib
     matches = [face for face in (installed_faces() if faces is None else faces) if face['family'].casefold() == family.casefold()]
+    matches.sort(key=lambda face: Path(face['path']).parent != bundled_directory())
     if not matches: return None
     key = 'AlderInstalled' + hashlib.sha256(repr(matches).encode()).hexdigest()[:16]
     def choose(bold, italic):
