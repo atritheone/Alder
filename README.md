@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="flash/alder_logo_white_transparent.png" />
+    <img src="flash/alder_logo_black_transparent.png" alt="Alder logo" width="300" />
+  </picture>
+</p>
+
 <h1 align="center">Alder</h1>
 
 <p align="center">
@@ -5,6 +12,8 @@
 </p>
 
 <p align="center">
+  <a href="https://atritheone.com/alder">Website</a>
+  ·
   <a href="#about-alder">About</a>
   ·
   <a href="#how-to-use">How to use</a>

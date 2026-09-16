@@ -1,0 +1,29 @@
+{
+  "win32": {
+    "python": "python/python.exe",
+    "speechPython": "speech/python/python.exe",
+    "qaPython": "speech/qa/python/python.exe",
+    "ffmpeg": "speech/ffmpeg/ffmpeg.exe",
+    "ffprobe": "speech/ffmpeg/ffprobe.exe",
+    "java": "tools/java/bin/java.exe",
+    "calibre": "tools/calibre/ebook-convert.exe"
+  },
+  "linux": {
+    "python": "python/bin/python3",
+    "speechPython": "speech/python/bin/python3",
+    "qaPython": "speech/qa/python/bin/python3",
+    "ffmpeg": "speech/ffmpeg/ffmpeg",
+    "ffprobe": "speech/ffmpeg/ffprobe",
+    "java": "tools/java/bin/java",
+    "calibre": "tools/calibre/ebook-convert"
+  },
+  "darwin": {
+    "python": "python/bin/python3",
+    "speechPython": "speech/python/bin/python3",
+    "qaPython": "speech/qa/python/bin/python3",
+    "ffmpeg": "speech/ffmpeg/ffmpeg",
+    "ffprobe": "speech/ffmpeg/ffprobe",
+    "java": "tools/java/Contents/Home/bin/java",
+    "calibre": "tools/calibre/calibre.app/Contents/MacOS/ebook-convert"
+  }
+}
