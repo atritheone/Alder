@@ -128,7 +128,10 @@ def test_simple_document_exports_only_authored_text_and_portable_font_layout(tmp
     word = build_export(p, "docx", tmp_path)
     doc = Document(word["path"])
     assert doc.sections[0].page_width > doc.sections[0].page_height
-    assert doc.styles["Normal"].font.name == "Liberation Serif"
+    # DOCX preserves the requested default even on hosts without Cambria.
+    # PDF font availability and substitution are checked separately below.
+    assert p["settings"]["fontFamily"] == "Cambria"
+    assert doc.styles["Normal"].font.name == "Cambria"
     pdf = build_export(p, "pdf", tmp_path)
     page = PdfReader(pdf["path"]).pages[0]
     assert page.mediabox.width > page.mediabox.height
