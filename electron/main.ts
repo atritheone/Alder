@@ -267,15 +267,35 @@ function registerIPC() {
           group.items.length > 60
         )
           throw new Error("Invalid menu group");
-        const submenu: Electron.MenuItemConstructorOptions[] = group.items.map(
-          (item: { id: string; label: string }) => {
+        const buildItems = (
+          items: unknown[],
+          depth = 0,
+        ): Electron.MenuItemConstructorOptions[] =>
+          items.map((value) => {
+            if (!value || typeof value !== "object" || depth > 3)
+              throw new Error("Invalid menu item");
+            const item = value as {
+              id: string;
+              label: string;
+              checked?: boolean;
+              submenu?: unknown[];
+            };
             if (
               typeof item.label !== "string" ||
               item.label.length > 120 ||
               typeof item.id !== "string" ||
-              !/^native:[A-Za-z]+:\d+$/.test(item.id)
+              !/^native:[A-Za-z]+:\d+(?::\d+){0,3}$/.test(item.id) ||
+              (item.checked !== undefined && typeof item.checked !== "boolean")
             )
               throw new Error("Invalid menu item");
+            if (item.submenu !== undefined) {
+              if (!Array.isArray(item.submenu) || item.submenu.length > 60)
+                throw new Error("Invalid submenu");
+              return {
+                label: item.label,
+                submenu: buildItems(item.submenu, depth + 1),
+              };
+            }
             const accelerator = item.label.startsWith("New Project")
               ? "CmdOrCtrl+N"
               : item.label.startsWith("Open Document")
@@ -287,11 +307,13 @@ function registerIPC() {
                     : undefined;
             return {
               label: item.label,
+              type: item.checked === undefined ? "normal" : "radio",
+              checked: item.checked,
               accelerator,
               click: () => command(item.id),
             };
-          },
-        );
+          });
+        const submenu = buildItems(group.items);
         if (group.label === "File")
           submenu.push({ type: "separator" }, { role: "quit" });
         if (group.label === "Edit")

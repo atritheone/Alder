@@ -1,8 +1,9 @@
 import { spacedWord } from "./wordInsertion";
 import { persistentCaret } from "./persistentCaret";
+import { structureMarks } from "./structureMarks";
 import { useFontCatalogue } from "./useInstalledFonts";
 import { shortcutLabel } from "./platform";
-import { fontIsAvailable, loadDocumentFont } from "./fontCatalogue";
+import { DOCUMENT_FONT, fontIsAvailable, loadDocumentFont } from "./fontCatalogue";
 import {
   forwardRef,
   useEffect,
@@ -525,12 +526,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const currentFont =
     (view.current && selectedTextStyle(view.current.state).fontFamily) ||
     props.fontFamily ||
-    "Liberation Serif";
+    DOCUMENT_FONT;
   const fontCatalogue = useFontCatalogue(currentFont);
   const installedFonts = fontCatalogue.families;
   useEffect(() => {
     if (!fontCatalogue.catalogue) return;
-    const families = new Set<string>([props.fontFamily || "Liberation Serif"]);
+    const families = new Set<string>([props.fontFamily || DOCUMENT_FONT]);
     for (const style of props.styles || [])
       if (style.fontFamily) families.add(style.fontFamily);
     const visit = (node: DocNode) => {
@@ -805,6 +806,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         doc,
         plugins: [
           new Plugin({ props: { decorations: () => pageDecorations.current } }),
+          structureMarks(() => latest.current.showStructure && !blocked.current),
           ...(props.persistentCaret && !blocked.current
             ? [persistentCaret()]
             : []),
@@ -1072,6 +1074,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       refreshEditorDecorations(v);
     }
   }, [props.annotations]);
+  useLayoutEffect(() => {
+    if (view.current) refreshEditorDecorations(view.current);
+  }, [props.showStructure]);
   useLayoutEffect(() => {
     const v = view.current;
     if (!v) return;
@@ -1401,7 +1406,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               aria-label="Delete table"
               onClick={() => command(deleteTable)}
             >
-              âˆ’table
+              &minus;table
             </button>
             <button
               data-help-label="Insert link"
@@ -1427,6 +1432,15 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             </button>
           </>
         )}
+        <button
+          className={props.showStructure ? "active" : ""}
+          data-help-label="Show structure"
+          aria-label="Show structure"
+          aria-pressed={props.showStructure}
+          onClick={props.onToggleStructure}
+        >
+          <Pilcrow />
+        </button>
         {props.onToggleRaw && (
           <button
             type="button"
@@ -1440,14 +1454,6 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           </button>
         )}
         <span className="toolbar-spacer" />
-        <button
-          className={props.showStructure ? "active" : ""}
-          data-help-label="Show structure"
-          aria-label="Show structure"
-          onClick={props.onToggleStructure}
-        >
-          <Pilcrow />
-        </button>
         <button
           data-help-label="Undo typing"
           aria-label="Undo typing"
@@ -1481,7 +1487,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           props.onVisiblePage?.(page);
         }}
         style={{
-          fontFamily: props.fontFamily || "Liberation Serif",
+          fontFamily: props.fontFamily || DOCUMENT_FONT,
           fontSize: `${props.fontSize || 15}px`,
         }}
       >

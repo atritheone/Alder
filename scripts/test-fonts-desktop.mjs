@@ -40,7 +40,19 @@ try {
     .toBe(4);
   await expect(
     page.getByRole("combobox", { name: "Font family", exact: true }).first(),
-  ).toHaveValue("Liberation Serif");
+  ).toHaveValue("Cambria");
+  await app.evaluate(({ Menu }) =>
+    Menu.getApplicationMenu().items.find((item) => item.label === "View")
+      .submenu.items.find((item) => item.label === "Show Sandbox").click(),
+  );
+  await expect(page.getByRole("combobox", { name: "Font family", exact: true })).toHaveCount(2);
+  for (const selector of await page.getByRole("combobox", { name: "Font family", exact: true }).all())
+    await expect(selector).toHaveValue("Cambria");
+  const cambriaInstalled = await page.evaluate(async () =>
+    (await window.alder.request("GET", "/api/fonts")).families.includes("Cambria"),
+  );
+  if (cambriaInstalled)
+    expect(await page.evaluate(() => [...document.fonts].some((font) => font.family === "Cambria"))).toBe(false);
   await expect(page.locator(".save-status")).toHaveText("Saved");
   const projectName = await page.evaluate(async () => {
     const id = localStorage.getItem("alder.project");

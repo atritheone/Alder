@@ -257,6 +257,14 @@ def test_resource_bundle_discovery_precedes_development_paths(tmp_path, monkeypa
     assert result["modelPresent"] and result["pythonPresent"] and result["sourcePresent"]
     assert result["modelRevision"] == "original-snapshot"
     assert str(root) in result["python"] and str(root) in result["source"]
+    # A source-testing workspace must use current speech code with bundled tools.
+    development = tmp_path / "chatterbox/src/chatterbox/tts_turbo.py"
+    development.parent.mkdir(parents=True)
+    development.write_text("# current checkout")
+    current = discover_runtime(tmp_path)
+    assert current["source"] == str(tmp_path / "chatterbox/src")
+    assert current["sourceRevision"] != result["sourceRevision"]
+    assert current["python"] == result["python"]
 
 
 def enable_qa_fixture(service):

@@ -221,14 +221,14 @@ def _prepare_publication(project, options=None, warnings=None):
 
 
 def _settings(project, options=None):
-    values = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22, "fontFamily": "Liberation Serif",
+    values = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22, "fontFamily": "Cambria",
               "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True, "includeTitle": True, "includeToc": False}
     values.update(project.get("settings", {}))
     values.update(options or {})
     values["fontSize"] = _number(values.get("fontSize"), 12, 6, 72)
     values["lineHeight"] = _number(values.get("lineHeight"), 1.6, 1, 3)
     values["marginMm"] = _number(values.get("marginMm"), 22, 5, 65)
-    values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Liberation Serif")))[:100] or "Liberation Serif"
+    values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Cambria")))[:100] or "Cambria"
     values["pageSize"] = values.get("pageSize") if values.get("pageSize") in ("A4", "A5", "Letter", "Legal", "6x9") else "A4"
     values["orientation"] = "landscape" if values.get("orientation") == "landscape" else "portrait"
     values["firstPageNumber"] = int(_number(values.get("firstPageNumber"), 1, 1, 9999))

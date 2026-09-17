@@ -25,6 +25,8 @@ type Props = {
   project: Project;
   change: (fn: (p: Project) => void) => void;
   view: string;
+  showStructure: boolean;
+  onToggleStructure: () => void;
   chapterId: string | null;
   onChapter: (id: string) => void;
   editorRef: RefObject<EditorHandle | null>;
@@ -60,7 +62,6 @@ export default function BookWorkspace(p: Props) {
   const [pageNumber, setPageNumber] = useState("1");
   useEffect(() => setPageNumber("1"), [chapter?.id]);
   const [zoom, setZoom] = useState(0.8);
-  const [structure, setStructure] = useState(false);
   const [speechPlaying, setSpeechPlaying] = useState(false);
   const [dragged, setDragged] = useState<number | null>(null);
   const [readingRange, setReadingRange] = useState<{
@@ -380,8 +381,8 @@ export default function BookWorkspace(p: Props) {
                   JSON.stringify(old) === JSON.stringify(next) ? old : next,
                 )
               }
-              showStructure={structure}
-              onToggleStructure={() => setStructure((v) => !v)}
+              showStructure={p.showStructure}
+              onToggleStructure={p.onToggleStructure}
               onImage={p.onImage}
               onLink={p.onLink}
               onComplete={p.onComplete}

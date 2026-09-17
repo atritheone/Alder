@@ -28,6 +28,7 @@ import { spokenWord } from "./wordFollowing";
 import { readingCursorOffset } from "./readingCursor";
 import PlaybackSpeed from "./PlaybackSpeed";
 import { useWheelSlider } from "./useWheelSlider";
+import { usePlaybackSettings } from "./usePlaybackSettings";
 
 type Props = {
   project: Project;
@@ -56,8 +57,7 @@ export default function DocumentReader(p: Props) {
   const [active, setActive] = useState(false);
   const [job, setJob] = useState<Job | null>(null),
     [error, setError] = useState("");
-  const [speed, setSpeed] = useState(1),
-    [volume, setVolume] = useState(2);
+  const { speed, setSpeed, volume, setVolume } = usePlaybackSettings("reading");
   const volumeSlider = useWheelSlider(volume, setVolume, 0, 4, 0.05);
   const [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);

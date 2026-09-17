@@ -233,7 +233,7 @@ def discover_runtime(project_root: Path):
     if not ffmpeg and not resources:
         ffmpeg = next((str(p) for p in sorted((local / "ffmpeg").glob("*/bin/ffmpeg.exe"), reverse=True)), None)
     source = project_root / "chatterbox/src"
-    if resources:
+    if resources and not source.is_dir():
         source = resources / "chatterbox/src"
     source_hasher = hashlib.sha256()
     if source.exists():

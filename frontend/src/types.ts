@@ -323,13 +323,17 @@ export type Job = {
   };
 };
 export type Voice = { id: string; name: string; [key: string]: any };
+export type NativeMenuEntry = {
+  id: string;
+  label: string;
+  checked?: boolean;
+  submenu?: NativeMenuEntry[];
+};
 declare global {
   interface Window {
     alder?: {
       setNativeMenu: (
-        menus:
-          | { label: string; items: { id: string; label: string }[] }[]
-          | null,
+        menus: { label: string; items: NativeMenuEntry[] }[] | null,
       ) => Promise<void>;
       readClipboard?: () => Promise<string>;
       request: (method: string, path: string, body?: unknown) => Promise<any>;

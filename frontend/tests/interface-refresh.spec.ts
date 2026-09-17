@@ -87,6 +87,14 @@ test("clean startup, TXT creation, Aptos, help, and exact speed", async ({
   await expect(page.getByLabel("Context help")).toContainText("separate area");
   await page.screenshot({ path: "work/alder-grey-workspace.png" });
   expect(errors).toEqual([]);
+  await page.getByLabel("Reading speed", { exact: true }).fill("1.37");
+  await page.getByLabel("Reading speed", { exact: true }).press("Tab");
+  await page.getByLabel("Reading volume", { exact: true }).fill("0");
+  await page.getByRole("button", { name: "Read", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Narration queue" }).click();
+  await page.getByLabel("Narration speed", { exact: true }).fill("0.83");
+  await page.getByLabel("Narration speed", { exact: true }).press("Tab");
+  await page.getByLabel("Narration volume", { exact: true }).fill("3.25");
   await page.reload();
   await expect(
     page.getByRole("button", { name: "New", exact: true }),
@@ -98,6 +106,18 @@ test("clean startup, TXT creation, Aptos, help, and exact speed", async ({
     .first()
     .click();
   await expect(editor).toHaveText("Only these words. No generated title.");
+  await expect(page.getByLabel("Reading speed", { exact: true })).toHaveValue(
+    "1.37",
+  );
+  await expect(page.getByLabel("Reading volume", { exact: true })).toHaveValue(
+    "0",
+  );
+  await expect(page.getByLabel("Narration speed", { exact: true })).toHaveValue(
+    "0.83",
+  );
+  await expect(page.getByLabel("Narration volume", { exact: true })).toHaveValue(
+    "3.25",
+  );
 });
 
 test("book setup persists layout and exports Cambria PDF and DOCX", async ({

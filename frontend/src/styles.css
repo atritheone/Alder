@@ -285,6 +285,21 @@ button.danger {
   justify-content: flex-start;
   padding: 7px 10px;
 }
+.menu-entry {
+  position: relative;
+}
+.menu-submenu {
+  top: -5px;
+  left: 100%;
+  min-width: 120px;
+}
+.menu-arrow {
+  margin-left: auto;
+}
+.menu-check {
+  width: 16px;
+  flex: none;
+}
 .transport {
   height: 56px;
   flex: none;
@@ -1255,21 +1270,37 @@ button.danger {
     sans-serif;
   margin: 15px 0;
 }
-.show-structure .ProseMirror p:after {
-  content: " Ã‚Â¶";
-  font:
-    11px "Aptos",
-    Arial,
-    sans-serif;
-  color: #ababab;
+.structure-marker {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  user-select: none;
 }
-.show-structure .ProseMirror {
-  background-image: linear-gradient(
-    to right,
-    transparent 23px,
-    #cbcbcb 24px,
-    transparent 25px
-  );
+.structure-whitespace {
+  position: relative;
+}
+.structure-marker::after,
+.structure-whitespace::after {
+  content: attr(data-symbol);
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+  font-family: "Aptos", Arial, sans-serif;
+  font-size: 0.8em;
+  font-weight: normal;
+  font-style: normal;
+  color: #858585;
+}
+.structure-marker::after {
+  left: 0;
+  bottom: -0.15em;
+  line-height: 1;
+}
+.structure-whitespace::after {
+  inset: 0;
+  text-align: center;
 }
 .annotation {
   text-decoration: underline wavy #7a7a7a;
@@ -2660,6 +2691,7 @@ button.danger {
 }
 .alder-app {
   zoom: var(--ui-scale);
+  min-height: 0;
   height: calc(100dvh / var(--ui-scale));
   width: calc(100vw / var(--ui-scale));
 }

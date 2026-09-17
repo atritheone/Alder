@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import {
   DOCUMENT_FONT,
+  FALLBACK_FONT,
   fontIsAvailable,
   loadDocumentFont,
   restoreInstalledFonts,
@@ -59,7 +60,7 @@ export function useFontCatalogue(current?: string | null) {
     missing,
     catalogue,
     ready: catalogue !== null,
-    fallback: catalogue?.fallback || DOCUMENT_FONT,
+    fallback: catalogue?.fallback || FALLBACK_FONT,
   };
 }
 export function useInstalledFonts(current?: string | null) {

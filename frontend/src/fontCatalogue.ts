@@ -1,5 +1,6 @@
 import { mediaUrl } from "./api";
-export const DOCUMENT_FONT = "Liberation Serif";
+export const DOCUMENT_FONT = "Cambria";
+export const FALLBACK_FONT = "Liberation Serif";
 export type FontCatalogue = {
   families: string[];
   bundled?: string[];
@@ -7,7 +8,7 @@ export type FontCatalogue = {
 };
 const loaded = new Map<string, Promise<void>>();
 const faces = new Map<string, FontFace[]>();
-export function loadDocumentFont(family = DOCUMENT_FONT) {
+export function loadDocumentFont(family = FALLBACK_FONT) {
   if (!loaded.has(family)) {
     const task = Promise.all(
       [
@@ -43,7 +44,7 @@ export function fontIsAvailable(family: string, catalogue: FontCatalogue) {
 
 export function restoreInstalledFonts(catalogue: FontCatalogue) {
   for (const [family, fonts] of faces) {
-    if (family !== DOCUMENT_FONT && fontIsAvailable(family, catalogue)) {
+    if (family !== FALLBACK_FONT && fontIsAvailable(family, catalogue)) {
       for (const font of fonts) document.fonts.delete(font);
       faces.delete(family);
       loaded.delete(family);

@@ -43,7 +43,7 @@ const descriptions: Record<string, string> = {
   "Insert page break":
     "Start the following text on a new page without inserting blank paragraphs.",
   "Show structure":
-    "Reveal paragraph and other structural marks to inspect the document's layout.",
+    "Show formatting marks in Write and Sandbox: ¶ ends a paragraph, · marks a space, ° marks a non-breaking space, → marks a tab, and ↵ marks a manual line break. These guides are not saved or exported.",
   "Undo typing": "Undo the last edit in this text editor. Shortcut: Ctrl+Z.",
   "Redo typing": "Restore the last undone edit in this text editor.",
   "Toggle sandbox":

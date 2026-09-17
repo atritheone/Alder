@@ -4,6 +4,8 @@ import ResizeHandle from "./ResizeHandle";
 import VoiceManager from "./VoiceManager";
 import PronunciationManager from "./PronunciationManager";
 import NativeMenu from "./NativeMenu";
+import MenuItems, { type MenuEntry } from "./MenuItems";
+import { ArrangementGlyph, WriteGlyph } from "./WorkspaceGlyphs";
 import AlderLogo from "./AlderLogo";
 import { useInstalledFonts } from "./useInstalledFonts";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -14,10 +16,8 @@ import {
   Plus,
   ChevronDown,
   ChevronLeft,
-  FilePenLine,
   PanelLeftClose,
   PanelLeftOpen,
-  Columns3,
   AlignJustify,
   BookOpen,
   FileText,
@@ -87,6 +87,7 @@ import { helpFor } from "./contextHelp";
 import { useNarrationGain } from "./audioPlayback";
 import PlaybackSpeed from "./PlaybackSpeed";
 import { useWheelSlider } from "./useWheelSlider";
+import { usePlaybackSettings } from "./usePlaybackSettings";
 
 type Field = {
   name: string;
@@ -205,6 +206,10 @@ function FormDialog({
   );
 }
 
+const UI_SCALES = Array.from({ length: 11 }, (_, index) =>
+  String((50 + index * 10) / 100),
+);
+
 function savedChoice(key: string, choices: string[], fallback: string) {
   const value = localStorage.getItem(key);
   return value && choices.includes(value) ? value : fallback;
@@ -221,7 +226,12 @@ export default function App() {
     useProject();
   const installedFonts = useInstalledFonts(project?.settings.fontFamily);
   const [newOpen, setNewOpen] = useState(false);
-  const [narrationVolume, setNarrationVolume] = useState(2);
+  const {
+    speed,
+    setSpeed,
+    volume: narrationVolume,
+    setVolume: setNarrationVolume,
+  } = usePlaybackSettings("narration");
   const narrationVolumeSlider = useWheelSlider(
     narrationVolume,
     setNarrationVolume,
@@ -261,7 +271,6 @@ export default function App() {
     ),
     [structure, setStructure] = useState(false),
     [loop, setLoop] = useState(false),
-    [speed, setSpeed] = useState(1),
     [playing, setPlaying] = useState(false),
     [time, setTime] = useState(0),
     [audioDuration, setAudioDuration] = useState(0),
@@ -289,7 +298,7 @@ export default function App() {
       original: string;
     } | null>(null);
   const [uiScale, setUiScale] = useState(() =>
-      savedChoice("alder.uiScale", ["1", "1.15", "1.3"], "1"),
+      savedChoice("alder.uiScale", UI_SCALES, "1"),
     ),
     [contrast, setContrast] = useState(
       () => localStorage.getItem("alder.highContrast") === "true",
@@ -1280,7 +1289,7 @@ export default function App() {
       bookEditor.current?.insert(text);
     });
   const isBook = !["txt", "docx"].includes(project.settings.documentKind);
-  const menuItems: Record<string, { label: string; action: () => void }[]> = {
+  const menuItems: Record<string, MenuEntry[]> = {
     File: [
       { label: "New project…", action: newProject },
       { label: "Open Document…", action: () => importFile.current?.click() },
@@ -1369,25 +1378,20 @@ export default function App() {
         label: structure ? "Hide structure" : "Show structure",
         action: () => setStructure((v) => !v),
       },
-      { label: "Accessibility…", action: () => openPanel("accessibility") },
+      {
+        label: "UI Scale",
+        submenu: UI_SCALES.map((scale) => ({
+          label: `${Math.round(Number(scale) * 100)}%`,
+          checked: uiScale === scale,
+          action: () => setUiScale(scale),
+        })),
+      },
     ],
     Options: [
       { label: "Document setup…", action: () => openPanel("settings") },
       { label: "Styles…", action: () => openPanel("styles") },
       { label: "Language rules…", action: () => openPanel("rules") },
       { label: "Project Assets…", action: () => openPanel("assets") },
-    ],
-    Help: [
-      {
-        label: "Show Help Area",
-        action: () => {
-          setHelpOpen(true);
-          setHelpText(
-            "Move the pointer over an area or control to learn what it does.",
-          );
-        },
-      },
-      { label: "About Alder", action: () => openPanel("about") },
     ],
   };
   return (
@@ -1441,18 +1445,7 @@ export default function App() {
               </button>
               {menu === name && (
                 <div className="menu-popup" role="menu">
-                  {items.map((item) => (
-                    <button
-                      role="menuitem"
-                      key={item.label}
-                      onClick={() => {
-                        setMenu(null);
-                        item.action();
-                      }}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
+                  <MenuItems items={items} onClose={() => setMenu(null)} />
                 </div>
               )}
             </div>
@@ -1522,8 +1515,8 @@ export default function App() {
           </div>
           <div className="view-tabs" role="tablist">
             {[
-              { name: "Write", icon: FilePenLine },
-              { name: "Pages", icon: Columns3 },
+              { name: "Write", icon: WriteGlyph },
+              { name: "Pages", icon: ArrangementGlyph },
             ].map(({ name, icon: Icon }) => (
               <button
                 role="tab"
@@ -1598,6 +1591,8 @@ export default function App() {
             </>
           )}
           <BookWorkspace
+            showStructure={structure}
+            onToggleStructure={() => setStructure((v) => !v)}
             externalPlayback={playing || voiceTestPlaying}
             key={project.id}
             project={project}

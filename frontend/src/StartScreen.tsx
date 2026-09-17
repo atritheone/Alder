@@ -2,6 +2,7 @@ import AlderLogo from "./AlderLogo";
 import { useEffect, useRef, useState } from "react";
 import { FilePlus2, FolderOpen, X } from "lucide-react";
 import { api } from "./api";
+import { DOCUMENT_FONT } from "./fontCatalogue";
 import { newChapter } from "./book";
 import type { Project } from "./types";
 import "./start-screen.css";
@@ -55,7 +56,7 @@ export function NewDocument({
             Object.assign(project.settings, {
               documentKind: kind,
               preferredFormat: kind === "book" ? "pdf" : kind,
-              fontFamily: "Liberation Serif",
+              fontFamily: DOCUMENT_FONT,
               pageSize: values.pageSize || "A4",
               orientation: values.orientation || "portrait",
               marginMm: Number(values.marginMm || 22),
