@@ -8,7 +8,7 @@
 <h1 align="center">Alder</h1>
 
 <p align="center">
-  An organic language engine for writing, shaping, assembling, and speaking language.
+  An organic language engine for writing, creating, assembling, and speaking language.
 </p>
 
 <p align="center">
@@ -20,10 +20,7 @@
   <a href="LICENCE.md">MIT Licence</a>
 </p>
 
-Alder is an **Organic Language Engine (OLE)**: a desktop workspace for writing,
-editing, exploring words, assembling books, and listening to your work. Your
-projects and speech processing stay on your machine. Once installed, Alder works
-offline and opens like an ordinary desktop application.
+Alder is an **Organic Language Engine (OLE)**, an application software used for processing, editing, and creating language. OLEs like Alder use a sandbox that works from the word level to manipulate language as well as a collation interface to manage and output written files.
 
 Alder is named after **Dr. Alder Wright**.
 
@@ -52,11 +49,6 @@ platform icons, and dependency information.
 | Alder Organic Language Engine for Windows | Windows x64. Installation and application checks have passed on the Windows development machine using fresh setup resources. |
 | Alder Organic Language Engine for Linux | Linux x64 with glibc 2.35 or newer and a graphical desktop. Installation and application checks have passed on Ubuntu 24.04 under WSL/WSLg; the separate Kali VM has not completed the same checks. |
 | Alder Organic Language Engine for Mac | macOS 14 or newer. Apple Silicon setup is provided but still needs testing on a Mac. Intel Mac setup is experimental and requires additional time and disk space. |
-
-Mac installation does **not** require an Apple Developer account. Read the
-[Mac instructions](docs/setup/macos.md) before installing, especially on an Intel
-Mac. See the [Windows](docs/setup/windows.md) or [Linux](docs/setup/linux.md)
-instructions for platform prerequisites and help.
 
 ### Ask your coding agent
 
@@ -208,8 +200,4 @@ See [maintenance](docs/setup/maintenance.md) for details. If installation fails,
 use the [troubleshooting guide](docs/setup/troubleshooting.md) and give your agent
 the error code and reported log location. You should never need to invent missing
 package metadata or edit source files to install Alder.
-
-Visit the [Alder website](https://atritheone.com/alder), or contact
-[edward@atritheone.com](mailto:edward@atritheone.com).
-
 Alder is available under the [MIT Licence](LICENCE.md).
