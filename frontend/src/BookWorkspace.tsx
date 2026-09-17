@@ -315,12 +315,14 @@ export default function BookWorkspace(p: Props) {
         <>
           {p.view === "Pages" && (
             <PageArrangement
+              key={chapter.id}
               snapshots={snapshots}
               layout={layout}
               zoom={arrangementZoom}
               onZoom={setArrangementZoom}
               areaRef={arrangementRef}
               onMove={(from, to) => p.editorRef.current?.movePage(from, to)}
+              onMoveUnit={(unit, to) => p.editorRef.current?.moveUnit(unit, to)}
             />
           )}
           <div
@@ -404,10 +406,8 @@ export default function BookWorkspace(p: Props) {
                 ) {
                   if (p.view === "Pages")
                     arrangementRef.current
-                      ?.querySelectorAll(".page-card")
-                      [
-                        value - 1
-                      ]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+                      ?.querySelector(`.page-card[data-page="${value - 1}"]`)
+                      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
                   else p.editorRef.current?.navigatePage(value - 1);
                 }
               }}

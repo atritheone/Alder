@@ -16,6 +16,11 @@ try {
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(1280, 900),
   );
+  // Keep animation frames running normally during native pointer drags.
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].showInactive(),
+  );
+  page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.getByRole("button", { name: "New", exact: true }).click();
@@ -63,6 +68,14 @@ try {
             },
           ],
         },
+        ...[
+          "Alice was beginning to get very tired of sitting by her sister",
+          "on the bank, and of having nothing to do: once or twice she had",
+          "peeped into the book her sister was reading, but it had no",
+          "pictures or conversations in it, 'and what is the use of a book,'",
+          "thought Alice 'without pictures or conversation?'",
+        ].map(para),
+        { type: "paragraph" },
         {
           type: "bullet_list",
           content: [
@@ -134,6 +147,36 @@ try {
   await page.getByRole("tab", { name: "Pages", exact: true }).click();
   const cards = page.locator(".page-card");
   await expect.poll(() => cards.count()).toBeGreaterThan(3);
+  const sentenceOutlineCount = await page
+    .locator(".unit-sentence")
+    .evaluateAll(
+      (nodes) =>
+        nodes.find(
+          (node) =>
+            JSON.parse(node.dataset.unit).text ===
+            "Words retain their exact wrapping and page boundaries.",
+        ).childElementCount,
+    );
+  expect(sentenceOutlineCount).toBeLessThanOrEqual(3);
+  const alice =
+    "Alice was beginning to get very tired of sitting by her sister " +
+    "on the bank, and of having nothing to do: once or twice she had " +
+    "peeped into the book her sister was reading, but it had no " +
+    "pictures or conversations in it, 'and what is the use of a book,' " +
+    "thought Alice 'without pictures or conversation?'";
+  for (const kind of ["paragraph", "sentence"]) {
+    const matches = await page
+      .locator(`.unit-${kind}`)
+      .evaluateAll(
+        (nodes, text) =>
+          nodes
+            .map((n) => JSON.parse(n.dataset.unit))
+            .filter((u) => u.text.startsWith("Alice was")),
+        alice,
+      );
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches.every((u) => u.text === alice)).toBe(true);
+  }
   await expect(page.locator(".document-reader")).toBeHidden();
   await expect(cards.locator("button,header,footer")).toHaveCount(0);
   const first = await cards.first().boundingBox();
@@ -173,13 +216,11 @@ try {
   await expect(page.getByLabel("Page zoom", { exact: true })).toHaveValue(
     "0.8",
   );
-  const indicator = await page
-    .locator(".reader-reveal")
-    .evaluate((el) => ({
-      line: getComputedStyle(el, "::before").backgroundColor,
-      bar: getComputedStyle(el.firstElementChild).backgroundColor,
-      height: getComputedStyle(el, "::before").height,
-    }));
+  const indicator = await page.locator(".reader-reveal").evaluate((el) => ({
+    line: getComputedStyle(el, "::before").backgroundColor,
+    bar: getComputedStyle(el.firstElementChild).backgroundColor,
+    height: getComputedStyle(el, "::before").height,
+  }));
   expect(indicator.line).toBe(indicator.bar);
   expect(indicator.height).toBe("3px");
   const total = await cards.count();
@@ -189,6 +230,43 @@ try {
   await expect
     .poll(() => page.locator(".page-arranger").evaluate((el) => el.scrollTop))
     .toBeGreaterThan(0);
+  const arrangementState = () =>
+    page.locator(".page-arranger").evaluate((el) => ({
+      top: el.scrollTop,
+      left: el.scrollLeft,
+      zoom: document.querySelector('[aria-label="Page zoom"]').value,
+      cards: [...el.querySelectorAll(".page-card")].map((card) =>
+        card.getBoundingClientRect().toJSON(),
+      ),
+    }));
+  const beforeFocus = await arrangementState();
+  const pageText = await cards.last().locator(".page-snapshot").textContent();
+  await cards.last().dblclick();
+  const focus = page.getByRole("dialog", {
+    name: `Page ${total} full view`,
+    exact: true,
+  });
+  await expect(focus).toBeVisible();
+  expect(await focus.locator(".page-snapshot").textContent()).toBe(pageText);
+  const sheet = await focus.locator(".focused-page-sheet").boundingBox();
+  const frame = await focus.boundingBox();
+  expect(sheet.height).toBeGreaterThan(first.height);
+  expect(sheet.x).toBeGreaterThan(frame.x);
+  expect(sheet.y).toBeGreaterThanOrEqual(frame.y);
+  expect(sheet.y + sheet.height).toBeLessThan(frame.y + frame.height);
+  await focus.locator(".focused-page-sheet").click();
+  await expect(focus).toBeVisible();
+  await page.mouse.move(frame.x + 8, frame.y + 80);
+  await page.mouse.wheel(0, -120);
+  await focus.click({ position: { x: 8, y: 80 } });
+  await expect(focus).toHaveCount(0);
+  expect(await arrangementState()).toEqual(beforeFocus);
+  expect((await saved()).book).toEqual(before.book);
+  await cards.last().dblclick();
+  await expect(focus).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(focus).toHaveCount(0);
+  expect(await arrangementState()).toEqual(beforeFocus);
   const geometry = await page.evaluate(() => {
     const root = document.querySelector(".book-editor .ProseMirror");
     const canvas = root.closest(".flow-canvas");
@@ -278,13 +356,127 @@ try {
   expect((await saved()).book).toEqual(before.book);
   await page.getByLabel("Go To Page", { exact: true }).fill("1");
   await page.getByLabel("Go To Page", { exact: true }).press("Enter");
+  await cards.first().click({ button: "right", position: { x: 8, y: 8 } });
+  await page
+    .getByRole("menuitem", { name: "Arrange with...", exact: true })
+    .click();
+  await expect(cards.first().locator(".page-miniature")).toHaveCSS(
+    "outline-color",
+    "rgb(60, 153, 94)",
+  );
+  await expect(cards.nth(1).locator(".page-miniature")).toHaveCSS(
+    "outline-color",
+    "rgb(220, 194, 76)",
+  );
+  await cards.nth(2).click({
+    modifiers: [process.platform === "darwin" ? "Meta" : "Control"],
+    position: { x: 8, y: 8 },
+  });
+  await cards.nth(4).click({ modifiers: ["Shift"], position: { x: 8, y: 8 } });
+  await expect(page.locator(".page-card.is-selected")).toHaveCount(4);
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("button", { name: "Arrange", exact: true }),
+  ).toHaveCount(0);
+  await cards.first().click({ button: "right", position: { x: 8, y: 8 } });
+  await page
+    .getByRole("menuitem", { name: "Arrange with...", exact: true })
+    .click();
+  await cards.last().click({ position: { x: 8, y: 8 } });
+  const beforeGroup = await arrangementState();
+  await page.getByRole("button", { name: "Arrange", exact: true }).click();
+  await expect(cards).toHaveCount(2);
+  expect(await cards.locator(".page-card-number").allTextContents()).toEqual([
+    "1",
+    String(total),
+  ]);
+  const groupedFirst = await cards.first().boundingBox(),
+    groupedLast = await cards.last().boundingBox();
+  expect(Math.abs(groupedFirst.y - groupedLast.y)).toBeLessThan(1);
+  const unitMove = async (kind, phrase) => {
+    const unit = cards
+      .first()
+      .locator(`.unit-${kind}`)
+      .filter({ has: page.locator(".unit-outline") });
+    const source = await unit.evaluateAll((nodes, phrase) => {
+      const node = nodes.find(
+        (n) => JSON.parse(n.dataset.unit).text === phrase,
+      );
+      return node.firstElementChild.getBoundingClientRect().toJSON();
+    }, phrase);
+    const target = await cards
+      .last()
+      .locator(`.unit-${kind}`)
+      .last()
+      .locator(".unit-outline")
+      .last()
+      .boundingBox();
+    await page.mouse.move(source.x + 0.5, source.y + 0.5);
+    await page.mouse.down();
+    await page.mouse.move(target.x + 2, target.y + target.height + 2, {
+      steps: 8,
+    });
+    await expect(page.locator(".unit-held")).toHaveCount(1);
+    await expect(page.locator(".is-unit-gap")).toHaveCount(1);
+    expect((await saved()).book).toEqual(before.book);
+    await page.mouse.up();
+    await expect(page.locator(".unit-held")).toHaveCount(0);
+    await expect(page.locator(".save-status")).toHaveText("Saved");
+    const movedUnit = await saved();
+    expect(
+      movedUnit.book.chapters[0].document.content
+        .at(-1)
+        .content.map((n) => n.text || "")
+        .join(""),
+    ).toContain(phrase);
+    await page.getByRole("tab", { name: "Write", exact: true }).click();
+    await editor.focus();
+    await editor.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
+    await expect(page.locator(".save-status")).toHaveText("Saved");
+    expect((await saved()).book.chapters[0].document).toEqual(
+      before.book.chapters[0].document,
+    );
+    await page.getByRole("tab", { name: "Pages", exact: true }).click();
+    await expect(cards).toHaveCount(total);
+  };
+  await unitMove("paragraph", "Measured page layout");
+  await cards.first().click({ button: "right", position: { x: 8, y: 8 } });
+  await page
+    .getByRole("menuitem", { name: "Arrange with...", exact: true })
+    .click();
+  await cards.last().click({ position: { x: 8, y: 8 } });
+  await page.getByRole("button", { name: "Arrange", exact: true }).click();
+  await expect(cards).toHaveCount(2);
+  await unitMove("sentence", "Right aligned bold text");
+  for (const kind of ["paragraph", "sentence"]) {
+    await cards.first().click({ button: "right", position: { x: 8, y: 8 } });
+    await page
+      .getByRole("menuitem", { name: "Arrange with...", exact: true })
+      .click();
+    await cards.last().click({ position: { x: 8, y: 8 } });
+    await page.getByRole("button", { name: "Arrange", exact: true }).click();
+    await unitMove(kind, alice);
+  }
+  await cards.first().click({ button: "right", position: { x: 8, y: 8 } });
+  await page
+    .getByRole("menuitem", { name: "Arrange with...", exact: true })
+    .click();
+  await cards.last().click({ position: { x: 8, y: 8 } });
+  const returning = await arrangementState();
+  await page.getByRole("button", { name: "Arrange", exact: true }).click();
+  await expect(cards).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  await expect(cards).toHaveCount(total);
+  expect(await arrangementState()).toEqual(returning);
+  await page.getByLabel("Go To Page", { exact: true }).fill("1");
+  await page.getByLabel("Go To Page", { exact: true }).press("Enter");
   const firstText = await cards.first().textContent();
   const from = await cards.first().boundingBox(),
     to = await cards.nth(1).boundingBox();
   const labels = await cards.locator(".page-card-number").allTextContents();
-  await page.mouse.move(from.x + from.width / 2, from.y + 100);
+  await page.mouse.move(from.x + 8, from.y + 100);
   await page.mouse.down();
-  await page.mouse.move(to.x + to.width / 2, to.y + 100, { steps: 12 });
+  await page.mouse.move(to.x + 8, to.y + 100, { steps: 12 });
   await expect(page.locator(".page-card.is-held")).toHaveCount(1);
   await expect(page.locator(".page-drop-gap")).toHaveCount(1);
   await expect
@@ -301,9 +493,9 @@ try {
   await page.mouse.up();
   await expect(page.locator(".page-drop-gap")).toHaveCount(0);
   expect((await saved()).book).toEqual(before.book);
-  await page.mouse.move(from.x + from.width / 2, from.y + 100);
+  await page.mouse.move(from.x + 8, from.y + 100);
   await page.mouse.down();
-  await page.mouse.move(to.x + to.width / 2, to.y + 100, { steps: 12 });
+  await page.mouse.move(to.x + 8, to.y + 100, { steps: 12 });
   await page.mouse.up();
   await expect.poll(() => cards.first().textContent()).not.toBe(firstText);
   await expect(page.locator(".save-status")).toHaveText("Saved");
@@ -345,14 +537,19 @@ try {
       backgroundWheelZoom: true,
       dragDisplacementAndCancel: true,
       pageNavigation: true,
+      fullPageFocusAndExactReturn: true,
+      arrangeWithSelectionAndUnitMoves: true,
       dragAndUndo: true,
       screenshot: path.join(data, "arrangement.png"),
     }),
   );
+} catch (error) {
+  console.error(error);
+  process.exitCode = 1;
 } finally {
   const closed = app.waitForEvent("close", { timeout: 30000 });
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].close(),
   );
-  await closed;
+  await closed.catch(() => app.process().kill());
 }

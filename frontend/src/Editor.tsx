@@ -35,7 +35,7 @@ import {
   chainCommands,
   exitCode,
 } from "prosemirror-commands";
-import { history, undo, redo } from "prosemirror-history";
+import { history, undo, redo, closeHistory } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import {
   addListNodes,
@@ -83,6 +83,7 @@ import { mediaUrl } from "./api";
 import { projectText, projectedRange } from "./textProjection";
 import { styleDeclarations, styleSheet } from "./styleResolution";
 import { pageSnapshots } from "./pageSnapshots";
+import { moveArrangementUnit, type ArrangementUnit } from "./arrangementUnits";
 
 const attrs = {
   align: { default: null },
@@ -412,6 +413,7 @@ export function namedStyleTransaction(
   return tr;
 }
 export type EditorHandle = {
+  moveUnit: (unit: ArrangementUnit, destination: number) => void;
   getText: () => string;
   replaceAll: (find: string, replacement: string) => void;
   getSelectionOffsets: () => { start: number; end: number };
@@ -510,6 +512,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const [documentVersion, documentTick] = useState(0);
   const pageDecorations = useRef(DecorationSet.empty);
   const measuredPages = useRef<FlowPage[]>([]);
+  const lastPageMeasurement = useRef<{ doc: PMNode; key: string } | null>(null);
   const [flowPages, setFlowPages] = useState<FlowPage[]>([]);
   const [pageInset, setPageInset] = useState(0);
   const selectedTextStyle = (state: EditorState) => {
@@ -699,6 +702,19 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             );
         } catch (e) {
           setRangeWarning((e as Error).message);
+        }
+      },
+      moveUnit(unit, destination) {
+        const v = editableView();
+        if (!v) return;
+        try {
+          const move = moveArrangementUnit(v.state, unit, destination);
+          if (move) {
+            v.dispatch(closeHistory(move.tr));
+            v.dispatch(closeHistory(v.state.tr));
+          }
+        } catch (error) {
+          setRangeWarning((error as Error).message);
         }
       },
       insert(text) {
@@ -1126,10 +1142,29 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     )
       return;
     let frame = 0;
-    const measure = () => {
+    let forceMeasurement = false;
+    const measure = (force = false) => {
+      forceMeasurement ||= force;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         if (!view.current || !v.dom.getBoundingClientRect().width) return;
+        const settings = latest.current;
+        const key = JSON.stringify([
+          settings.pageLayout,
+          settings.capturePages,
+          settings.layoutVisible,
+          settings.fontFamily,
+          settings.fontSize,
+          namedStyles.css,
+          v.dom.getBoundingClientRect().width,
+        ]);
+        if (
+          !forceMeasurement &&
+          lastPageMeasurement.current?.doc === v.state.doc &&
+          lastPageMeasurement.current.key === key
+        )
+          return;
+        forceMeasurement = false;
         const viewport = v.dom.closest<HTMLElement>(".editor-scroll");
         const scrollTop = viewport?.scrollTop;
         const scrollLeft = viewport?.scrollLeft;
@@ -1150,24 +1185,40 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         latest.current.onPages?.(pages);
         if (latest.current.capturePages)
           latest.current.onPageSnapshots?.(
-            pageSnapshots(v.dom, layout, pages.length),
+            pageSnapshots(v.dom, layout, pages.length, v),
           );
+        lastPageMeasurement.current = { doc: v.state.doc, key };
       });
     };
     measure();
-    const observer = new ResizeObserver(measure);
+    // Pagination itself changes the editor height. Observing that height can
+    // schedule another full pagination after every drop (and keep doing so).
+    // Document edits, image loads and font changes have their own invalidation.
+    const widths = new WeakMap<Element, number>();
+    const observer = new ResizeObserver((entries) => {
+      let changed = false;
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        const previous = widths.get(entry.target);
+        widths.set(entry.target, width);
+        if (previous !== undefined && Math.abs(width - previous) > 0.5)
+          changed = true;
+      }
+      if (changed) measure(true);
+    });
     observer.observe(v.dom);
     const viewport = v.dom.closest(".editor-scroll");
     if (viewport) observer.observe(viewport);
-    v.dom.addEventListener("load", measure, true);
-    document.fonts.addEventListener("loadingdone", measure);
-    window.addEventListener("alder-fonts-changed", measure);
+    const assetsChanged = () => measure(true);
+    v.dom.addEventListener("load", assetsChanged, true);
+    document.fonts.addEventListener("loadingdone", assetsChanged);
+    window.addEventListener("alder-fonts-changed", assetsChanged);
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
-      v.dom.removeEventListener("load", measure, true);
-      document.fonts.removeEventListener("loadingdone", measure);
-      window.removeEventListener("alder-fonts-changed", measure);
+      v.dom.removeEventListener("load", assetsChanged, true);
+      document.fonts.removeEventListener("loadingdone", assetsChanged);
+      window.removeEventListener("alder-fonts-changed", assetsChanged);
     };
   }, [
     documentVersion,
