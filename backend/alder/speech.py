@@ -765,7 +765,8 @@ class SpeechService:
                     pause_frames = round(first["sampleRate"] * job["settings"]["pauseSeconds"])
                     combined.writeframes(b"\0" * pause_frames * first["channels"] * 2)
                     position += pause_frames
-                chunk["startSeconds"] = position / first["sampleRate"]
+                with self._lock:
+                    chunk["startSeconds"] = position / first["sampleRate"]
                 with wave.open(str(self._chunk_path(job, chunk)), "rb") as audio:
                     if (audio.getframerate(), audio.getnchannels(), audio.getsampwidth()) != (first["sampleRate"], first["channels"], 2):
                         raise RuntimeError("Narration chunks have incompatible audio formats.")

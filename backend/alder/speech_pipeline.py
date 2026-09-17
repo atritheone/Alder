@@ -432,9 +432,9 @@ class SpeechPipeline(SpeechService):
     def _process_section(self, job, chunk):
         started = time.monotonic()
         try:
-            attempts = chunk.setdefault("qaAttempts", [])
             root = chunk.get("budgetRoot", chunk["id"])
             with self._lock:
+                attempts = chunk.setdefault("qaAttempts", [])
                 budget = job.setdefault("_budgets", {}).setdefault(root, {"attempts": 0, "seconds": 0})
             selected = None
             # A short passage cannot use split recovery. Use the same fresh-take
@@ -455,21 +455,27 @@ class SpeechPipeline(SpeechService):
                     raise
                 except (RuntimeError, ValueError, OSError) as exc:
                     self._metric("generation_retry", job, chunk, errorType=type(exc).__name__)
-                    chunk.setdefault("generationFailures", []).append({"error": str(exc), "seed": seed})
+                    with self._lock:
+                        chunk.setdefault("generationFailures", []).append({"error": str(exc), "seed": seed})
                     continue
                 check, check_cached = self._check(job, chunk, cache)
                 take_path = self._chunk_path(job, chunk).with_name(chunk["id"] + f".take-{len(attempts)+1}.wav")
                 self._copy_audio(cache, take_path)
                 take = {"index": len(attempts), "seed": seed, "file": take_path.name,
                         "seconds": _wav_info(cache)["seconds"], "qa": check, "createdAt": _now()}
-                attempts.append(take)
+                # Manifest writers and public snapshots iterate this shared state.
+                # Publish metadata under their lock, keeping audio I/O outside it.
+                with self._lock:
+                    attempts.append(take)
+                    if check["matched"]:
+                        chunk.update(cached=cached, checkCached=check_cached)
+                    else:
+                        chunk["verificationStatus"] = "retrying"
                 if selected is None or check.get("wordErrorRate", 999) < selected["qa"].get("wordErrorRate", 999):
                     selected = take
                 if check["matched"]:
                     selected = take
-                    chunk.update(cached=cached, checkCached=check_cached)
                     break
-                chunk["verificationStatus"] = "retrying"
                 self._metric("rejected", job, chunk, attempt=index)
             if selected is None:
                 with self._lock:

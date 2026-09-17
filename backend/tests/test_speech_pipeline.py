@@ -1,4 +1,5 @@
 """Production acceptance/scheduling tests. Synthetic PCM is explicitly a test fixture."""
+import copy
 import json
 import math
 import struct
@@ -171,11 +172,74 @@ def test_stop_during_synthesis_has_no_publication_then_resume(service, monkeypat
 def test_interactive_buffer_is_bounded_then_demand_advances(service):
     text = ' '.join(f'This is section {i} with several words to read aloud.' for i in range(25))
     done = finish(service, submit(service, text, interactive=True), states=('buffered', 'failed'))
+    assert done['status'] == 'buffered', done
     time.sleep(.2)
     done = service.get_job(done['id'])
     assert sum(c['status'] == 'ready' for c in done['chunks']) < 9
     service.demand(done['id'], {'index': 0, 'mode': 'export', 'speed': 1})
-    assert finish(service, done, states=('ready', 'failed'))['status'] == 'ready'
+    done = finish(service, done, states=('ready', 'failed'))
+    assert done['status'] == 'ready', done
+
+
+def test_section_publication_waits_for_job_snapshot(service, monkeypatch):
+    copied_take, release, publishing = threading.Event(), threading.Event(), threading.Event()
+    original = service._copy_audio
+
+    def copy_audio(source, destination):
+        original(source, destination)
+        if '.take-' in destination.name:
+            copied_take.set()
+            assert release.wait(3)
+        else:
+            publishing.set()
+
+    monkeypatch.setattr(service, '_copy_audio', copy_audio)
+    job = submit(service)
+    try:
+        assert copied_take.wait(3)
+        # Snapshotting and manifest serialization both hold this lock. A worker
+        # must not alter attempts or add cache fields while either is reading.
+        with service._lock:
+            current = service._jobs[job['id']]
+            snapshot = copy.deepcopy(current)
+            release.set()
+            assert not publishing.wait(.1)
+            assert current == snapshot
+    finally:
+        release.set()
+    done = finish(service, job)
+    assert done['status'] == 'ready', done
+    assert publishing.is_set()
+
+
+def test_export_offsets_wait_for_job_snapshot(service, monkeypatch):
+    assembling, release, reading = threading.Event(), threading.Event(), threading.Event()
+    original = wave.open
+
+    def open_audio(path, mode=None):
+        if Path(path).name == 'narration.tmp.wav':
+            assembling.set()
+            assert release.wait(3)
+        elif assembling.is_set() and mode == 'rb':
+            reading.set()
+        return original(path, mode)
+
+    monkeypatch.setattr(wave, 'open', open_audio)
+    job = submit(service)
+    try:
+        assert assembling.wait(3)
+        with service._lock:
+            current = service._jobs[job['id']]
+            snapshot = copy.deepcopy(current)
+            release.set()
+            assert not reading.wait(.1)
+            assert current == snapshot
+    finally:
+        release.set()
+    done = finish(service, job)
+    assert done['status'] == 'ready', done
+    assert done['chunks'][0]['startSeconds'] == 0
+    assert reading.is_set()
 
 
 def test_events_reconnect_and_do_not_repeat_order_or_manuscript(service):
