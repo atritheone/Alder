@@ -33,7 +33,7 @@ test("continuous chapter text flows, page moves preserve words, and edits surviv
   const text = Array.from({ length: 750 }, (_, i) => `word${i}`).join(" ");
   await editor.fill(text);
   await expect
-    .poll(() => page.locator(".page-navigation button").count())
+    .poll(() => page.locator(".book-editor .page-sheet").count())
     .toBeGreaterThan(1);
   await expect(editor).toHaveText(text);
   await page.getByRole("tab", { name: "Pages", exact: true }).click();
@@ -42,8 +42,9 @@ test("continuous chapter text flows, page moves preserve words, and edits surviv
     .toBeGreaterThan(1);
   const before = await page.locator(".page-card").first().innerText();
   await page
-    .getByRole("button", { name: "Move page 1 later", exact: true })
-    .click();
+    .locator(".page-card")
+    .first()
+    .dragTo(page.locator(".page-card").nth(1));
   await expect
     .poll(() => page.locator(".page-card").first().innerText())
     .not.toBe(before);

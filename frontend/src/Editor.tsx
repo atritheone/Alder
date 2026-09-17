@@ -3,7 +3,11 @@ import { persistentCaret } from "./persistentCaret";
 import { structureMarks } from "./structureMarks";
 import { useFontCatalogue } from "./useInstalledFonts";
 import { shortcutLabel } from "./platform";
-import { DOCUMENT_FONT, fontIsAvailable, loadDocumentFont } from "./fontCatalogue";
+import {
+  DOCUMENT_FONT,
+  fontIsAvailable,
+  loadDocumentFont,
+} from "./fontCatalogue";
 import {
   forwardRef,
   useEffect,
@@ -78,6 +82,7 @@ import type { Annotation, DocNode, Idea, Project, StyleKind } from "./types";
 import { mediaUrl } from "./api";
 import { projectText, projectedRange } from "./textProjection";
 import { styleDeclarations, styleSheet } from "./styleResolution";
+import { pageSnapshots } from "./pageSnapshots";
 
 const attrs = {
   align: { default: null },
@@ -430,6 +435,8 @@ type Props = {
   rawDisabled?: boolean;
   pageLayout?: PageLayout;
   layoutVisible?: boolean;
+  capturePages?: boolean;
+  onPageSnapshots?: (pages: string[]) => void;
   persistentCaret?: boolean;
   onPages?: (pages: FlowPage[]) => void;
   onVisiblePage?: (page: number) => void;
@@ -806,7 +813,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         doc,
         plugins: [
           new Plugin({ props: { decorations: () => pageDecorations.current } }),
-          structureMarks(() => latest.current.showStructure && !blocked.current),
+          structureMarks(
+            () => latest.current.showStructure && !blocked.current,
+          ),
           ...(props.persistentCaret && !blocked.current
             ? [persistentCaret()]
             : []),
@@ -1113,7 +1122,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       !v ||
       !props.pageLayout ||
       blocked.current ||
-      props.layoutVisible === false
+      (props.layoutVisible === false && !props.capturePages)
     )
       return;
     let frame = 0;
@@ -1139,6 +1148,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           JSON.stringify(old) === JSON.stringify(pages) ? old : pages,
         );
         latest.current.onPages?.(pages);
+        if (latest.current.capturePages)
+          latest.current.onPageSnapshots?.(
+            pageSnapshots(v.dom, layout, pages.length),
+          );
       });
     };
     measure();
@@ -1166,8 +1179,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     props.pageLayout?.lineHeight,
     props.pageLayout?.zoom,
     props.layoutVisible,
+    props.capturePages,
     props.styles,
     props.fontSize,
+    props.fontFamily,
   ]);
   const mark = (name: string) =>
     view.current

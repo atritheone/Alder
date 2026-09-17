@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -9,6 +9,7 @@ import {
   Volume2,
 } from "lucide-react";
 import Editor, { type EditorHandle } from "./Editor";
+import PageArrangement from "./PageArrangement";
 import PublicationPreview from "./PublicationPreview";
 import { newChapter } from "./book";
 import { words } from "./api";
@@ -59,11 +60,14 @@ export default function BookWorkspace(p: Props) {
     [chapter?.rawSource?.text],
   );
   const [pages, setPages] = useState<FlowPage[]>([]);
+  const [snapshots, setSnapshots] = useState<string[]>([]);
+  const arrangementRef = useRef<HTMLDivElement>(null);
   const [pageNumber, setPageNumber] = useState("1");
   useEffect(() => setPageNumber("1"), [chapter?.id]);
   const [zoom, setZoom] = useState(0.8);
+  const [arrangementZoom, setArrangementZoom] = useState(0.8);
   const [speechPlaying, setSpeechPlaying] = useState(false);
-  const [dragged, setDragged] = useState<number | null>(null);
+  const [readerKeyboardOpen, setReaderKeyboardOpen] = useState(false);
   const [readingRange, setReadingRange] = useState<{
     start: number;
     end: number;
@@ -222,18 +226,37 @@ export default function BookWorkspace(p: Props) {
           </button>
         </nav>
       )}
-      <div className="book-main">
+      <div
+        className={`book-main${p.view === "Pages" ? " arranging-pages" : ""}`}
+      >
         {!showRaw && (
-          <DocumentReader
-            project={p.project}
-            chapter={chapter}
-            editorRef={p.editorRef}
-            flush={p.flush}
-            change={p.change}
-            onChapter={p.onChapter}
-            onHighlight={setReadingRange}
-            onPlaybackChange={setSpeechPlaying}
-          />
+          <div
+            className="reader-reveal"
+            data-keyboard-open={readerKeyboardOpen}
+            onFocus={(event) => {
+              if (
+                event.target === event.currentTarget &&
+                event.target.matches(":focus-visible")
+              )
+                setReaderKeyboardOpen(true);
+            }}
+            onKeyDown={() => setReaderKeyboardOpen(true)}
+            onPointerEnter={() => setReaderKeyboardOpen(false)}
+            onPointerLeave={() => setReaderKeyboardOpen(false)}
+            tabIndex={p.view === "Pages" ? 0 : undefined}
+            aria-label={p.view === "Pages" ? "Reading controls" : undefined}
+          >
+            <DocumentReader
+              project={p.project}
+              chapter={chapter}
+              editorRef={p.editorRef}
+              flush={p.flush}
+              change={p.change}
+              onChapter={p.onChapter}
+              onHighlight={setReadingRange}
+              onPlaybackChange={setSpeechPlaying}
+            />
+          </div>
         )}
         {isBook && (
           <header className="chapter-toolbar">
@@ -291,48 +314,14 @@ export default function BookWorkspace(p: Props) {
         )}
         <>
           {p.view === "Pages" && (
-            <div
-              className="page-arranger"
-              aria-label="Arrange pages"
-              data-help="Drag pages into reading order, or use the arrows. Moving a page adds explicit page breaks to preserve its boundaries. Undo typing reverses the move."
-            >
-              <div className="page-card-grid">
-                {pages.map((page, i) => (
-                  <article
-                    className="page-card"
-                    key={i}
-                    draggable
-                    onDragStart={() => setDragged(i)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      if (dragged !== null)
-                        p.editorRef.current?.movePage(dragged, i);
-                      setDragged(null);
-                    }}
-                  >
-                    <header>Page {i + 1}</header>
-                    <p>{page.text.slice(0, 750) || "Blank page"}</p>
-                    <footer>
-                      <button
-                        aria-label={`Move page ${i + 1} earlier`}
-                        disabled={i === 0}
-                        onClick={() => p.editorRef.current?.movePage(i, i - 1)}
-                      >
-                        <ArrowUp size={12} />
-                      </button>
-                      <button
-                        aria-label={`Move page ${i + 1} later`}
-                        disabled={i === pages.length - 1}
-                        onClick={() => p.editorRef.current?.movePage(i, i + 1)}
-                      >
-                        <ArrowDown size={12} />
-                      </button>
-                    </footer>
-                  </article>
-                ))}
-              </div>
-            </div>
+            <PageArrangement
+              snapshots={snapshots}
+              layout={layout}
+              zoom={arrangementZoom}
+              onZoom={setArrangementZoom}
+              areaRef={arrangementRef}
+              onMove={(from, to) => p.editorRef.current?.movePage(from, to)}
+            />
           )}
           <div
             className={
@@ -369,10 +358,20 @@ export default function BookWorkspace(p: Props) {
               persistentCaret
               pageLayout={layout}
               layoutVisible={p.view === "Write" && !p.previewActive}
+              capturePages={p.view === "Pages"}
+              onPageSnapshots={(next) =>
+                setSnapshots((old) =>
+                  old.length === next.length &&
+                  old.every((html, i) => html === next[i])
+                    ? old
+                    : next,
+                )
+              }
               onVisiblePage={(page) => {
                 if (
+                  p.view === "Write" &&
                   document.activeElement?.getAttribute("aria-label") !==
-                  "Go To Page"
+                    "Go To Page"
                 )
                   setPageNumber(String(page + 1));
               }}
@@ -402,8 +401,15 @@ export default function BookWorkspace(p: Props) {
                   Number.isInteger(value) &&
                   value >= 1 &&
                   value <= Math.max(1, pages.length)
-                )
-                  p.editorRef.current?.navigatePage(value - 1);
+                ) {
+                  if (p.view === "Pages")
+                    arrangementRef.current
+                      ?.querySelectorAll(".page-card")
+                      [
+                        value - 1
+                      ]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+                  else p.editorRef.current?.navigatePage(value - 1);
+                }
               }}
             >
               <label>
@@ -429,10 +435,17 @@ export default function BookWorkspace(p: Props) {
                 Zoom{" "}
                 <select
                   aria-label="Page zoom"
-                  value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
+                  value={p.view === "Pages" ? arrangementZoom : zoom}
+                  onChange={(e) =>
+                    (p.view === "Pages" ? setArrangementZoom : setZoom)(
+                      Number(e.target.value),
+                    )
+                  }
                 >
-                  {[0.5, 0.65, 0.8, 1, 1.25].map((z) => (
+                  {Array.from(
+                    { length: p.view === "Pages" ? 51 : 21 },
+                    (_, i) => (50 + i * 5) / 100,
+                  ).map((z) => (
                     <option key={z} value={z}>
                       {Math.round(z * 100)}%
                     </option>

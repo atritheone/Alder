@@ -214,51 +214,112 @@
 .page-navigation button {
   font-size: 10px;
 }
+.arranging-pages > .chapter-toolbar {
+  order: -1;
+}
+.reader-reveal {
+  flex: none;
+}
+.arranging-pages > .reader-reveal {
+  position: relative;
+  z-index: 5;
+  height: 14px;
+  margin-bottom: -14px;
+}
+.arranging-pages > .reader-reveal::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: #e0e0e0;
+  pointer-events: none;
+}
+.arranging-pages > .reader-reveal > .document-reader {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.arranging-pages > .reader-reveal:hover > .document-reader,
+.arranging-pages
+  > .reader-reveal[data-keyboard-open="true"]:focus-within
+  > .document-reader {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
 .page-arranger {
   flex: 1;
+  min-height: 0;
   overflow: auto;
-  padding: 16px;
+  overscroll-behavior: none;
+  padding: 24px;
   background: #aeaeae;
 }
-.page-arranger > p {
-  margin: 0 0 14px;
-  max-width: 780px;
-  font-size: 11px;
-}
 .page-card-grid {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 20px;
+  align-items: start;
+  gap: 24px;
 }
 .page-card {
-  background: #fefefe;
-  min-height: 250px;
-  max-height: 340px;
-  display: flex;
-  flex-direction: column;
-  padding: 16px;
-  box-shadow: 0 2px 5px #41414144;
+  min-width: 0;
   cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
-.page-card header {
-  color: #7d7d7d;
-  font-size: 10px;
-  border-bottom: 1px solid #dfdfdf;
-  padding-bottom: 8px;
+.page-arranger.is-dragging,
+.page-arranger.is-dragging .page-card {
+  cursor: grabbing;
 }
-.page-card p {
-  font:
-    11px/1.6 "Aptos",
-    Arial,
-    sans-serif;
-  flex: 1;
+.is-dragging .page-card {
+  position: relative;
+  transition: transform 160ms ease-out;
+  will-change: transform;
+}
+.is-dragging .page-card.is-held {
+  z-index: 10;
+  transition: none;
+}
+.page-card.is-held .page-miniature {
+  box-shadow:
+    0 14px 28px #29292966,
+    0 3px 8px #29292944;
+  outline: 1px solid #ffffff;
+}
+.page-drop-gap {
+  position: absolute;
+  background: #979797;
+  box-shadow: inset 0 0 0 1px #858585;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-dragging .page-card {
+    transition: none;
+  }
+}
+.page-card:active {
+  cursor: grabbing;
+}
+.page-miniature {
+  position: relative;
   overflow: hidden;
-  white-space: pre-wrap;
+  background: #fefefe;
+  box-shadow: 0 2px 5px #41414144;
+  pointer-events: none;
+  user-select: none;
 }
-.page-card footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
+.page-snapshot {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+.page-card-number {
+  display: block;
+  margin-top: 5px;
+  text-align: right;
+  font-size: 10px;
+  line-height: 1.2;
+  color: #454545;
 }
 .measuring-editor {
   position: absolute;
