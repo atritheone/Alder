@@ -24,7 +24,9 @@ class UpdateTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root=Path(self.temp.name)/'Alder update é'
+        # Match the updater's canonical paths: macOS /var aliases /private/var,
+        # and Windows TEMP can contain an 8.3 name such as RUNNER~1.
+        self.root=Path(self.temp.name).resolve()/'Alder update é'
         self.root.mkdir()
         self.state=self.root/'setup state';cli.own_state(self.state)
         self.install=self.root/'installed app'
@@ -106,6 +108,14 @@ class UpdateTests(unittest.TestCase):
             write_json(self.state/'report.json',{'installation':str(other)})
             with self.assertRaisesRegex(SetupError,'Multiple'):updates.discover_install(self.state)
             self.assertEqual(updates.discover_install(self.state,self.install),self.install)
+
+    def test_discovery_collapses_equivalent_installation_paths(self):
+        alias=self.install/'versions'/'..'
+        write_json(self.state/'installation.json',{'installation':str(self.install)})
+        write_json(self.state/'report.json',{'installation':str(alias)})
+        with patch('updates.default_install',return_value=alias),patch('updates.launcher_install',return_value=self.install):
+            self.assertEqual(updates.discover_install(self.state),self.install)
+            self.assertEqual(updates.discover_install(self.state,alias),self.install)
 
     def test_linux_custom_launcher_is_only_read_and_not_executed(self):
         home=self.root/'home';launcher=home/'.local/bin/alder';launcher.parent.mkdir(parents=True)
