@@ -1,3 +1,4 @@
+import { openContextMenu } from "./ContextMenu";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BookOpen, FilePenLine, Pencil, Plus, X } from "lucide-react";
@@ -51,36 +52,8 @@ export default function PronunciationManager(p: {
     [testing, setTesting] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const [editing, setEditing] = useState(false);
-  const [addMenu, setAddMenu] = useState<{ top: number; left: number } | null>(
-    null,
-  );
+  const [addMenu, setAddMenu] = useState(false);
   const addButton = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!addMenu) return;
-    menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    const dismiss = (e: PointerEvent) => {
-      if (
-        !menu.current?.contains(e.target as Node) &&
-        !addButton.current?.contains(e.target as Node)
-      )
-        setAddMenu(null);
-    };
-    const escape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        setAddMenu(null);
-        addButton.current?.focus();
-      }
-    };
-    document.addEventListener("pointerdown", dismiss);
-    document.addEventListener("keydown", escape, true);
-    return () => {
-      document.removeEventListener("pointerdown", dismiss);
-      document.removeEventListener("keydown", escape, true);
-    };
-  }, [addMenu]);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dictionaryName, setDictionaryName] = useState("");
   const renameTarget = useRef<string | null>(null);
@@ -430,19 +403,23 @@ export default function PronunciationManager(p: {
             data-help="Add or create a pronunciation dictionary."
             onClick={() => {
               const rect = addButton.current!.getBoundingClientRect();
-              const scale =
-                Number(
-                  getComputedStyle(document.documentElement).getPropertyValue(
-                    "--ui-scale",
-                  ),
-                ) || 1;
-              setAddMenu(
-                addMenu
-                  ? null
-                  : {
-                      top: rect.bottom / scale + 3,
-                      left: Math.max(116, rect.right / scale),
-                    },
+              setAddMenu(true);
+              openContextMenu(
+                {
+                  clientX: rect.right,
+                  clientY: rect.bottom + 3,
+                  preventDefault() {},
+                },
+                [
+                  { label: "Add", run: () => file.current?.click() },
+                  { label: "Create", run: createDictionary },
+                ],
+                {
+                  label: "Add dictionary",
+                  alignRight: true,
+                  className: "dictionary-add-menu",
+                  onClose: () => setAddMenu(false),
+                },
               );
             }}
             disabled={busy}
@@ -458,6 +435,40 @@ export default function PronunciationManager(p: {
             <div
               key={name}
               className={`voice-card${dictionary === name ? " selected" : ""}`}
+              onContextMenu={(event) => {
+                if ((event.target as Element).closest("input, form")) return;
+                openContextMenu(
+                  event,
+                  [
+                    {
+                      label: "Rename",
+                      disabled: busy,
+                      run: () => beginRename(name),
+                    },
+                    {
+                      label: "Edit",
+                      disabled: busy,
+                      run: () => openDictionary(name),
+                    },
+                    {
+                      label: disabledDictionaries.includes(name)
+                        ? "Activate"
+                        : "Deactivate",
+                      run: () =>
+                        toggleDictionary(
+                          name,
+                          disabledDictionaries.includes(name),
+                        ),
+                    },
+                    {
+                      label: "Remove",
+                      disabled: busy,
+                      run: () => removeDictionary(name),
+                    },
+                  ],
+                  { label: `${name} dictionary actions` },
+                );
+              }}
               onClick={(e) => {
                 if (!(e.target as Element).closest("button, input, form"))
                   setDictionary(name);
@@ -479,7 +490,14 @@ export default function PronunciationManager(p: {
                       maxLength={100}
                       required
                       onChange={(e) => setDictionaryName(e.target.value)}
-                      onBlur={finishRename}
+                      onBlur={(event) => {
+                        if (
+                          !(event.relatedTarget as Element | null)?.closest(
+                            ".alder-context-menu",
+                          )
+                        )
+                          finishRename();
+                      }}
                       onKeyDown={(e) => {
                         e.stopPropagation();
                         if (e.key === "Escape") {
@@ -557,59 +575,6 @@ export default function PronunciationManager(p: {
         {!editing && notice && <small role="status">{notice}</small>}
         {!editing && error && <p role="alert">{error}</p>}
       </section>
-      {addMenu &&
-        createPortal(
-          <div
-            ref={menu}
-            className="menu-popup dictionary-add-menu"
-            role="menu"
-            aria-label="Add dictionary"
-            style={{
-              position: "fixed",
-              top: addMenu.top,
-              left: addMenu.left,
-              zIndex: 10000,
-            }}
-            onBlur={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget)) setAddMenu(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                const buttons = Array.from(
-                  e.currentTarget.querySelectorAll("button"),
-                );
-                const index = buttons.indexOf(
-                  document.activeElement as HTMLButtonElement,
-                );
-                buttons[
-                  (index + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) %
-                    buttons.length
-                ]?.focus();
-              }
-            }}
-          >
-            <button
-              role="menuitem"
-              onClick={() => {
-                setAddMenu(null);
-                file.current?.click();
-              }}
-            >
-              Add
-            </button>
-            <button
-              role="menuitem"
-              onClick={() => {
-                setAddMenu(null);
-                createDictionary();
-              }}
-            >
-              Create
-            </button>
-          </div>,
-          document.body,
-        )}
       {createPortal(
         <dialog
           ref={dialog}

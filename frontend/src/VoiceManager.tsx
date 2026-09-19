@@ -1,3 +1,4 @@
+import { openContextMenu } from "./ContextMenu";
 import { useSpeechJob } from "./useSpeechJob";
 import { useSpeechTransport } from "./useSpeechTransport";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -227,6 +228,34 @@ export default function VoiceManager(p: Props) {
                 <div
                   className={`voice-card${selectedId === v.id ? " selected" : ""}`}
                   key={v.id}
+                  onContextMenu={(event) => {
+                    if ((event.target as Element).closest("input, form"))
+                      return;
+                    openContextMenu(
+                      event,
+                      [
+                        {
+                          label: "Rename",
+                          disabled: busy,
+                          run: () => rename(v),
+                        },
+                        {
+                          label:
+                            testing && testingId === v.id
+                              ? "Stop test"
+                              : "Test",
+                          disabled: busy,
+                          run: () => void test(v),
+                        },
+                        {
+                          label: "Remove",
+                          disabled: busy || visible.length <= 1,
+                          run: () => void update(v, "remove"),
+                        },
+                      ],
+                      { label: `${v.name} voice actions` },
+                    );
+                  }}
                   onClick={(e) => {
                     if (!(e.target as Element).closest("button, input, form"))
                       setSelectedId(v.id);
@@ -248,7 +277,14 @@ export default function VoiceManager(p: Props) {
                           maxLength={100}
                           required
                           onChange={(event) => setName(event.target.value)}
-                          onBlur={() => void update(v, "rename")}
+                          onBlur={(event) => {
+                            if (
+                              !(event.relatedTarget as Element | null)?.closest(
+                                ".alder-context-menu",
+                              )
+                            )
+                              void update(v, "rename");
+                          }}
                           onKeyDown={(event) => {
                             event.stopPropagation();
                             if (event.key === "Escape") {

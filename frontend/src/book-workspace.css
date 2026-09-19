@@ -581,14 +581,3 @@
   border: 1px solid #888;
   font-size: 11px;
 }
-.arrangement-context-menu {
-  position: fixed;
-  z-index: 100;
-  padding: 3px;
-  background: #e0e0e0;
-  border: 1px solid #888;
-  box-shadow: 0 3px 10px #0003;
-}
-.arrangement-context-menu button {
-  border-radius: 0;
-}

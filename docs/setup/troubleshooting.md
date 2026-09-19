@@ -20,6 +20,10 @@ intentionally collected.
 | `ALDER_SOURCE` | The repository changed during setup; retry with a stable repository version |
 | `ALDER_IO` | Resolve the reported file, disk, permission or network issue, then retry; the current failure replaces older reports when the state directory is writable |
 | `ALDER_RUNNING` | Close Alder normally, then retry maintenance |
+| `ALDER_UPDATE` | Select the existing managed root with --install-dir; for older installer/portable copies follow [the transition guide](updating.md#older-installer-or-portable-copies) |
+| `ALDER_AMBIGUOUS` | More than one managed installation was found; choose the intended one with --install-dir |
+| `ALDER_VERSION` | Obtain the requested repository version; do not edit its version metadata |
+| `ALDER_DOWNGRADE` | The installed version is newer; obtain a newer repository or use the explicit compatible rollback command |
 | `ALDER_INTEGRATION` | An existing unowned launcher conflicts; setup preserves it |
 | `ALDER_OFFLINE` | Required cached material is missing; complete an online install first |
 | `ALDER_EXPERIMENTAL` | Intel Mac needs an explicitly selected experimental native source build |

@@ -297,6 +297,8 @@ export default function StartScreen({
           {projects.length > 0 && <p className="quiet">Saved workspaces</p>}
           {projects.map((p) => (
             <button
+              data-context-actions="self"
+              data-context-label="Open"
               className="project-list-item"
               key={p.id}
               disabled={busy}

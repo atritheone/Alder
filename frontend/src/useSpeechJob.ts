@@ -98,7 +98,7 @@ export function useSpeechDemand(
   jobId: string | undefined,
   index: number,
   speed: number,
-  mode: "playing" | "paused" | "stopped",
+  mode: "playing" | "paused" | "stopped" | "buffering",
 ) {
   useEffect(() => {
     if (!jobId) return;

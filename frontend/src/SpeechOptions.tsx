@@ -7,6 +7,7 @@ export type SpeechOptionsValue = {
   topK: number;
   repetitionPenalty: number;
   verificationRetries: number;
+  strictVerification: boolean;
 };
 export const DEFAULT_SPEECH_OPTIONS: SpeechOptionsValue = {
   pauseSeconds: 0.18,
@@ -15,6 +16,7 @@ export const DEFAULT_SPEECH_OPTIONS: SpeechOptionsValue = {
   topK: 1000,
   repetitionPenalty: 1.2,
   verificationRetries: 1,
+  strictVerification: false,
 };
 type Props = {
   options: SpeechOptionsValue;
@@ -22,7 +24,10 @@ type Props = {
 };
 
 export default function SpeechOptions({ options, onChange }: Props) {
-  const change = (key: keyof SpeechOptionsValue, value: number) => {
+  const change = (
+    key: Exclude<keyof SpeechOptionsValue, "strictVerification">,
+    value: number,
+  ) => {
     if (Number.isFinite(value)) onChange({ ...options, [key]: value });
   };
   return (
@@ -46,10 +51,29 @@ export default function SpeechOptions({ options, onChange }: Props) {
         Silence inserted between completed chunks. Playback speed is controlled
         separately in the transport.
       </p>
+      <label className="strict-verification-option">
+        <input
+          type="checkbox"
+          aria-label="Strict wording verification"
+          checked={options.strictVerification ?? false}
+          onChange={(event) =>
+            onChange({
+              ...options,
+              strictVerification: event.currentTarget.checked,
+            })
+          }
+        />
+        Strict wording verification
+      </label>
+      <p>
+        Off: playback continues through wording differences. On:
+        unresolved differences stop reading and require review before export.
+      </p>
       <label>
         Content-check retries
         <select
           aria-label="Content-check retries"
+          disabled={!options.strictVerification}
           value={options.verificationRetries}
           onChange={(event) =>
             change("verificationRetries", Number(event.target.value))

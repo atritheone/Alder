@@ -27,6 +27,27 @@ an existing common-resource bundle. Dependencies are fetched and checked locally
 
 ## Validation status
 
+### Version 0.11 update workflow
+
+The update entry points are `update.ps1` and `update.sh`. They check existing
+installation ownership, target, release ordering and data compatibility before
+provisioning. Tests exercise upgrades from 0.1.0, an unchanged offline rerun,
+custom locations, version mismatches, legacy-install refusal, and failed/pending
+verification with restoration of both installation records. Native wrapper tests
+check argument forwarding and exit codes, including paths with spaces and Unicode.
+The setup suite passes on Windows and Ubuntu/WSL (platform-specific skips apply).
+The actual Windows and Linux update wrappers also completed offline preflight
+against isolated 0.1.0 fixtures, reporting 0.11 as the target without changing
+those fixtures or activating an application.
+See [updating](setup/updating.md) for end-user and coding-agent instructions.
+
+These setup transaction tests use isolated fixture applications. They do not claim
+that the full 0.11 application has passed native installed acceptance. Mac native
+acceptance remains outstanding. The earlier full-application results below were
+recorded on 16 September for 0.1.0 and must not be read as 0.11 release validation.
+
+### Earlier 0.1.0 native installation evidence
+
 The repository installer was exercised on Windows x64 with a fresh external state
 directory: private Node/Python, all three hashed Python environments, models and
 publishing tools were downloaded from the committed records. Both the assembled

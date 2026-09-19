@@ -45,6 +45,8 @@ def service(tmp_path, monkeypatch):
 
 
 def submit(s, text='Alder reads clearly.', **options):
+    # Existing acceptance/retry cases exercise the opt-in strict policy.
+    options.setdefault('strictVerification', True)
     return s.submit({'id': 'test', 'revision': 0, 'pronunciation': []}, {'scope': 'selection', 'text': text, 'voiceId': 'default', **options})
 
 
@@ -202,7 +204,7 @@ def test_interactive_buffer_is_bounded_then_demand_advances(service):
     assert done['status'] == 'buffered', done
     time.sleep(.2)
     done = service.get_job(done['id'])
-    assert sum(c['status'] == 'ready' for c in done['chunks']) < 9
+    assert sum(c['status'] == 'ready' for c in done['chunks']) < len(done['chunks'])
     service.demand(done['id'], {'index': 0, 'mode': 'export', 'speed': 1})
     done = finish(service, done, states=('ready', 'failed'))
     assert done['status'] == 'ready', done
@@ -731,3 +733,109 @@ def test_spoken_ranges_preserve_source_mapping_and_explicit_pronunciation():
     assert spoken[mapping[0]['spokenStart']:mapping[0]['spokenEnd']] == '1914 to 1925'
     spoken, _ = speech_projection(text, [{'word': '1914–1925', 'spoken': 'the early period'}], 'default')
     assert spoken == 'Between the early period, things changed.'
+
+
+def test_buffering_remains_bounded_and_scales_with_playback_speed(service):
+    text = ' '.join(f'This is section {i} with several words to read aloud.' for i in range(100))
+    job = submit(service, text, interactive=True)
+    service.demand(job['id'], {'index': 0, 'mode': 'buffering', 'speed': 1})
+    done = finish(service, job, states=('buffered', 'failed'))
+    assert done['status'] == 'buffered'
+    assert done['interactive'] is True
+    ready = sum(c.get('seconds', 0) for c in done['chunks'] if c['playbackEligible'])
+    assert 35 <= ready < 65
+    assert any(not c['playbackEligible'] for c in done['chunks'])
+    service.demand(job['id'], {'index': 0, 'mode': 'buffering', 'speed': 2})
+    done = finish(service, job, states=('buffered', 'failed'))
+    assert done['status'] == 'buffered'
+    assert sum(c.get('seconds', 0) for c in done['chunks'] if c['playbackEligible']) > ready
+    assert any(not c['playbackEligible'] for c in done['chunks'])
+
+
+def test_spelling_recovery_checks_audio_again_with_only_one_vocabulary_word(service, monkeypatch):
+    expected = 'thebaine and the starting biological material from which heroin is ultimately derived.'
+    service.runtime['qaSecondaryModel'] = 'secondary'
+    requests = []
+    def recognize(payload, timeout=45):
+        requests.append(payload)
+        text = expected if payload.get('hotwords') == 'thebaine' else expected.replace('thebaine', 'Thebein')
+        return {'ok': True, 'transcript': text, 'words': [{'text': word, 'startSeconds': i*.2, 'endSeconds': (i+1)*.2} for i, word in enumerate(text.split())]}
+    monkeypatch.setattr(service, '_invoke_qa_worker', recognize)
+    done = finish(service, submit(service, expected))
+    assert done['status'] == 'ready'
+    assert done['chunks'][0]['qa']['spellingHint'] == 'thebaine'
+    assert requests[0].get('hotwords') is None
+    assert requests[-1]['hotwords'] == 'thebaine'
+
+
+def test_spelling_hint_cannot_rescue_missing_words():
+    from alder.speech import compare_transcript
+    from alder.speech_comparison import recognition_hint
+    text = 'thebaine and the starting biological material from which heroin is ultimately derived.'
+    assert recognition_hint(compare_transcript(text, text.replace('thebaine', 'Thebein'))) == 'thebaine'
+    for transcript in [text.replace('starting ', ''), text.replace('thebaine', 'Theban'), text.replace('is', 'is not'), text.replace('thebaine', 'Thebein').replace('heroin', 'water')]:
+        assert recognition_hint(compare_transcript(text, transcript)) is None
+
+
+@pytest.mark.parametrize('heard', ['', 'Unfamiliar names spelled differently.', 'Alder reads reads clearly.'])
+def test_normal_reading_warns_without_retrying_or_blocking_exports(service, monkeypatch, heard):
+    monkeypatch.setattr(service, '_invoke_qa_worker', lambda *a, **kw: {'ok': True, 'transcript': heard, 'words': []})
+    # Exercise the real default, without the strict test helper.
+    job = service.submit({'id': 'normal', 'revision': 0, 'pronunciation': []},
+                         {'scope': 'selection', 'text': 'Alder reads clearly.', 'voiceId': 'default', 'interactive': True})
+    done = finish(service, job)
+    assert done['status'] == 'ready' and done['strictVerification'] is False
+    assert len(service.generated) == 1
+    chunk = done['chunks'][0]
+    assert chunk['verificationStatus'] == 'warning' and chunk['playbackEligible']
+    assert chunk['qa']['matched'] is False  # Never mislabel a warning as a match.
+    assert service.audio_path(done['id']).is_file()
+    assert service.audio_path(done['id'], chunk['id']).is_file()
+    resumed = service.resume(done['id'])
+    assert resumed['chunks'][0]['playbackEligible'] and len(service.generated) == 1
+    # Integrity remains a hard gate even for advisory checks.
+    pcm(service._chunk_path(service._jobs[done['id']], chunk), silent=True)
+    assert not service.get_job(done['id'])['chunks'][0]['playbackEligible']
+
+
+def test_normal_reading_continues_when_recognizer_fails(service, monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise RuntimeError('Recognizer unavailable')
+    monkeypatch.setattr(service, '_invoke_qa_worker', unavailable)
+    done = finish(service, submit(service, strictVerification=False))
+    assert done['status'] == 'ready'
+    assert done['chunks'][0]['verificationStatus'] == 'warning'
+    assert done['chunks'][0]['qa']['error'] == 'Recognizer unavailable'
+    assert done['chunks'][0]['wordTimings'] == []
+    assert len(service.generated) == 1
+
+
+@pytest.mark.parametrize('kind', ['silent', 'empty', 'truncated'])
+def test_normal_reading_still_blocks_invalid_audio(service, monkeypatch, kind):
+    def broken(payload, **kwargs):
+        pcm(payload['output'], silent=kind == 'silent')
+        path = Path(payload['output'])
+        if kind == 'empty': path.write_bytes(b'')
+        if kind == 'truncated': path.write_bytes(path.read_bytes()[:50])
+        return {'ok': True}
+    monkeypatch.setattr(service, '_invoke_worker', broken)
+    done = finish(service, submit(service, strictVerification=False))
+    assert done['status'] in {'failed', 'needs_review'}
+    assert not done['chunks'][0]['playbackEligible'] and not done.get('audioUrl')
+
+
+def test_strict_setting_is_validated_and_kept_separate_from_advisory_cache(service, monkeypatch):
+    monkeypatch.setattr(service, '_invoke_qa_worker', lambda *a, **kw: {'ok': True, 'transcript': 'Other words.', 'words': []})
+    normal = finish(service, submit(service, strictVerification=False))
+    strict = finish(service, submit(service, strictVerification=True))
+    assert normal['status'] == 'ready' and normal['chunks'][0]['playbackEligible']
+    assert strict['status'] == 'needs_review' and not strict['chunks'][0]['playbackEligible']
+    with pytest.raises(ValueError, match='strictVerification'):
+        submit(service, strictVerification='false')
+
+
+def test_project_strict_setting_applies_when_not_overridden(service, monkeypatch):
+    monkeypatch.setattr(service, '_invoke_qa_worker', lambda *a, **kw: {'ok': True, 'transcript': 'Other words.', 'words': []})
+    project = {'id': 'strict-project', 'revision': 0, 'pronunciation': [], 'settings': {'speechOptions': {'strictVerification': True}}}
+    done = finish(service, service.submit(project, {'scope': 'selection', 'text': 'Alder reads clearly.', 'voiceId': 'default'}))
+    assert done['strictVerification'] is True and done['status'] == 'needs_review'

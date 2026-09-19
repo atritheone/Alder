@@ -563,11 +563,14 @@ export default function NarrationReview({
   currentTime = 0,
   onReview,
 }: Props) {
-  const [open, setOpen] = useState(job.reviewStatus === "needs_review"),
+  const [open, setOpen] = useState(
+      job.strictVerification !== false && job.reviewStatus === "needs_review",
+    ),
     [showWaveform, setShowWaveform] = useState(false);
   useEffect(() => {
-    if (job.reviewStatus === "needs_review") setOpen(true);
-  }, [job.reviewStatus]);
+    if (job.strictVerification !== false && job.reviewStatus === "needs_review")
+      setOpen(true);
+  }, [job.reviewStatus, job.strictVerification]);
   return (
     <details
       className="narration-review"
@@ -580,7 +583,7 @@ export default function NarrationReview({
         <small>
           {job.chunks.length} chunks
           {job.verificationSummary
-            ? ` · ${job.verificationSummary.needsReview} need review`
+            ? ` · ${job.verificationSummary.needsReview} ${job.strictVerification === false ? "wording warnings" : "need review"}`
             : ""}
         </small>
       </summary>

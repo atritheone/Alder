@@ -9,7 +9,9 @@ function savedLevel(key: string, fallback: number, min: number, max: number) {
 }
 
 /** App-wide preferences in the persistent renderer profile on every desktop OS. */
-export function usePlaybackSettings(scope: "reading" | "narration") {
+export function usePlaybackSettings(
+  scope: "reading" | "narration" | "sandbox",
+) {
   const [speed, setSpeed] = useState(() =>
     savedLevel(`alder.${scope}Speed`, 1, 0.25, 3),
   );

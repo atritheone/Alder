@@ -101,11 +101,20 @@ def integrations(root,active):
         python=Path(sys.executable)
         command=subprocess.list2cmdline([str(python),'-B',str(root/'management/maintenance.py'),'uninstall','--install-dir',str(root)])
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Uninstall\AlderRepository') as key:
-            for n,v in [('DisplayName','Alder (local)'),('DisplayVersion',active['version']),('Publisher','Alder'),('Comments',active['description']),('DisplayIcon',str(exe)),('UninstallString',command)]:winreg.SetValueEx(key,n,0,winreg.REG_SZ,v)
+            for n,v in [('DisplayName','Alder (local)'),('DisplayVersion',active['version']),('Publisher','Alder'),('Comments',active['description']),('DisplayIcon',str(exe)),('InstallLocation',str(root)),('UninstallString',command)]:winreg.SetValueEx(key,n,0,winreg.REG_SZ,v)
     from common import digest
     records=[{'path':str(p),**({'link':os.readlink(p)} if p.is_symlink() else {'sha256':digest(p)})} for p in paths]
     write_json(root/'integrations.json',records)
     return str(paths[0])
+
+
+def restore_activation(root, active, previous):
+    """Restore launcher and both records after failed activation/verification."""
+    root=Path(root)
+    integrations(root,active)
+    write_json(root/'active.json',active)
+    if previous is None:(root/'previous.json').unlink(missing_ok=True)
+    else:write_json(root/'previous.json',previous)
 
 
 def activate(root,built,target,version,fingerprint,source):
@@ -116,6 +125,7 @@ def activate(root,built,target,version,fingerprint,source):
     write_json(root/'.alder-owned.json',{'owner':'Alder repository installation','schemaVersion':1})
     require_closed(root)
     previous=read_json(root/'active.json') if (root/'active.json').exists() else None
+    retained=read_json(root/'previous.json') if (root/'previous.json').exists() else None
     metadata=read_json(Path(source)/'package.json')['alderSetup']
     compatibility=metadata['dataCompatibility']
     if previous and previous.get('dataCompatibility')!=compatibility:
@@ -134,8 +144,8 @@ def activate(root,built,target,version,fingerprint,source):
         active['launcher']=integrations(root,active)
         write_json(root/'active.json',active)
         if previous:write_json(root/'previous.json',previous)
-    except Exception:
-        if previous:integrations(root,previous)
+    except BaseException:
+        if previous:restore_activation(root,previous,retained)
         raise
     return active
 

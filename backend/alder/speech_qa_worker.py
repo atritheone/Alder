@@ -34,14 +34,17 @@ def main():
                     protocol.write(json.dumps({"id": request.get("id"), "ok": True, "health": health}) + "\n")
                     protocol.flush()
                     continue
-                # No source-text prompt: the recogniser must independently report
-                # audio rather than be biased toward the words being checked.
+                # No source sentence is supplied. A bounded spelling-recovery
+                # request may provide one vocabulary word after an independent pass.
+                hotwords = request.get("hotwords")
+                if hotwords is not None and (not isinstance(hotwords, str) or not hotwords.isalpha() or not 7 <= len(hotwords) <= 100):
+                    raise ValueError("Use one vocabulary word for spelling recovery.")
                 selected = model
                 if request.get("secondaryModel"):
                     if secondary is None:
                         secondary = WhisperModel(request["secondaryModel"], device="cpu", compute_type="int8", cpu_threads=6, local_files_only=True)
                     selected = secondary
-                segments, info = selected.transcribe(request["path"], language="en", beam_size=5, temperature=0, condition_on_previous_text=False, vad_filter=False, word_timestamps=True)
+                segments, info = selected.transcribe(request["path"], language="en", beam_size=5, temperature=0, condition_on_previous_text=False, vad_filter=False, word_timestamps=True, hotwords=hotwords)
                 segments = list(segments)
                 pieces = [{"text": segment.text.strip(), "startSeconds": segment.start, "endSeconds": segment.end, "averageLogProbability": segment.avg_logprob, "noSpeechProbability": segment.no_speech_prob} for segment in segments]
                 words = [{"text": w.word.strip(), "startSeconds": w.start, "endSeconds": w.end} for segment in segments for w in (segment.words or [])]

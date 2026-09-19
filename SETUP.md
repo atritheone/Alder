@@ -1,6 +1,24 @@
-# Install Alder from this repository
+# Agent setup entry point for Alder 0.11
 
-Open a normal desktop terminal in the checkout. No global Node or Python is
+These instructions are for the coding agent doing the work. The user only needs
+to ask to install or update Alder; do not hand routine terminal work back to them.
+This repository contains **0.11**. If Alder is already installed, follow the
+[agent update runbook](docs/setup/updating.md) first. Check the old and new versions
+before updating the existing managed installation:
+
+```powershell
+.\update.ps1 --check --expect-version 0.11 --json
+.\update.ps1 --expect-version 0.11 --json
+```
+
+On Linux or Mac, use `bash ./update.sh` with the same options. Close Alder normally
+and create a verified backup of the user's data between the check and update.
+Preserve existing custom state/install paths. Updates include installed
+verification and preserve a compatible previous version; they never silently
+create a fresh install. Older installer/portable copies have a separate transition
+in the update guide. The commands below are for a **first installation**.
+
+Use a normal desktop terminal in the checkout. No global Node or Python is
 required. First setup downloads verified private runtimes, dependencies, language
 data and speech models. Internet access and roughly 45 GiB of free workspace are
 required; setup checks the actual disk and install destination before large work.
@@ -24,11 +42,9 @@ If PowerShell blocks a local script, use a process-scoped invocation:
 `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 install`.
 Do not change machine execution policy or run setup elevated.
 
-You can instead ask your coding agent:
-
-> Install Alder on this machine. Read AGENTS.md, run setup doctor, complete the
-> native install and verification, and give me the launcher location and any
-> remaining limitations. Do not edit the repository or supply missing metadata.
+Complete the install and verification, then report the launcher location and any
+remaining limitations to the user. Do not edit the repository or supply missing
+metadata as a local workaround.
 
 Setup downloads only this machine's native resources, builds in private local
 state and installs a complete application directory. No `.deb`, DMG or archive

@@ -1,5 +1,13 @@
+import {
+  changeCase,
+  caseInputPlugin,
+  type CaseMode,
+  type LetterCase,
+} from "./caseTransform";
+import { openContextMenu, editCommand } from "./ContextMenu";
 import { spacedWord } from "./wordInsertion";
 import { persistentCaret } from "./persistentCaret";
+import { readingHighlight } from "./readingHighlight";
 import { structureMarks } from "./structureMarks";
 import { useFontCatalogue } from "./useInstalledFonts";
 import { shortcutLabel } from "./platform";
@@ -17,6 +25,7 @@ import {
   useState,
   useMemo,
   useId,
+  type ReactNode,
 } from "react";
 import {
   Schema,
@@ -25,7 +34,12 @@ import {
   Fragment,
   Slice,
 } from "prosemirror-model";
-import { EditorState, Plugin, TextSelection } from "prosemirror-state";
+import {
+  AllSelection,
+  EditorState,
+  Plugin,
+  TextSelection,
+} from "prosemirror-state";
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
 import {
   baseKeymap,
@@ -79,6 +93,7 @@ import {
   Redo2,
   WrapText,
   Pilcrow,
+  SpellCheck,
 } from "lucide-react";
 import type { Annotation, DocNode, Idea, Project, StyleKind } from "./types";
 import { mediaUrl } from "./api";
@@ -435,6 +450,8 @@ export type EditorHandle = {
 };
 type Props = {
   label?: string;
+  toolbarContent?: ReactNode;
+  onToggleSpeech?: () => void;
   rawMode?: boolean;
   onToggleRaw?: () => void;
   rawDisabled?: boolean;
@@ -452,6 +469,8 @@ type Props = {
   onChange: (document: DocNode, text: string) => void;
   onSelection: (word: string, selection: string) => void;
   annotations?: Annotation[];
+  suppressChecks?: boolean;
+  caseScope?: "selection" | "document";
   showStructure: boolean;
   onToggleStructure: () => void;
   onImage: () => void;
@@ -492,6 +511,20 @@ function refreshEditorDecorations(v: EditorView) {
 
 export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const editorScope = useId();
+  const [caseMode, setCaseMode] = useState<CaseMode>("free");
+  const inputCase = useRef<CaseMode>("free");
+  inputCase.current = caseMode;
+  const spellcheckKey =
+    props.caseScope === "document"
+      ? "alder.sandboxSpellcheck"
+      : "alder.writeSpellcheck";
+  const [spellcheck, setSpellcheck] = useState(
+    () => localStorage.getItem(spellcheckKey) !== "false",
+  );
+  const visibleAnnotations = useMemo(
+    () => (spellcheck && !props.suppressChecks ? props.annotations || [] : []),
+    [props.annotations, spellcheck, props.suppressChecks],
+  );
   const namedStyles = useMemo(() => {
     try {
       return { css: styleSheet(props.styles || [], editorScope), error: "" };
@@ -559,7 +592,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         void loadDocumentFont(family).catch(() => {});
   }, [props.document, props.styles, props.fontFamily, fontCatalogue.catalogue]);
   latest.current = props;
-  decos.current = props.annotations || [];
+  decos.current = visibleAnnotations;
   const command = (cmd: any) => {
     if (view.current && !blocked.current) {
       cmd(view.current.state, view.current.dispatch, view.current);
@@ -853,6 +886,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       state: EditorState.create({
         doc,
         plugins: [
+          caseInputPlugin(
+            () => inputCase.current,
+            () => view.current?.composing || false,
+          ),
           new Plugin({ props: { decorations: () => pageDecorations.current } }),
           structureMarks(
             () => latest.current.showStructure && !blocked.current,
@@ -862,6 +899,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             : []),
           history(),
           keymap({
+            "Mod-Enter": () => {
+              if (!latest.current.onToggleSpeech) return false;
+              latest.current.onToggleSpeech();
+              return true;
+            },
             "Ctrl-Space": () => {
               latest.current.onComplete?.();
               return true;
@@ -899,28 +941,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           columnResizing(),
           tableEditing(),
           dropCursor(),
-          new Plugin({
-            props: {
-              decorations(state) {
-                const range = latest.current.readingRange;
-                if (!range || blocked.current) return DecorationSet.empty;
-                try {
-                  const { from, to } = projectedRange(
-                    state.doc,
-                    range.start,
-                    range.end,
-                  );
-                  return to > from
-                    ? DecorationSet.create(state.doc, [
-                        Decoration.inline(from, to, { class: "reading-word" }),
-                      ])
-                    : DecorationSet.empty;
-                } catch {
-                  return DecorationSet.empty;
-                }
-              },
-            },
-          }),
+          readingHighlight(
+            () => (blocked.current ? null : latest.current.readingRange),
+            () => latest.current.layoutVisible !== false,
+          ),
           new Plugin({
             props: {
               decorations(state) {
@@ -947,8 +971,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                     if (to > from)
                       spans.push(
                         Decoration.inline(from, to, {
-                          class: `annotation annotation-${annotation.type}`,
-                          "data-help": annotation.message,
+                          class: `annotation annotation-${annotation.type}${annotation.type === "spelling" ? "" : " annotation-grammar"}`,
+                          "data-help": `${annotation.type === "spelling" ? "Spelling" : "Grammar"}: ${annotation.message}`,
                         }),
                       );
                   } catch {
@@ -977,16 +1001,21 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
       dispatchTransaction(tr) {
         if (blocked.current && tr.docChanged) return;
-        const next = v.state.apply(tr);
-        if (tr.docChanged) {
+        const applied = v.state.applyTransaction(tr);
+        const next = applied.state;
+        const docChanged = applied.transactions.some(
+          (transaction) => transaction.docChanged,
+        );
+        if (docChanged) {
           annotationSource.current = null;
-          pageDecorations.current = pageDecorations.current.map(
-            tr.mapping,
-            next.doc,
-          );
+          for (const transaction of applied.transactions)
+            pageDecorations.current = pageDecorations.current.map(
+              transaction.mapping,
+              transaction.doc,
+            );
         }
         v.updateState(next);
-        if (tr.docChanged) {
+        if (docChanged) {
           documentTick((n) => n + 1);
           setRangeWarning("");
           const json = next.doc.toJSON();
@@ -1032,6 +1061,73 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         return true;
       },
       handleDOMEvents: {
+        compositionend(v) {
+          setTimeout(() => {
+            if (!v.isDestroyed)
+              v.dispatch(v.state.tr.setMeta("caseCompositionEnd", true));
+          }, 0);
+          return false;
+        },
+        contextmenu(v, event) {
+          refreshEditorDecorations(v);
+          openContextMenu(
+            event,
+            [
+              {
+                label: "Undo",
+                disabled: !v.editable || !undo(v.state),
+                run: () => {
+                  undo(v.state, v.dispatch);
+                  v.focus();
+                },
+              },
+              {
+                label: "Redo",
+                disabled: !v.editable || !redo(v.state),
+                run: () => {
+                  redo(v.state, v.dispatch);
+                  v.focus();
+                },
+              },
+              {
+                label: "Cut",
+                disabled: !v.editable || v.state.selection.empty,
+                run: () => {
+                  v.dispatch(closeHistory(v.state.tr));
+                  v.focus();
+                  editCommand("cut");
+                },
+              },
+              {
+                label: "Copy",
+                disabled: v.state.selection.empty,
+                run: () => {
+                  v.focus();
+                  editCommand("copy");
+                },
+              },
+              {
+                label: "Paste",
+                disabled: !v.editable,
+                run: () => {
+                  v.focus();
+                  editCommand("paste");
+                },
+              },
+              {
+                label: "Select all",
+                run: () => {
+                  v.dispatch(
+                    v.state.tr.setSelection(new AllSelection(v.state.doc)),
+                  );
+                  v.focus();
+                },
+              },
+            ],
+            { label: "Text actions" },
+          );
+          return true;
+        },
         blur(v) {
           if (
             !latest.current.persistentCaret ||
@@ -1136,7 +1232,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           : null;
       refreshEditorDecorations(v);
     }
-  }, [props.annotations]);
+  }, [visibleAnnotations]);
   useLayoutEffect(() => {
     if (view.current) refreshEditorDecorations(view.current);
   }, [props.showStructure]);
@@ -1144,44 +1240,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     const v = view.current;
     if (!v) return;
     refreshEditorDecorations(v);
-    if (props.readingRange && props.layoutVisible !== false) {
-      try {
-        const { from } = projectedRange(
-          v.state.doc,
-          props.readingRange.start,
-          props.readingRange.end,
-        );
-        const { node } = v.domAtPos(from, 1);
-        const element =
-          node.nodeType === Node.TEXT_NODE
-            ? node.parentElement
-            : (node as HTMLElement);
-        const word =
-          element?.closest<HTMLElement>(".reading-word") ||
-          element?.querySelector<HTMLElement>(".reading-word");
-        const viewport = v.dom.closest(".editor-scroll");
-        if (word && viewport) {
-          const rect = word.getBoundingClientRect(),
-            bounds = viewport.getBoundingClientRect();
-          // Scroll only when speech reaches an offscreen line. Restarting a
-          // smooth scroll at every word keeps the viewport chasing the audio.
-          if (
-            rect.top < bounds.top ||
-            rect.bottom > bounds.bottom ||
-            rect.left < bounds.left ||
-            rect.right > bounds.right
-          )
-            word.scrollIntoView({
-              block: "nearest",
-              inline: "nearest",
-              behavior: "instant",
-            });
-        }
-      } catch {
-        /* Stale speech ranges must not move the viewport. */
-      }
-    }
-  }, [props.readingRange]);
+  }, [props.readingRange, props.layoutVisible]);
   useLayoutEffect(() => {
     const layout = props.pageLayout;
     const scroll = host.current?.closest<HTMLElement>(".editor-scroll");
@@ -1574,6 +1633,76 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           </>
         )}
         <button
+          aria-label="Spelling and grammar"
+          aria-pressed={spellcheck}
+          className={spellcheck ? "active" : ""}
+          data-help="Show or hide spelling and grammar checks. Both are hidden during TTS playback."
+          onClick={() =>
+            setSpellcheck((current) => {
+              localStorage.setItem(spellcheckKey, String(!current));
+              return !current;
+            })
+          }
+        >
+          <SpellCheck />
+        </button>
+        <select
+          aria-label="Case"
+          value={caseMode}
+          data-help={
+            props.caseScope === "document"
+              ? "Change case throughout this sandbox draft and future input. Free leaves input unchanged."
+              : "Change case in selected text and use this case for new writing. Free leaves input unchanged."
+          }
+          onChange={(event) => {
+            const v = view.current;
+            if (!v || blocked.current) return;
+            const chosen = event.target.value as CaseMode;
+            inputCase.current = chosen;
+            setCaseMode(chosen);
+            if (chosen === "free") {
+              v.focus();
+              return;
+            }
+            // A native dropdown can take focus before selectionchange reaches ProseMirror.
+            const live = v.dom.ownerDocument.getSelection();
+            if (
+              props.caseScope !== "document" &&
+              live?.anchorNode &&
+              live.focusNode &&
+              v.dom.contains(live.anchorNode) &&
+              v.dom.contains(live.focusNode)
+            ) {
+              v.dispatch(
+                v.state.tr.setSelection(
+                  TextSelection.between(
+                    v.state.doc.resolve(
+                      v.posAtDOM(live.anchorNode, live.anchorOffset),
+                    ),
+                    v.state.doc.resolve(
+                      v.posAtDOM(live.focusNode, live.focusOffset),
+                    ),
+                  ),
+                ),
+              );
+            }
+            v.dispatch(
+              changeCase(
+                v.state,
+                event.target.value as LetterCase,
+                props.caseScope === "document",
+              ),
+            );
+            v.focus();
+          }}
+        >
+          <option value="free">Free</option>
+          <option value="sentence">Sentence case</option>
+          <option value="lower">lowercase</option>
+          <option value="upper">UPPERCASE</option>
+          <option value="title">Title Case</option>
+        </select>
+        <button
           className={props.showStructure ? "active" : ""}
           data-help-label="Show structure"
           aria-label="Show structure"
@@ -1609,6 +1738,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         >
           <Redo2 />
         </button>
+        {props.toolbarContent}
       </div>
       <div
         className={

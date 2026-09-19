@@ -19,7 +19,7 @@ from .pronunciation import compare_pronounced
 from .sapi import NATIVE_TIMING_VERSION, native_timings
 from .speech_quality import QUALITY_VERSION, inspect_pcm, projected_sections, valid_timings, speech_projection
 from .reading import word_timings, TIMING_VERSION
-from .speech_comparison import VERSION as COMPARISON_VERSION
+from .speech_comparison import VERSION as COMPARISON_VERSION, recognition_hint
 
 STOPPED = {"cancelling", "ready", "failed", "cancelled", "interrupted", "needs_review"}
 
@@ -55,33 +55,45 @@ class SpeechPipeline(SpeechService):
     def capabilities(self):
         result = super().capabilities()
         result["controls"] = [name for name in result["controls"] if name != "verify"]
-        result["verification"].update(required=True, maximumRetries=1, maximumSectionAttempts=6,
+        result["controls"].append("strictVerification")
+        result["verification"].update(required=False, strictDefault=False, maximumRetries=1, maximumSectionAttempts=6,
                                       secondaryAvailable=bool(self.runtime.get("qaSecondaryModel")), maximumInteractiveSectionAttempts=12)
         return result
 
     def submit(self, project, request):
         if "verify" in request and not isinstance(request["verify"], bool):
             raise ValueError("verify must be true or false.")
+        strict = request.get("strictVerification", project.get("settings", {}).get("speechOptions", {}).get("strictVerification", False))
+        if not isinstance(strict, bool):
+            raise ValueError("strictVerification must be true or false.")
         sources = self._sources(project, request)
-        if any(not s["voiceId"].startswith("sapi-") for s in sources) and not self.capabilities()["verification"]["available"]:
+        if strict and any(not s["voiceId"].startswith("sapi-") for s in sources) and not self.capabilities()["verification"]["available"]:
             raise ValueError("Speech checking is unavailable. Repair Alder's speech resources before reading.")
-        result = super().submit(project, {**request, "verify": False})
+        result = super().submit(project, {**request, "verify": False, "strictVerification": strict})
         self._metric("submitted", result, sections=len(result["chunks"]), inputHash=_hash(result["text"]))
         return result
 
     def _initialize_job(self, job, project, request):
         # Freeze acceptance policy before the first save/enqueue. Avoid writing
         # and copying the entire manuscript twice before generation can start.
-        job.update(schemaVersion=2, verify=True, follow=True, verificationModelRevision=self.runtime.get("qaModelRevision"),
-                   interactive=bool(request.get("interactive", False)), _pronunciation=copy.deepcopy(project.get("pronunciation", [])), _budgets={})
+        job.update(schemaVersion=2, verify=True, strictVerification=request["strictVerification"], follow=True, verificationModelRevision=self.runtime.get("qaModelRevision"),
+                   interactive=bool(request.get("interactive", False)), _pronunciation=copy.deepcopy([r for r in project.get("pronunciation", []) if (r.get("dictionary") or "My Rules") not in project.get("settings", {}).get("disabledPronunciationDictionaries", [])]), _budgets={})
         for c in job["chunks"]:
             c["verificationStatus"] = "pending"
             c["playbackEligible"] = False
         self._demand[job["id"]] = {"index": 0, "speed": 1., "mode": "playing", "at": time.monotonic()}
 
+    @staticmethod
+    def _advisory(job, check):
+        # Recognition uncertainty cannot invalidate healthy audio in normal reading.
+        # Legacy jobs retain their original strict acceptance policy.
+        return not job.get("strictVerification", True) and check.get("acoustic", {}).get("accepted") is True
+
     def _eligible(self, job, chunk):
         return bool(job.get("schemaVersion") == 2 and chunk["status"] == "ready" and
-                    (chunk.get("verificationStatus") == "accepted" or self._review_applies(job, chunk)) and self._intact(job, chunk))
+                    (chunk.get("verificationStatus") == "accepted" or
+                     chunk.get("verificationStatus") == "warning" and self._advisory(job, chunk.get("qa", {})) or
+                     self._review_applies(job, chunk)) and self._intact(job, chunk))
 
     def _intact(self, job, chunk):
         expected = (chunk.get("manualReview") or {}).get("audioHash") if self._review_applies(job, chunk) else (chunk.get("qa") or {}).get("audioHash")
@@ -178,7 +190,7 @@ class SpeechPipeline(SpeechService):
 
     def demand(self, job_id, request):
         index, speed, mode = request.get("index", 0), request.get("speed", 1.), request.get("mode", "playing")
-        if not isinstance(index, int) or isinstance(index, bool) or not isinstance(speed, (float, int)) or not .25 <= speed <= 3 or mode not in {"playing", "paused", "stopped", "export"}:
+        if not isinstance(index, int) or isinstance(index, bool) or not isinstance(speed, (float, int)) or not .25 <= speed <= 3 or mode not in {"playing", "paused", "stopped", "export", "buffering"}:
             raise ValueError("Invalid playback demand.")
         with self._lock:
             job = self._job(job_id)
@@ -237,9 +249,11 @@ class SpeechPipeline(SpeechService):
             return True
         recent = job["chunks"][max(0, current - 4):current + 8]
         recovery = max((c.get("processingSeconds", 0) for c in recent), default=0)
-        budget = (4 if d.get("mode") == "paused" else min(45, max(12, recovery * 1.5))) * d.get("speed", 1)
+        chatterbox = not job["chunks"][current]["voiceId"].startswith("sapi-")
+        reserve = min(90, max(45, recovery * 3)) if chatterbox else min(45, max(12, recovery * 1.5))
+        budget = (4 if d.get("mode") == "paused" else reserve) * d.get("speed", 1)
         ahead = sum(c.get("seconds", max(.3, len(c["spokenText"].split()) / 2.5)) + job["settings"]["pauseSeconds"] for c in job["chunks"][current:index])
-        return index - current < 8 and ahead < budget
+        return (chatterbox or index - current < 8) and ahead < budget
 
     def _run(self):
         while not self._stopping.is_set():
@@ -356,7 +370,7 @@ class SpeechPipeline(SpeechService):
 
     def _check_locked(self, job, chunk, cache):
         audio_hash = hashlib.sha256(cache.read_bytes()).hexdigest()
-        identity = _hash({"audio": audio_hash, "text": chunk["spokenText"], "pronunciation": chunk.get("pronunciationMap", []), "pronunciationComparison": 1, "version": QUALITY_VERSION,
+        identity = _hash({"audio": audio_hash, "text": chunk["spokenText"], "pronunciation": chunk.get("pronunciationMap", []), "pronunciationComparison": 1, "spellingRecovery": 1, "strictVerification": job.get("strictVerification", True), "version": QUALITY_VERSION,
                           "model": self.runtime.get("qaModelRevision"), "secondary": self.runtime.get("qaSecondaryRevision"), "voice": chunk["voiceId"], "comparison": COMPARISON_VERSION, **({"nativeTimings": NATIVE_TIMING_VERSION} if chunk["voiceId"].startswith("sapi-") else {})})
         path = self.root / "cache" / (identity + ".check.json")
         try:
@@ -377,6 +391,12 @@ class SpeechPipeline(SpeechService):
         if not acoustic["accepted"]:
             return {"status": "needs_review", "matched": False, "acoustic": acoustic, "audioHash": audio_hash,
                     "error": ", ".join(acoustic["reasons"])}, False
+        def unavailable(message):
+            return {"status": "error", "matched": False, "error": message, "audioHash": audio_hash,
+                    "acoustic": acoustic, "words": [], "checkedAt": _now()}, False
+        if not chunk["voiceId"].startswith("sapi-") and not self.capabilities()["verification"]["available"]:
+            if not job.get("strictVerification", True):
+                return unavailable("Speech recognition is unavailable; the audio passed its integrity checks.")
         with self._lock:
             chunk["status"] = "checking"
             chunk["verificationStatus"] = "checking"
@@ -388,7 +408,7 @@ class SpeechPipeline(SpeechService):
             model = "sapi-events"
         else:
             response = None
-            for attempt in range(2):
+            for attempt in range(2 if job.get("strictVerification", True) else 1):
                 if self._cancelled(job):
                     raise InterruptedError("Reading stopped.")
                 try:
@@ -399,11 +419,14 @@ class SpeechPipeline(SpeechService):
                 if response.get("ok"):
                     break
             if not response or not response.get("ok"):
-                raise RuntimeError((response or {}).get("error", "The speech checker could not finish."))
+                message = (response or {}).get("error", "The speech checker could not finish.")
+                if not job.get("strictVerification", True):
+                    return unavailable(message)
+                raise RuntimeError(message)
             transcript = response["transcript"]
             model = "faster-whisper-base.en"
         check = compare_pronounced(chunk, transcript)
-        if not check["matched"] and model != "sapi-events" and self.runtime.get("qaSecondaryModel"):
+        if job.get("strictVerification", True) and not check["matched"] and model != "sapi-events" and self.runtime.get("qaSecondaryModel"):
             if self._cancelled(job):
                 raise InterruptedError("Reading stopped.")
             try:
@@ -418,11 +441,28 @@ class SpeechPipeline(SpeechService):
                         check["secondaryCheck"] = second_check
             except (RuntimeError, OSError) as exc:
                 check["secondaryError"] = str(exc)
+        # A vocabulary hint is limited to one similar long-word substitution.
+        # Never supply the sentence or use this to recover omissions/additions.
+        hint = recognition_hint(check) if job.get("strictVerification", True) and model != "sapi-events" else None
+        if hint and self.runtime.get("qaSecondaryModel"):
+            try:
+                if self._cancelled(job):
+                    raise InterruptedError("Reading stopped.")
+                with self._qa_serial:
+                    hinted = self._invoke_qa_worker({"operation": "transcribe", "path": str(cache),
+                        "secondaryModel": self.runtime["qaSecondaryModel"], "hotwords": hint}, timeout=20)
+                if hinted.get("ok"):
+                    recovered = compare_pronounced(chunk, hinted["transcript"])
+                    if recovered["matched"] and hinted.get("words"):
+                        recovered.update(primaryCheck=check, spellingHint=hint)
+                        check, response, model = recovered, hinted, "faster-whisper-small.en"
+            except (RuntimeError, OSError) as exc:
+                check["secondaryError"] = str(exc)
         check.update(audioHash=audio_hash, words=response.get("words", []), acoustic=acoustic,
                      model=model, modelRevision=self.runtime.get("qaSecondaryRevision") if model == "faster-whisper-small.en" else self.runtime.get("qaModelRevision"), checkedAt=_now(),
                      recognitionSeconds=time.monotonic() - started)
         self._metric("checked", job, chunk, seconds=check["recognitionSeconds"], matched=check["matched"])
-        # A completed negative check is reusable too; it still cannot grant playback.
+        # A wording mismatch is reusable; playback depends on the job acceptance policy.
         # Worker errors and incomplete checks never reach this publication point.
         if not check.get("secondaryError"):
             _atomic_json(path, check)
@@ -472,7 +512,7 @@ class SpeechPipeline(SpeechService):
                         chunk["verificationStatus"] = "retrying"
                 if selected is None or check.get("wordErrorRate", 999) < selected["qa"].get("wordErrorRate", 999):
                     selected = take
-                if check["matched"]:
+                if check["matched"] or self._advisory(job, check):
                     selected = take
                     break
                 self._metric("rejected", job, chunk, attempt=index)
@@ -490,10 +530,10 @@ class SpeechPipeline(SpeechService):
             with self._lock:
                 chunk.update(status="ready", qa=check, qaComplete=True, selectedAttempt=selected["index"], selectedSeed=selected["seed"],
                              seconds=info["seconds"], sampleRate=info["sampleRate"], processingSeconds=time.monotonic() - started,
-                             verificationStatus="accepted" if check["matched"] else "needs_review",
+                             verificationStatus="accepted" if check["matched"] else "warning" if self._advisory(job, check) else "needs_review",
                              wordTimings=valid_timings(timings, chunk["text"], info["seconds"]), timingVersion=TIMING_VERSION,
                              audioUrl=f"/api/speech/jobs/{job['id']}/chunks/{chunk['id']}")
-                if not check["matched"]:
+                if not check["matched"] and not self._advisory(job, check):
                     self._split_section(job, chunk, root)
                 job["progress"] = sum(self._eligible(job, c) for c in job["chunks"]) / len(job["chunks"])
                 if not self._cancelled(job):
@@ -533,7 +573,11 @@ class SpeechPipeline(SpeechService):
     def _hold_unresolved(self, job):
         job["status"] = "failed" if job.get("interactive") else "needs_review"
         if job.get("interactive"):
-            job["error"] = "Could not read this passage. Press Play to retry."
+            unresolved = next((c for c in job["chunks"] if c.get("verificationStatus") == "needs_review"), None)
+            differences = (unresolved or {}).get("qa", {}).get("differences", [])
+            wording = next((d.get("expected") for d in differences if d.get("expected")), None)
+            job["error"] = (f'The speech checker could not confirm "{wording[:100]}". Press Play to retry.'
+                            if wording else "Could not read this passage. Press Play to retry.")
 
     def _split_section(self, job, chunk, root):
         if chunk.get("splitDepth") or self._cancelled(job):

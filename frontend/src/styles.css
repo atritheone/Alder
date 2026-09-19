@@ -199,7 +199,7 @@ button.danger {
   overflow: hidden;
   background: #909090;
   --browser-width: 342px;
-  --detail-height: 310px;
+  --detail-height: 287.5px;
 }
 .titlebar {
   height: 29px;
@@ -1303,12 +1303,21 @@ button.danger {
   text-align: center;
 }
 .annotation {
-  text-decoration: underline wavy #7a7a7a;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
+  --check-color: #24803b;
+  background-image: linear-gradient(
+    to right,
+    var(--check-color) 0 6px,
+    transparent 6px 12px
+  );
+  background-size: 12px 2px;
+  background-position: left bottom;
+  background-repeat: repeat-x;
+  padding-bottom: 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
-.annotation-repetition {
-  text-decoration-color: #8d8d8d;
+.annotation-spelling {
+  --check-color: #c53030;
 }
 .word-workbench {
   width: 254px;
@@ -3335,7 +3344,7 @@ input[type="range"]:disabled {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.alder-app .book-workspace .reading-word {
+.alder-app :is(.book-workspace, .detail-pane) .reading-word {
   background: #e5c59a;
   color: #1f1f1f;
   padding: 0;
@@ -3344,6 +3353,38 @@ input[type="range"]:disabled {
   box-shadow: none;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+
+/* Outside the editable document: no reflow, selection, or pagination changes. */
+.reading-highlight-host {
+  position: relative;
+  isolation: isolate;
+}
+.reading-ink,
+.reading-ink-release {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  user-select: none;
+  background-color: #e5c59a;
+  border-radius: 3px;
+  opacity: 0;
+}
+.reading-ink-release {
+  background-color: transparent;
+}
+/* The ink surface covers the entire spoken word from its first frame. */
+.alder-app
+  :is(.book-workspace, .detail-pane)
+  .reading-ink-active
+  .reading-word {
+  background: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reading-ink,
+  .reading-ink-release {
+    display: none;
+  }
 }
 
 /* Keep the filter surface continuous down to its resize border. */
@@ -3430,7 +3471,7 @@ input[type="range"]:disabled {
   animation: none;
 }
 /* Keep the following lines visible before the spoken word reaches the edge. */
-.book-workspace .reading-word {
+:is(.book-workspace, .detail-pane) .reading-word {
   scroll-margin-block: 1lh 4lh;
 }
 /* Voice library controls stay with the voice they act on. */
@@ -3546,29 +3587,46 @@ button.library-add-button:hover {
   color: var(--muted, #596675);
 }
 
-.dictionary-add-menu {
+/* All action popups share the dictionary menu's compact, square styling. */
+.alder-context-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
   zoom: var(--ui-scale);
-  transform: translateX(-100%);
-  width: 112px;
-  min-width: 0;
+  width: max-content;
+  min-width: 112px;
+  max-width: calc(100vw / var(--ui-scale) - 8px);
+  max-height: calc(100vh / var(--ui-scale) - 8px);
+  overflow: auto;
   padding: 0;
   border: 1px solid #b7bec7;
   border-radius: 0;
+  background: #d3d3d3;
+  color: #222;
+  box-shadow: 0 6px 20px #00000044;
 }
-.dictionary-add-menu button {
+.alder-context-menu button {
+  display: flex;
+  width: 100%;
   min-height: 25px;
+  justify-content: flex-start;
   padding: 4px 9px;
   border: 0;
   border-radius: 0;
   background: transparent;
+  text-transform: none;
+  text-align: left;
 }
-.dictionary-add-menu button + button {
+.alder-context-menu button + button {
   border-top: 1px solid #b7bec7;
 }
-.dictionary-add-menu button:hover,
-.dictionary-add-menu button:focus-visible {
+.alder-context-menu button:not(:disabled):hover,
+.alder-context-menu button:focus-visible {
   background: var(--accent-light, #d3dbe5);
   outline: none;
+}
+.alder-app .arrange-back {
+  text-transform: none;
 }
 
 .voice-card-name input.dictionary-active-checkbox {
@@ -3592,4 +3650,28 @@ button.library-add-button:hover {
 .voice-card-name input.dictionary-active-checkbox:focus-visible {
   outline: 1px solid var(--accent, #293f5e);
   outline-offset: 2px;
+}
+
+.alder-app select[aria-label="Case"] {
+  text-transform: none;
+}
+
+.format-toolbar .sandbox-reader {
+  flex: 1 0 100%;
+  padding: 3px 0 0;
+  border: 0;
+  border-top: 1px solid #a9a9a9;
+  background: transparent;
+}
+.sandbox-reader .reader-controls {
+  gap: 5px;
+}
+.format-toolbar .sandbox-reader select {
+  max-width: 170px;
+}
+.sandbox-reader .reader-controls input[type="range"] {
+  width: 48px;
+}
+.sandbox-reader .reader-controls input[type="number"] {
+  width: 4ch;
 }

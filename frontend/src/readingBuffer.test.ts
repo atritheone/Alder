@@ -1,0 +1,53 @@
+import { describe, it, expect } from "vitest";
+import { readingBufferReady, highlightClock } from "./readingBuffer";
+import type { Job } from "./types";
+const job = (voiceId = "default") =>
+  ({
+    chunks: [
+      { voiceId, playbackEligible: true, audioUrl: "/first.wav" },
+      { voiceId, playbackEligible: false },
+    ],
+  }) as Job;
+describe("reading buffer", () => {
+  it("starts with a rolling reserve while the rest remains queued", () => {
+    const reading = job();
+    reading.chunks[0].seconds = 12;
+    expect(readingBufferReady(reading, 0)).toBe(false);
+    Object.assign(reading.chunks[1], {
+      playbackEligible: true,
+      audioUrl: "/second.wav",
+      seconds: 12,
+    });
+    reading.chunks.push({
+      voiceId: "default",
+      playbackEligible: false,
+    } as Job["chunks"][number]);
+    expect(readingBufferReady(reading, 0)).toBe(true);
+    expect(readingBufferReady(reading, 0, 2)).toBe(false);
+    expect(readingBufferReady(reading, 1, 1, true)).toBe(true);
+    expect(readingBufferReady(reading, 2, 1, true)).toBe(false);
+    expect(readingBufferReady(reading, 1)).toBe(false);
+  });
+  it("allows short passages and increases the reserve for slow generation", () => {
+    const reading = job();
+    reading.chunks.pop();
+    reading.chunks[0].seconds = 3;
+    expect(readingBufferReady(reading, 0)).toBe(true);
+    reading.chunks[0].seconds = 25;
+    reading.chunks[0].processingSeconds = 18;
+    reading.chunks.push({
+      voiceId: "default",
+      playbackEligible: false,
+    } as Job["chunks"][number]);
+    expect(readingBufferReady(reading, 0)).toBe(false);
+  });
+  it("allows SAPI to start immediately and rejects missing audio", () => {
+    expect(readingBufferReady(job("sapi-voice"), 0)).toBe(true);
+    expect(readingBufferReady(null, 0)).toBe(false);
+  });
+  it("compensates the visual clock in wall time only during playback", () => {
+    expect(highlightClock(1, 1, true)).toBeCloseTo(1.04);
+    expect(highlightClock(1, 2, true)).toBeCloseTo(1.08);
+    expect(highlightClock(1, 2, false)).toBe(1);
+  });
+});

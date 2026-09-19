@@ -24,6 +24,7 @@ import type { ReadingPosition } from "./readingCursor";
 type Props = {
   flush: () => Promise<void>;
   externalPlayback?: boolean;
+  onPlaybackChange?: (playing: boolean) => void;
   project: Project;
   change: (fn: (p: Project) => void) => void;
   view: string;
@@ -72,6 +73,10 @@ export default function BookWorkspace(p: Props) {
   const [zoom, setZoom] = useState(0.8);
   const [arrangementZoom, setArrangementZoom] = useState(0.8);
   const [speechPlaying, setSpeechPlaying] = useState(false);
+  useEffect(() => {
+    p.onPlaybackChange?.(speechPlaying);
+  }, [speechPlaying, p.onPlaybackChange]);
+  useEffect(() => () => p.onPlaybackChange?.(false), [p.onPlaybackChange]);
   const [readingPosition, setReadingPosition] =
     useState<ReadingPosition | null>(null);
   const [readerKeyboardOpen, setReaderKeyboardOpen] = useState(false);
@@ -80,13 +85,8 @@ export default function BookWorkspace(p: Props) {
     end: number;
   } | null>(null);
   const annotations = useMemo(
-    () =>
-      showRaw
-        ? []
-        : speechPlaying || p.externalPlayback
-          ? p.annotations?.filter((item) => item.type !== "spelling")
-          : p.annotations,
-    [showRaw, speechPlaying, p.externalPlayback, p.annotations],
+    () => (showRaw ? [] : p.annotations),
+    [showRaw, p.annotations],
   );
   useEffect(() => {
     if (
@@ -209,6 +209,7 @@ export default function BookWorkspace(p: Props) {
             {chapters.map((item, index) => (
               <div
                 key={item.id}
+                data-context-actions="button"
                 className={`chapter-entry ${item.id === chapter.id ? "selected" : ""}`}
               >
                 <button
@@ -384,6 +385,7 @@ export default function BookWorkspace(p: Props) {
               onSelection={p.onSelection}
               onFocus={p.onFocus}
               annotations={annotations}
+              suppressChecks={speechPlaying || p.externalPlayback}
               readingRange={showRaw ? null : readingRange}
               persistentCaret
               pageLayout={layout}

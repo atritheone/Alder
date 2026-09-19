@@ -93,7 +93,11 @@ export default function RulesManager({
         </button>
       </div>
       {rules.map((rule) => (
-        <div className="rule-row" key={rule.id}>
+        <div
+          data-context-actions="button, input[type=checkbox]"
+          className="rule-row"
+          key={rule.id}
+        >
           <input
             aria-label={`Enable ${rule.name}`}
             type="checkbox"

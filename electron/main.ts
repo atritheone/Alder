@@ -332,6 +332,31 @@ function registerIPC() {
     Menu.setApplicationMenu(Menu.buildFromTemplate(platformMenu(template)));
     window?.setMenuBarVisibility(true);
   });
+  ipcMain.handle("alder:edit-command", (event, command: string) => {
+    trusted(event);
+    switch (command) {
+      case "undo":
+        event.sender.undo();
+        break;
+      case "redo":
+        event.sender.redo();
+        break;
+      case "cut":
+        event.sender.cut();
+        break;
+      case "copy":
+        event.sender.copy();
+        break;
+      case "paste":
+        event.sender.paste();
+        break;
+      case "selectAll":
+        event.sender.selectAll();
+        break;
+      default:
+        throw new Error("Unsupported editing command.");
+    }
+  });
   ipcMain.handle("alder:clipboard-text", async (e) => {
     trusted(e);
     const text = await clipboard.readText();

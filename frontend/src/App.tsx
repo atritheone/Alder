@@ -1,3 +1,4 @@
+import DocumentReader from "./DocumentReader";
 import { useSpeechTransport } from "./useSpeechTransport";
 import { useSpeechJob } from "./useSpeechJob";
 import ResizeHandle from "./ResizeHandle";
@@ -272,6 +273,12 @@ export default function App() {
     [structure, setStructure] = useState(false),
     [loop, setLoop] = useState(false),
     [playing, setPlaying] = useState(false),
+    [documentPlaying, setDocumentPlaying] = useState(false),
+    [sandboxPlaying, setSandboxPlaying] = useState(false),
+    [sandboxRange, setSandboxRange] = useState<{
+      start: number;
+      end: number;
+    } | null>(null),
     [time, setTime] = useState(0),
     [audioDuration, setAudioDuration] = useState(0),
     [activeJob, setActiveJob] = useState<Job | null>(null),
@@ -306,9 +313,15 @@ export default function App() {
     [browserWidth, setBrowserWidth] = useState(() =>
       savedNumber("alder.browserWidth", 342, 240, 800),
     ),
-    [detailHeight, setDetailHeight] = useState(() =>
-      savedNumber("alder.bookSandboxHeight", 230, 180, 700),
-    );
+    [detailHeight, setDetailHeight] = useState(() => {
+      // Older builds wrote detailHeight but read bookSandboxHeight. Recover
+      // the last resized height; their automatically saved 230px default
+      // should use the new default instead.
+      const legacy = savedNumber("alder.detailHeight", 230, 180, 700);
+      return legacy !== 230
+        ? legacy
+        : savedNumber("alder.bookSandboxHeight", 287.5, 180, 700);
+    });
   const [workbenchWidth, setWorkbenchWidth] = useState(() =>
     savedNumber("alder.workbenchWidth", 254, 160, 600),
   );
@@ -582,9 +595,10 @@ export default function App() {
       uiScale,
       highContrast: contrast,
       browserWidth,
-      detailHeight,
+      bookSandboxHeight: detailHeight,
     }))
       localStorage.setItem(`alder.${key}`, String(value));
+    localStorage.removeItem("alder.detailHeight");
     document.documentElement.style.setProperty("--ui-scale", uiScale);
   }, [
     view,
@@ -1061,8 +1075,8 @@ export default function App() {
       rect = el.getBoundingClientRect();
     const initial =
       kind === "browser"
-        ? parseInt(getComputedStyle(el).getPropertyValue("--browser-width"))
-        : parseInt(getComputedStyle(el).getPropertyValue("--detail-height"));
+        ? parseFloat(getComputedStyle(el).getPropertyValue("--browser-width"))
+        : parseFloat(getComputedStyle(el).getPropertyValue("--detail-height"));
     const move = (e: MouseEvent) => {
       const val =
         kind === "browser"
@@ -1071,7 +1085,7 @@ export default function App() {
               Math.max(240, initial + (e.clientX - startX) / scale),
             )
           : Math.min(
-              rect.height * 0.65,
+              Math.min(700, (rect.height * 0.65) / scale),
               Math.max(180, initial + (startY - e.clientY) / scale),
             );
       el.style.setProperty(
@@ -1086,6 +1100,10 @@ export default function App() {
         ),
       );
       if (Number.isFinite(value)) {
+        localStorage.setItem(
+          kind === "browser" ? "alder.browserWidth" : "alder.bookSandboxHeight",
+          String(value),
+        );
         if (kind === "browser") setBrowserWidth(value);
         else setDetailHeight(value);
       }
@@ -1211,6 +1229,8 @@ export default function App() {
           </div>
           {projectList.map((p) => (
             <button
+              data-context-actions="self"
+              data-context-label="Open"
               className="project-list-item"
               key={p.id}
               onClick={() =>
@@ -1591,7 +1611,8 @@ export default function App() {
           <BookWorkspace
             showStructure={structure}
             onToggleStructure={() => setStructure((v) => !v)}
-            externalPlayback={playing || voiceTestPlaying}
+            externalPlayback={playing || voiceTestPlaying || sandboxPlaying}
+            onPlaybackChange={setDocumentPlaying}
             key={project.id}
             project={project}
             change={change}
@@ -1852,13 +1873,6 @@ export default function App() {
                       <small>estimated reading</small>
                     </div>
                     <button
-                      className="wide amber"
-                      onClick={() => void run(() => startSpeech(clip.id))}
-                    >
-                      <Play size={12} />
-                      Read draft
-                    </button>
-                    <button
                       className="wide subtle"
                       onClick={() =>
                         setForm({
@@ -1883,6 +1897,47 @@ export default function App() {
                   </aside>
                   <Editor
                     ref={editor}
+                    caseScope="document"
+                    readingRange={sandboxRange}
+                    onToggleSpeech={() =>
+                      window.dispatchEvent(
+                        new CustomEvent("alder-reading-command", {
+                          detail: "sandbox-toggle",
+                        }),
+                      )
+                    }
+                    toolbarContent={
+                      <DocumentReader
+                        sandbox
+                        project={project}
+                        chapter={{
+                          id: `${clip.id}:${clip.activeVariantId || "original"}`,
+                          title: clip.title,
+                          text: content.text,
+                          voiceId: clip.voiceId || track?.voiceId || null,
+                        }}
+                        editorRef={editor}
+                        flush={flush}
+                        change={change}
+                        onChapter={() => {}}
+                        onPlaybackChange={setSandboxPlaying}
+                        onHighlight={setSandboxRange}
+                        onVoiceChange={(id) =>
+                          change((project) => {
+                            const draft = project.clips.find(
+                              (item) => item.id === clip.id,
+                            );
+                            if (draft) draft.voiceId = id;
+                          })
+                        }
+                      />
+                    }
+                    suppressChecks={
+                      playing ||
+                      voiceTestPlaying ||
+                      documentPlaying ||
+                      sandboxPlaying
+                    }
                     onFocus={() => setWritingFocus(false)}
                     document={content.document}
                     identity={`${clip.id}:${clip.activeVariantId || "original"}`}
@@ -2208,6 +2263,7 @@ export default function App() {
                       "device-card " + (!device.enabled ? "bypassed" : "")
                     }
                     key={device.id}
+                    data-context-actions="header button, footer button"
                     data-help={
                       deviceCatalog.find((d) => d.id === device.type)
                         ?.description
@@ -2457,6 +2513,7 @@ export default function App() {
                       className={
                         "job " + (activeJob?.id === job.id ? "selected" : "")
                       }
+                      data-context-actions=".job-actions button"
                       key={job.id}
                     >
                       <div>
@@ -3026,7 +3083,11 @@ export default function App() {
                     stay with this project.
                   </p>
                   {project.dictionary.map((entry, i) => (
-                    <div className="dictionary-row" key={entry.word + i}>
+                    <div
+                      data-context-actions="button"
+                      className="dictionary-row"
+                      key={entry.word + i}
+                    >
                       <strong>{entry.word}</strong>
                       <span>
                         {entry.definition}

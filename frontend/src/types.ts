@@ -315,6 +315,7 @@ export type Job = {
   format?: string;
   seconds?: number;
   verify?: boolean;
+  strictVerification?: boolean;
   verificationRetries?: number;
   verificationSummary?: {
     matched: number;
@@ -336,6 +337,9 @@ declare global {
     alder?: {
       setNativeMenu: (
         menus: { label: string; items: NativeMenuEntry[] }[] | null,
+      ) => Promise<void>;
+      editCommand?: (
+        command: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll",
       ) => Promise<void>;
       readClipboard?: () => Promise<string>;
       request: (method: string, path: string, body?: unknown) => Promise<any>;

@@ -5,7 +5,7 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
+import { openContextMenu } from "./ContextMenu";
 import type { PageLayout } from "./pageFlow";
 import type { ArrangementUnit } from "./arrangementUnits";
 import { useUnitDragging } from "./useUnitDragging";
@@ -46,11 +46,6 @@ export default function PageArrangement({
   const [drag, setDrag] = useState<Drag | null>(null);
   const units = useUnitDragging(onMoveUnit, snapshots);
   const rendered = snapshots;
-  const [menu, setMenu] = useState<{
-    page: number;
-    x: number;
-    y: number;
-  } | null>(null);
   const [selection, setSelection] = useState<{
     pages: number[];
     anchor: number;
@@ -121,19 +116,10 @@ export default function PageArrangement({
     }
   }, [group, zoom]);
   useEffect(() => {
-    const dismiss = (event: PointerEvent) => {
-      if (!(event.target as Element).closest(".arrangement-context-menu"))
-        setMenu(null);
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, []);
-  useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (units.active) return;
-      if (menu) setMenu(null);
-      else if (selection) setSelection(null);
+      if (selection) setSelection(null);
       else if (group && !focusedPage) closeGroup();
     };
     window.addEventListener("keydown", escape);
@@ -402,11 +388,37 @@ export default function PageArrangement({
                   event.preventDefault();
                   stop();
                   units.cancel();
-                  setMenu({
-                    page: i,
-                    x: Math.min(event.clientX, window.innerWidth - 180),
-                    y: Math.min(event.clientY, window.innerHeight - 50),
-                  });
+                  openContextMenu(
+                    event,
+                    [
+                      {
+                        label: "Arrange with...",
+                        run: () => {
+                          if (group) closeGroup();
+                          setSelection({ pages: [i], anchor: i });
+                        },
+                      },
+                      {
+                        label: "Focus page",
+                        run: () => {
+                          const area = areaRef.current!;
+                          setFocusedPage({
+                            index: i,
+                            html: snapshot,
+                            scrollTop: area.scrollTop,
+                            scrollLeft: area.scrollLeft,
+                          });
+                        },
+                      },
+                      ...(group
+                        ? [{ label: "Back to Arrangement", run: closeGroup }]
+                        : []),
+                    ],
+                    {
+                      label: `Page ${i + 1} actions`,
+                      className: "arrangement-context-menu",
+                    },
+                  );
                 }}
                 onClick={(event) => {
                   if (
@@ -518,30 +530,9 @@ export default function PageArrangement({
       )}
       {group && !selection && (
         <button className="arrange-back" onClick={closeGroup}>
-          Back to arrangement
+          Back to Arrangement
         </button>
       )}
-      {menu &&
-        createPortal(
-          <div
-            className="arrangement-context-menu"
-            role="menu"
-            style={{ left: menu.x, top: menu.y }}
-          >
-            <button
-              role="menuitem"
-              onClick={() => {
-                const page = menu.page;
-                if (group) closeGroup();
-                setSelection({ pages: [page], anchor: page });
-                setMenu(null);
-              }}
-            >
-              Arrange with...
-            </button>
-          </div>,
-          document.body,
-        )}
       {focusedPage && (
         <div
           ref={focusRef}

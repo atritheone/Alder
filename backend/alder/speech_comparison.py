@@ -98,3 +98,23 @@ def canonical_tokens(value):
             result.extend(COMPOUNDS.get(token, [SPELLINGS.get(token, token)]))
     # Optional conjunction in spoken cardinal integers only.
     return [t for i,t in enumerate(result) if not (t == 'and' and i and result[i-1] in {'hundred', 'thousand'} and i+1 < len(result) and result[i+1] in SMALL + TENS + list(ORDINAL_ENDINGS.values()))]
+
+
+def recognition_hint(check):
+    """One spelling hint after an independent, otherwise exact recognition.
+
+    Short words, numbers, missing/extra words and widespread disagreement must
+    still fail. A hinted pass must independently match the entire audio text.
+    """
+    from difflib import SequenceMatcher
+    if check.get("matched") or check.get("expectedWords", 0) < 6 or check.get("expectedWords") != check.get("heardWords"):
+        return None
+    differences = check.get("differences", [])
+    if len(differences) != 1 or differences[0].get("type") != "replace":
+        return None
+    expected, heard = differences[0].get("expected", ""), differences[0].get("heard", "")
+    if not expected.isalpha() or not heard.isalpha() or not 7 <= len(expected) <= 100 or len(heard) < 5 or abs(len(expected) - len(heard)) > 1:
+        return None
+    if SequenceMatcher(None, expected.casefold(), heard.casefold()).ratio() < .75:
+        return None
+    return expected

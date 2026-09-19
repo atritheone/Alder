@@ -13,6 +13,7 @@
 
 <p align="center">
   <a href="https://atritheone.com/alder">Website</a> ·
+  <a href="#update-to-alder-011">Update to 0.11</a> ·
   <a href="#install-alder">Install</a> ·
   <a href="#start-writing">Start writing</a> ·
   <a href="#listen-to-your-writing">Listen</a> ·
@@ -23,6 +24,23 @@
 Alder is an **Organic Language Engine (OLE)**, an application software used for processing, editing, and creating language. OLEs like Alder use a sandbox that works from the word level to manipulate language as well as a collation interface to manage and output written files.
 
 Alder is named after **Dr. Alder Wright**.
+
+## Update to Alder 0.11
+
+This repository contains **Alder 0.11**. If you already have Alder, open this
+repository in your coding agent and give it this request:
+
+> Update Alder for me. Follow AGENTS.md and docs/setup/updating.md, preserve my
+> projects and settings, and tell me when the update has passed verification.
+
+Your agent checks the installed version, preserves your existing locations,
+backs up your data, runs the update, and verifies the result. You do not need to
+edit files or run terminal commands yourself. Existing verified resources are
+reused, and a compatible previous version is retained for rollback.
+
+The [agent update runbook](docs/setup/updating.md) covers custom locations,
+recovery, and older installer or portable copies. You do not need to uninstall
+Alder first. If this is your first installation, continue below.
 
 ## Install Alder
 
@@ -179,9 +197,11 @@ GPU support; Mac acceleration has not yet been validated.
 
 ## Updates and help
 
-Close Alder before maintenance. To update, obtain the new repository version and
-ask your agent to run setup's `update` command. Setup does not fetch or alter your
-repository for you. Keep a backup of your projects before updating.
+For version 0.11, follow the [update guide](docs/setup/updating.md) or give your
+agent the request above. Obtain the new repository version before updating; setup
+does not fetch or alter your repository for you. Close Alder before maintenance
+and keep backups of your projects. The update scripts include verification, so a
+passed update does not need an immediate second verification run.
 
 You can also run these commands yourself, replacing `verify` with the command
 you need:
@@ -200,7 +220,7 @@ bash ./setup.sh verify
 | --- | --- |
 | `verify` | Check the installed application and its writing, publishing, and speech features. |
 | `repair` | Restore damaged application or setup files. |
-| `update` | Install the repository version you have obtained. |
+| `update` | Update an existing managed installation; use update.ps1 or update.sh. |
 | `rollback` | Return to the previous verified version when its data format is compatible. |
 | `uninstall` | Remove the managed application while preserving your projects and settings. |
 | `clean-cache` | Preview downloaded files that can be cleared; add `--yes` to clear them. |

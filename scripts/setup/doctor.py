@@ -42,6 +42,11 @@ def validate_metadata(source):
     for name in ('name','version','description','homepage','author','license'):
         if not package.get(name): raise SetupError('ALDER_METADATA', f'Missing package.json {name}; maintainer fix required.')
     if not re.match(r'https://\S+$', package['homepage']): raise SetupError('ALDER_METADATA','Invalid project homepage.')
+    if not re.fullmatch(r'\d+\.\d+\.\d+',package['version']):
+        raise SetupError('ALDER_METADATA','Alder releases require a major.minor.patch version.')
+    lock=read_json(source/'package-lock.json')
+    if lock.get('version')!=package['version'] or lock.get('packages',{}).get('',{}).get('version')!=package['version']:
+        raise SetupError('ALDER_METADATA','package.json and package-lock.json release versions disagree; obtain a corrected repository.')
     build=package['build']
     for platform_name, label in [('win32','Windows'),('linux','Linux'),('darwin','Mac')]:
         if package.get('alderSetup',{}).get('descriptions',{}).get(platform_name) != 'Alder Organic Language Engine for '+label:
@@ -56,7 +61,7 @@ def validate_metadata(source):
         raise SetupError('ALDER_METADATA','Local Mac installation must use ad-hoc signing without notarisation.')
     pairs=[(x['from'],x['to']) for x in build['extraResources']]
     if len(set(pairs)) != len(pairs): raise SetupError('ALDER_METADATA','Duplicated resource configuration.')
-    for file in ('build/alder.ico','build/alder.icns','build/icons/16x16.png','build/icons/256x256.png','build/icons/512x512.png','LICENCE.md','chatterbox/LICENSE','scripts/setup/cli.py','setup.sh','setup.ps1'):
+    for file in ('build/alder.ico','build/alder.icns','build/icons/16x16.png','build/icons/256x256.png','build/icons/512x512.png','LICENCE.md','chatterbox/LICENSE','scripts/setup/cli.py','setup.sh','setup.ps1','update.sh','update.ps1'):
         if not (source/file).is_file(): raise SetupError('ALDER_METADATA',f'Missing committed asset: {file}')
     with (source/'build/alder.icns').open('rb') as f:
         magic,size=struct.unpack('>4sI',f.read(8))

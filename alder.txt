@@ -2,20 +2,6 @@
 
 ## todo
 
-expand arrange to allow easily moving and inserting paragraphs etc.
-
 make write show detailed backend by default.
 
-fix chatterbox custom voice tts.
-
-	make it such that tts never has to stop and catch up.
-	
-	fix errors in poppy reading.
-
-make tts highlight exact, then turn it into smooth flowing animation.
-
-optimise graphics during tts playback.
-
-investigate spellcheck underlines and add toggle.
-
-add right click context menus throughout.
+add spelling and grammar correction.

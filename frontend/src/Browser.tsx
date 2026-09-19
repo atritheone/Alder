@@ -1,3 +1,4 @@
+import { openContextMenu } from "./ContextMenu";
 import { type ReactNode, useMemo, useState } from "react";
 import {
   Search,
@@ -328,7 +329,28 @@ export default function Browser({
               <>
                 {["Words", "Favourites"].includes(category) ? (
                   visible.map((idea) => (
-                    <div className="library-word-row" key={idea.id}>
+                    <div
+                      className="library-word-row"
+                      key={idea.id}
+                      onContextMenu={(event) =>
+                        openContextMenu(event, [
+                          { label: "Insert", run: () => onInsert(idea) },
+                          {
+                            label: "Definition",
+                            run: () => {
+                              setSelected(idea);
+                              onHint(idea.definition);
+                            },
+                          },
+                          {
+                            label: favourites.includes(idea.id)
+                              ? "Remove from favourites"
+                              : "Add to favourites",
+                            run: () => favourite(idea.id),
+                          },
+                        ])
+                      }
+                    >
                       <button
                         className={
                           "library-item " +
@@ -385,6 +407,8 @@ export default function Browser({
                     .map((c) => (
                       <button
                         key={c.id}
+                        data-context-actions="self"
+                        data-context-label="Open draft"
                         className="library-item"
                         draggable
                         onDragStart={(e) =>
@@ -427,6 +451,15 @@ export default function Browser({
                     .map((d) => (
                       <button
                         key={d.id}
+                        onContextMenu={(event) =>
+                          openContextMenu(event, [
+                            { label: "Add tool", run: () => onAddDevice(d.id) },
+                            {
+                              label: "Description",
+                              run: () => onHint(d.description),
+                            },
+                          ])
+                        }
                         className="library-item"
                         draggable
                         onDragStart={(e) =>

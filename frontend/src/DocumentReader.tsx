@@ -1,3 +1,4 @@
+import { readingBufferReady, highlightClock } from "./readingBuffer";
 import {
   useSpeechJob,
   useSpeechDemand,
@@ -37,7 +38,9 @@ import { usePlaybackSettings } from "./usePlaybackSettings";
 
 type Props = {
   project: Project;
-  chapter: Chapter;
+  chapter: Pick<Chapter, "id" | "text" | "title" | "voiceId">;
+  sandbox?: boolean;
+  onVoiceChange?: (id: string) => void;
   editorRef: RefObject<EditorHandle | null>;
   flush: () => Promise<void>;
   change: (fn: (p: Project) => void) => void;
@@ -56,6 +59,7 @@ type Snapshot = {
   }[];
 };
 export default function DocumentReader(p: Props) {
+  const sourceChapters = p.sandbox ? [p.chapter] : p.project.book?.chapters;
   const [voices, setVoices] = useState<Voice[]>([
       { id: "default", name: "Chatterbox Turbo", kind: "builtin" },
     ]),
@@ -82,7 +86,9 @@ export default function DocumentReader(p: Props) {
   const [active, setActive] = useState(false);
   const [job, setJob] = useState<Job | null>(null),
     [error, setError] = useState("");
-  const { speed, setSpeed, volume, setVolume } = usePlaybackSettings("reading");
+  const { speed, setSpeed, volume, setVolume } = usePlaybackSettings(
+    p.sandbox ? "sandbox" : "reading",
+  );
   const volumeSlider = useWheelSlider(volume, setVolume, 0, 4, 0.05);
   const [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);
@@ -102,6 +108,13 @@ export default function DocumentReader(p: Props) {
         0,
       );
   const playable = !!job?.chunks.some((c) => c.playbackEligible);
+  const bufferPrimed = useRef(false);
+  const bufferReady = readingBufferReady(
+    job,
+    chunkIndex,
+    speed,
+    bufferPrimed.current,
+  );
   const audio = useRef<HTMLAudioElement>(null),
     snapshot = useRef<Snapshot | null>(null),
     loaded = useRef("");
@@ -109,6 +122,7 @@ export default function DocumentReader(p: Props) {
   const stopRef = useRef(() => {});
   const transport = useSpeechTransport(audio, () => stopRef.current());
   const playAudio = () => {
+    if (shouldPlay.current) setBuffering(true);
     transport.intent = shouldPlay.current;
     return transport.play().catch((error) => {
       shouldPlay.current = false;
@@ -141,9 +155,12 @@ export default function DocumentReader(p: Props) {
   );
   const position = useRef<ReadingPosition | null>(null);
   useEffect(() => () => p.onPosition?.(null), [p.onPosition]);
+  useEffect(() => () => p.onHighlight(null), [p.onHighlight]);
   useEffect(() => {
-    setVoice(p.chapter.voiceId || "default");
-  }, [p.chapter.id]);
+    const next = p.chapter.voiceId || "default";
+    if (p.sandbox && voice !== next) stopRef.current();
+    setVoice(next);
+  }, [p.chapter.id, p.chapter.voiceId]);
   useEffect(() => {
     const refresh = () =>
       api<{ voices: Voice[] }>("/api/speech/voices")
@@ -166,21 +183,27 @@ export default function DocumentReader(p: Props) {
     job?.id,
     chunkIndex,
     speed,
-    active ? (playing || shouldPlay.current ? "playing" : "paused") : "stopped",
+    active
+      ? shouldPlay.current && !bufferReady
+        ? "buffering"
+        : playing || shouldPlay.current
+          ? "playing"
+          : "paused"
+      : "stopped",
   );
   useEffect(() => {
     const chunk = job?.chunks[chunkIndex];
     const key = job ? `${job.id}:${chunkIndex}` : "";
-    // Start the first accepted section immediately; bounded lookahead and
-    // nextAudio preload prepare later sections while it plays.
+    // Start after a rolling reserve is ready; do not rebuffer at every section.
     if (
       active &&
       !fullAudio.current &&
-      chunk?.playbackEligible &&
-      chunk.audioUrl &&
+      bufferReady &&
+      chunk?.audioUrl &&
       loaded.current !== key &&
       audio.current
     ) {
+      bufferPrimed.current = true;
       loaded.current = key;
       audio.current.src = mediaUrl(chunk.audioUrl);
       audio.current.playbackRate = speed;
@@ -189,7 +212,7 @@ export default function DocumentReader(p: Props) {
           setError("Audio is ready. Press Play to listen."),
         );
     }
-  }, [job, chunkIndex, active]);
+  }, [job, chunkIndex, active, bufferReady]);
   useEffect(() => {
     if (audio.current) {
       audio.current.playbackRate = speed;
@@ -206,7 +229,10 @@ export default function DocumentReader(p: Props) {
     const tick = () => {
       if (!audio.current) return;
       const seconds = audio.current.currentTime;
-      const word = spokenWord(chunk?.wordTimings, seconds);
+      const word = spokenWord(
+        chunk?.wordTimings,
+        highlightClock(seconds, speed, true),
+      );
       const cursor = chunk ? readingCursorOffset(chunk, seconds) : 0;
       // Sample the audio clock often, but update React only at a word boundary.
       if (fullAudio.current || word !== lastWord || cursor !== lastCursor) {
@@ -218,7 +244,7 @@ export default function DocumentReader(p: Props) {
     tick();
     const timer = setInterval(tick, 16);
     return () => clearInterval(timer);
-  }, [playing, job, chunkIndex]);
+  }, [playing, job, chunkIndex, speed]);
   useLayoutEffect(() => {
     let next: { start: number; end: number } | null = null;
     let nextPosition: ReadingPosition | null = null;
@@ -236,18 +262,20 @@ export default function DocumentReader(p: Props) {
         const source = [...snapshot.current.chapters]
           .reverse()
           .find((c) => (chunk.sourceStart || 0) >= c.offset);
-        const current = p.project.book?.chapters.find(
-          (c) => c.id === source?.id,
-        );
+        const current = sourceChapters?.find((c) => c.id === source?.id);
         if (
           source &&
           current &&
           current.text === source.text &&
           (current.id === p.chapter.id || playing)
         ) {
-          const relative = fullAudio.current
-            ? time - (chunk.startSeconds || 0)
-            : audio.current?.currentTime || 0;
+          const relative = highlightClock(
+            fullAudio.current
+              ? time - (chunk.startSeconds || 0)
+              : audio.current?.currentTime || 0,
+            speed,
+            playing,
+          );
           const word = spokenWord(chunk.wordTimings, relative);
           nextPosition = readingPosition(chunk, relative, source);
           if (follow && word) {
@@ -276,6 +304,7 @@ export default function DocumentReader(p: Props) {
     }
   }, [
     time,
+    speed,
     job,
     follow,
     active,
@@ -287,14 +316,33 @@ export default function DocumentReader(p: Props) {
   const requestInFlight = useRef(false);
   const playbackRequest = useRef(0);
   const [requesting, setRequesting] = useState(false);
+  const latestJob = useRef(job);
+  latestJob.current = job;
+  useEffect(() => {
+    const element = audio.current;
+    return () => {
+      playbackRequest.current++;
+      shouldPlay.current = false;
+      element?.pause();
+      element?.removeAttribute("src");
+      element?.load();
+      const pending = latestJob.current;
+      if (pending && !["ready", "failed", "cancelled"].includes(pending.status))
+        void api(`/api/speech/jobs/${pending.id}/cancel`, "POST").catch(
+          () => {},
+        );
+    };
+  }, []);
   const lastConfiguration = useRef("");
   const currentConfiguration = (
-    cursor = p.editorRef.current?.getSelectionOffsets().start,
+    cursor = p.sandbox ? 0 : p.editorRef.current?.getSelectionOffsets().start,
   ) =>
     JSON.stringify([
       voice,
       format,
       p.project.settings.speechOptions,
+      p.project.pronunciation,
+      p.project.settings.disabledPronunciationDictionaries,
       p.chapter.id,
       p.chapter.text,
       cursor,
@@ -321,9 +369,10 @@ export default function DocumentReader(p: Props) {
     }
   }, [p.chapter.id, p.chapter.text]);
   const parkCursor = (finished = false) => {
+    if (p.sandbox) return;
     if (!active && !lastConfiguration.current) return;
     const source = snapshot.current?.chapters[0];
-    const current = p.project.book?.chapters.find((c) => c.id === source?.id);
+    const current = sourceChapters?.find((c) => c.id === source?.id);
     if (!job || !source || !current || current.text !== source.text) return;
     let offset = source.base;
     if (finished) offset = source.text.length;
@@ -389,7 +438,8 @@ export default function DocumentReader(p: Props) {
       setActive(false);
       audio.current?.pause();
       p.onHighlight(null);
-      const span = p.editorRef.current?.getSelectionOffsets() || {
+      const span = (!p.sandbox &&
+        p.editorRef.current?.getSelectionOffsets()) || {
         start: 0,
         end: 0,
       };
@@ -416,7 +466,7 @@ export default function DocumentReader(p: Props) {
         "POST",
         {
           scope: "selection",
-          chapterId: p.chapter.id,
+          ...(p.sandbox ? {} : { chapterId: p.chapter.id }),
           text,
           voiceId: voice,
           follow: true,
@@ -441,6 +491,7 @@ export default function DocumentReader(p: Props) {
         transport.pause();
       }
       lastConfiguration.current = requestedConfiguration;
+      bufferPrimed.current = false;
       setJob(next);
       setTime(0);
       setChunkIndex(0);
@@ -466,7 +517,7 @@ export default function DocumentReader(p: Props) {
     setError("");
     // Retained audio resumes before the backend acknowledges new render demand.
     if (
-      job.chunks[chunkIndex]?.playbackEligible &&
+      bufferReady &&
       loaded.current === `${job.id}:${chunkIndex}` &&
       audio.current?.src &&
       !audio.current.ended
@@ -523,15 +574,38 @@ export default function DocumentReader(p: Props) {
       shouldPlay.current &&
       rendering &&
       !playing &&
-      (!job?.chunks[chunkIndex]?.playbackEligible || !loaded.current));
+      (!bufferReady || !loaded.current));
   useLayoutEffect(() => {
     p.onPlaybackChange(playing || (active && shouldPlay.current));
   }, [playing, active, rendering, buffering, shouldPlay.current]);
   useEffect(() => () => p.onPlaybackChange(false), [p.onPlaybackChange]);
   const togglePlayback = () => {
+    if (
+      p.sandbox &&
+      job &&
+      audio.current?.ended &&
+      lastConfiguration.current === currentConfiguration()
+    ) {
+      shouldPlay.current = true;
+      transport.prepare();
+      const first = job.chunks[0];
+      setTime(0);
+      setChunkIndex(0);
+      setActive(true);
+      if (first?.playbackEligible && first.audioUrl) {
+        bufferPrimed.current = true;
+        fullAudio.current = false;
+        loaded.current = `${job.id}:0`;
+        audio.current.src = mediaUrl(first.audioUrl);
+        audio.current.playbackRate = speed;
+        void playAudio().catch((error) => setError(error.message));
+      }
+      return;
+    }
     if (playing || (loading && shouldPlay.current)) {
       shouldPlay.current = false;
       transport.pause();
+      setPlaying(false);
       p.onPlaybackChange(false);
       setActive(true);
       setBuffering(false);
@@ -544,7 +618,11 @@ export default function DocumentReader(p: Props) {
       transport.intent = true;
       setActive(true);
       setBuffering(true);
-      if (audio.current?.src && loaded.current === `${job?.id}:${chunkIndex}`)
+      if (
+        bufferReady &&
+        audio.current?.src &&
+        loaded.current === `${job?.id}:${chunkIndex}`
+      )
         void playAudio().catch((e) => setError(e.message));
     } else if (
       job &&
@@ -567,6 +645,7 @@ export default function DocumentReader(p: Props) {
       shouldPlay.current = true;
       setActive(true);
       if (
+        bufferReady &&
         audio.current &&
         !audio.current.ended &&
         (fullAudio.current || loaded.current === `${job.id}:${chunkIndex}`)
@@ -585,12 +664,20 @@ export default function DocumentReader(p: Props) {
     requestInFlight.current = false;
     setRequesting(false);
     transport.stop();
+    setPlaying(false);
+    p.onPlaybackChange(false);
     setResumeAfterCancel(false);
     setBuffering(false);
     setActive(false);
     shouldPlay.current = false;
     audio.current?.pause();
     if (park && !requesting) parkCursor();
+    if (p.sandbox) {
+      if (audio.current) audio.current.currentTime = 0;
+      setTime(0);
+      setChunkIndex(0);
+      loaded.current = "";
+    }
     setRange(null);
     p.onHighlight(null);
     if (job && !["ready", "failed", "cancelled"].includes(job.status))
@@ -623,7 +710,7 @@ export default function DocumentReader(p: Props) {
     if (
       active &&
       !requesting &&
-      !chunk?.playbackEligible &&
+      !bufferReady &&
       ["needs_review", "failed"].includes(job?.status || "")
     ) {
       shouldPlay.current = false;
@@ -633,7 +720,9 @@ export default function DocumentReader(p: Props) {
       setRange(null);
       p.onHighlight(null);
       setActive(false);
-      setError("Could not read this passage. Press Play to retry.");
+      setError(
+        job?.error || "Could not read this passage. Press Play to retry.",
+      );
     }
   }, [job, chunkIndex, active, requesting]);
   const bookmarks = (p.project.settings.readingBookmarks || []) as {
@@ -644,6 +733,11 @@ export default function DocumentReader(p: Props) {
   }[];
   useEffect(() => {
     const execute = (command: string) => {
+      if (p.sandbox) {
+        if (command === "sandbox-toggle") togglePlayback();
+        if (command === "sandbox-stop" || command === "stop") stop();
+        return;
+      }
       if (command === "reading-stop" || command === "stop") stop();
       if (command === "reading-toggle" || command === "toggle")
         togglePlayback();
@@ -659,10 +753,13 @@ export default function DocumentReader(p: Props) {
     };
   });
   return (
-    <section className="document-reader" aria-label="Document reader">
+    <section
+      className={`document-reader${p.sandbox ? " sandbox-reader" : ""}`}
+      aria-label={p.sandbox ? "Sandbox TTS" : "Document reader"}
+    >
       <div className="reader-controls">
         <select
-          aria-label="Reading voice"
+          aria-label={p.sandbox ? "Sandbox voice" : "Reading voice"}
           onFocus={() => prepareVoice(voice)}
           value={voice}
           onChange={(e) => {
@@ -670,12 +767,14 @@ export default function DocumentReader(p: Props) {
             stop();
             setVoice(id);
             prepareVoice(id);
-            p.change((project) => {
-              const c = project.book!.chapters.find(
-                (c) => c.id === p.chapter.id,
-              );
-              if (c) c.voiceId = id;
-            });
+            if (p.onVoiceChange) p.onVoiceChange(id);
+            else
+              p.change((project) => {
+                const c = project.book!.chapters.find(
+                  (c) => c.id === p.chapter.id,
+                );
+                if (c) c.voiceId = id;
+              });
           }}
         >
           <optgroup label="Chatterbox · local">
@@ -699,15 +798,25 @@ export default function DocumentReader(p: Props) {
         </select>
         <button
           aria-label={
-            loading
-              ? "Loading Reading"
-              : playing
-                ? "Pause Reading"
-                : "Play Reading"
+            p.sandbox
+              ? loading
+                ? "Loading Sandbox"
+                : playing
+                  ? "Pause Sandbox"
+                  : "Play Sandbox"
+              : loading
+                ? "Loading Reading"
+                : playing
+                  ? "Pause Reading"
+                  : "Play Reading"
           }
-          data-help="Read from the text cursor. Pause or Stop moves the cursor to the spoken position; Play continues from there. Move the cursor yourself to choose a new starting point."
+          data-help={
+            p.sandbox
+              ? "Listen to the whole sandbox draft. Edit the text, then press Play or Ctrl/Cmd+Enter to hear the updated wording. Pause resumes the same take; Stop starts again from the beginning."
+              : "Read from the text cursor. Pause or Stop moves the cursor to the spoken position; Play continues from there. Move the cursor yourself to choose a new starting point."
+          }
           aria-busy={loading}
-          disabled={false}
+          disabled={p.sandbox && !p.chapter.text.trim() && !loading && !playing}
           onPointerEnter={() => prepareVoice(voice)}
           onFocus={() => prepareVoice(voice)}
           onMouseDown={(e) => e.preventDefault()}
@@ -725,16 +834,24 @@ export default function DocumentReader(p: Props) {
             <Play size={12} />
           )}
         </button>
-        <button aria-label="Stop reading" onClick={() => stop()}>
+        <button
+          aria-label={p.sandbox ? "Stop Sandbox" : "Stop reading"}
+          onClick={() => stop()}
+        >
           <Square size={12} />
         </button>
         <span className="speed-control">
-          Speed <PlaybackSpeed value={speed} onChange={setSpeed} />
+          Speed{" "}
+          <PlaybackSpeed
+            value={speed}
+            onChange={setSpeed}
+            label={p.sandbox ? "Sandbox speed" : "Reading speed"}
+          />
         </span>
         <label>
           Volume{" "}
           <input
-            aria-label="Reading volume"
+            aria-label={p.sandbox ? "Sandbox volume" : "Reading volume"}
             ref={volumeSlider}
             data-help-label={`Narration volume: ${Math.round(volume * 100)}%. Drag or scroll over the slider to adjust.`}
             type="range"
@@ -745,76 +862,85 @@ export default function DocumentReader(p: Props) {
             onChange={(e) => setVolume(Number(e.target.value))}
           />
         </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={follow}
-            onChange={(e) => setFollow(e.target.checked)}
-          />
-          Follow text
-        </label>
-        <button
-          aria-label="Bookmark reading position"
-          onClick={() => {
-            const offset =
-              range?.start ||
-              p.editorRef.current?.getSelectionOffsets().start ||
-              0;
-            p.change((project) => {
-              project.settings.readingBookmarks = [
-                ...bookmarks,
-                {
-                  chapterId: p.chapter.id,
-                  offset,
-                  context: p.chapter.text.slice(offset, offset + 60),
-                  name: `${p.chapter.title} · ${offset + 1}`,
-                },
-              ];
-            });
-          }}
-        >
-          <BookmarkPlus size={13} />
-        </button>
-        {job?.audioUrl && (
-          <button
-            aria-label="Save reading audio"
-            onClick={() =>
-              void download(
-                job.audioUrl!,
-                `${p.project.name}.${job.format || "wav"}`,
-              )
-            }
-          >
-            <Download size={13} />
-          </button>
-        )}
-        {bookmarks.length > 0 && (
-          <select
-            aria-label="Reading bookmarks"
-            value=""
-            onChange={(e) => {
-              const b = bookmarks[Number(e.target.value)],
-                c = p.project.book!.chapters.find((c) => c.id === b.chapterId);
-              if (!c || c.text.slice(b.offset, b.offset + 60) !== b.context) {
-                setError(
-                  "This bookmark's wording has changed. Create a new bookmark at the desired position.",
-                );
-                return;
-              }
-              p.onChapter(c.id);
-              setTimeout(
-                () => p.editorRef.current?.selectRange(b.offset, b.offset),
-                50,
-              );
-            }}
-          >
-            <option value="">Bookmarks</option>
-            {bookmarks.map((b, i) => (
-              <option key={i} value={i}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+        {!p.sandbox && (
+          <>
+            <label>
+              <input
+                type="checkbox"
+                checked={follow}
+                onChange={(e) => setFollow(e.target.checked)}
+              />
+              Follow text
+            </label>
+            <button
+              aria-label="Bookmark reading position"
+              onClick={() => {
+                const offset =
+                  range?.start ||
+                  p.editorRef.current?.getSelectionOffsets().start ||
+                  0;
+                p.change((project) => {
+                  project.settings.readingBookmarks = [
+                    ...bookmarks,
+                    {
+                      chapterId: p.chapter.id,
+                      offset,
+                      context: p.chapter.text.slice(offset, offset + 60),
+                      name: `${p.chapter.title} · ${offset + 1}`,
+                    },
+                  ];
+                });
+              }}
+            >
+              <BookmarkPlus size={13} />
+            </button>
+            {job?.audioUrl && (
+              <button
+                aria-label="Save reading audio"
+                onClick={() =>
+                  void download(
+                    job.audioUrl!,
+                    `${p.project.name}.${job.format || "wav"}`,
+                  )
+                }
+              >
+                <Download size={13} />
+              </button>
+            )}
+            {bookmarks.length > 0 && (
+              <select
+                aria-label="Reading bookmarks"
+                value=""
+                onChange={(e) => {
+                  const b = bookmarks[Number(e.target.value)],
+                    c = p.project.book!.chapters.find(
+                      (c) => c.id === b.chapterId,
+                    );
+                  if (
+                    !c ||
+                    c.text.slice(b.offset, b.offset + 60) !== b.context
+                  ) {
+                    setError(
+                      "This bookmark's wording has changed. Create a new bookmark at the desired position.",
+                    );
+                    return;
+                  }
+                  p.onChapter(c.id);
+                  setTimeout(
+                    () => p.editorRef.current?.selectRange(b.offset, b.offset),
+                    50,
+                  );
+                }}
+              >
+                <option value="">Bookmarks</option>
+                {bookmarks.map((b, i) => (
+                  <option key={i} value={i}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </>
         )}
       </div>
       {error && <p role="alert">{error}</p>}
@@ -826,9 +952,7 @@ export default function DocumentReader(p: Props) {
       )}
       {snapshot.current &&
         !snapshot.current.chapters.every(
-          (s) =>
-            p.project.book?.chapters.find((c) => c.id === s.id)?.text ===
-            s.text,
+          (s) => sourceChapters?.find((c) => c.id === s.id)?.text === s.text,
         ) && (
           <p>
             The text changed after rendering. Press Play to update the audio and
@@ -854,7 +978,8 @@ export default function DocumentReader(p: Props) {
         onWaiting={() => {
           if (shouldPlay.current && active) setBuffering(true);
         }}
-        onPause={() => {
+        onPause={(event) => {
+          if (!event.currentTarget.paused) return;
           setPlaying(false);
           setBuffering(false);
         }}
@@ -866,10 +991,13 @@ export default function DocumentReader(p: Props) {
           setPlaying(false);
           setError("Audio could not be played. Press Play to retry.");
         }}
-        onEnded={() => {
+        onEnded={(event) => {
+          if (!event.currentTarget.ended) return;
           setPlaying(false);
           p.onHighlight(null);
           if (job && !fullAudio.current && chunkIndex + 1 < job.chunks.length) {
+            if (!job.chunks[chunkIndex + 1]?.playbackEligible)
+              bufferPrimed.current = false;
             if (shouldPlay.current) setBuffering(true);
             const endedIndex = chunkIndex;
             const epoch = playbackRequest.current;

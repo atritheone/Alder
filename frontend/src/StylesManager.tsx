@@ -166,7 +166,11 @@ export default function StylesManager({
       </div>
       <div className="style-list">
         {styles.map((style) => (
-          <div className="style-row" key={style.id}>
+          <div
+            data-context-actions="button"
+            className="style-row"
+            key={style.id}
+          >
             <div>
               <strong>{style.name}</strong>
               <small>

@@ -13,13 +13,14 @@ from common import SetupError, check_space, digest, inventory, operation_lock, i
 from doctor import native_target, validate_metadata, inspect_host
 from downloads import fetch, extract
 from resources import Resources
-from install import activate, default_install, integrations, resource_dir, require_closed, rollback, uninstall, prune_versions
+from install import activate, default_install, restore_activation, resource_dir, require_closed, rollback, uninstall, prune_versions
+from updates import discover_install, update_plan
 from verify import capabilities, desktop
 
 SOURCE = Path(__file__).resolve().parents[2]
 SOURCE_DIRS = ('frontend','electron','backend','scripts','build','resources')
 ROOT_FILES = ('package.json','package-lock.json','tsconfig.json','vite.config.ts','vitest.config.ts',
-              'LICENCE.md','README.md','SETUP.md','AGENTS.md','setup.sh','setup.ps1',
+              'LICENCE.md','README.md','SETUP.md','AGENTS.md','setup.sh','setup.ps1','update.sh','update.ps1',
               'requirements.txt','requirements-core.lock.txt','requirements-speech.txt','requirements-qa.txt')
 
 
@@ -130,12 +131,17 @@ def build(source,state,target,env,node,npm,resources,fingerprint,offline):
 
 
 def execute(args):
-    state=args.state_dir.expanduser().resolve();install=args.install_dir.expanduser().resolve();target=native_target()
+    state=args.state_dir.expanduser().resolve();args.state_dir=state;target=native_target()
+    install=(discover_install(state,args.install_dir) if args.command=='update' else
+             (args.install_dir or default_install()).expanduser().resolve())
     if args.command=='validate':return validate_metadata(SOURCE)
     # No writes or downloads are needed for Python-level doctor.
     info=inspect_host(SOURCE,state,install,target,allow_experimental=args.allow_experimental,
                       need_space=args.command=='doctor')
     if args.command=='doctor':return {'status':'ready',**info}
+    if args.command=='update':
+        plan=update_plan(SOURCE,install,target,source_fingerprint(SOURCE),args.expect_version)
+        if args.check:return {**plan,'stateDirectory':str(state),'warnings':info['warnings'],'checks':'preflight only; application verification has not run'}
     own_state(state)
     with operation_lock(state), installation_lock(install):
         if args.command=='uninstall':return uninstall(install)
@@ -146,6 +152,11 @@ def execute(args):
             if args.yes and cache.exists():remove_owned(cache,state)
             return {'status':'cleaned' if args.yes else 'preview','bytes':size,'path':str(cache),'next':'clean-cache --yes removes only downloaded caches; installed apps and user data are preserved.'}
         fingerprint=source_fingerprint(SOURCE);env=environment(state)
+        if args.command=='update':
+            # Recheck inside the install lock: another updater may have run since preflight.
+            plan=update_plan(SOURCE,install,target,fingerprint,args.expect_version)
+            require_closed(install)
+            print(f'[update] Alder {plan["installedRelease"]} -> {plan["repositoryRelease"]} at {install}',file=sys.stderr,flush=True)
         node,npm=node_runtime(SOURCE,state,target,args.offline)
         env['PATH']=str(node.parent)+os.pathsep+env.get('PATH','')
         active=read_json(install/'active.json') if (install/'active.json').exists() else None
@@ -160,14 +171,15 @@ def execute(args):
             result=desktop(workspace,install/active['directory'],target,node,env,state/'logs')
             capabilities(workspace,resource_dir(install/active['directory'],target),target,env,state/'logs/installed')
             active['verification']=result['status'];write_json(install/'active.json',active)
-            return {'status':result['status'],'installation':str(install),'launcher':active.get('launcher'),'checks':result}
+            return {'status':result['status'],'version':active['version'],'installation':str(install),'launcher':active.get('launcher'),'checks':result}
         if active and active['fingerprint']==fingerprint and args.command!='repair' and verify_inventory(install/active['directory'],read_json(install/active['inventory'])):
             if not (workspace/'node_modules').exists():
                 raise SetupError('ALDER_VERIFY','Verification workspace is missing. Run repair to restore it.')
             result=desktop(workspace,install/active['directory'],target,node,env,state/'logs')
             capabilities(workspace,resource_dir(install/active['directory'],target),target,env,state/'logs/installed')
             active['verification']=result['status'];write_json(install/'active.json',active)
-            return {'status':result['status'],'reused':True,'launcher':active.get('launcher'),'installation':str(install)}
+            if source_fingerprint(SOURCE)!=fingerprint:raise SetupError('ALDER_SOURCE','Repository changed during verification. Retry against a stable revision.')
+            return {'status':result['status'],'version':active['version'],'previousVersion':active['version'],'reused':True,'launcher':active.get('launcher'),'installation':str(install),'sourceUnchanged':True}
         require_closed(install)
         check_space(state,(80 if target=='darwin-x64' else 45)*2**30)
         if args.command=='repair':
@@ -181,20 +193,29 @@ def execute(args):
             {**env,'PYTHONPATH':str(workspace/'backend'),'ALDER_RESOURCES_DIR':str(resources)},state/'logs','backend-tests',timeout=600)
         stage_report=desktop(workspace,app,target,node,env,state/'logs/staged')
         capabilities(workspace,resource_dir(app,target),target,env,state/'logs/staged')
+        if active and stage_report['status']!='passed':
+            return {'status':'pending','version':active['version'],'requestedVersion':read_json(SOURCE/'package.json')['version'],
+                    'installation':str(install),'launcher':active.get('launcher'),'activated':False,
+                    'reason':'Staged desktop verification is incomplete. The existing application remains active. Rerun update from a graphical desktop.'}
+        if source_fingerprint(SOURCE)!=fingerprint:raise SetupError('ALDER_SOURCE','Repository changed during setup. Retry against a stable revision.')
         check_space(install,sum(p.stat().st_size for p in app.rglob('*') if p.is_file())+2*2**30)
         version=read_json(SOURCE/'package.json')['version']
+        retained=read_json(install/'previous.json') if (install/'previous.json').exists() else None
         new=activate(install,app,target,version,fingerprint,SOURCE)
         try:
             result=desktop(workspace,install/new['directory'],target,node,env,state/'logs/installed')
             capabilities(workspace,resource_dir(install/new['directory'],target),target,env,state/'logs/installed')
-        except Exception:
-            if active:
-                integrations(install,active);write_json(install/'active.json',active)
+            if active and result['status']!='passed':
+                restore_activation(install,active,retained)
+                return {'status':'pending','version':active['version'],'requestedVersion':version,'installation':str(install),
+                        'launcher':active.get('launcher'),'activated':False,'reason':'Installed verification is incomplete; the previous application was restored. Rerun update from a graphical desktop.'}
+            if source_fingerprint(SOURCE)!=fingerprint:raise SetupError('ALDER_SOURCE','Repository changed during setup. Retry against a stable revision.')
+            new['verification']=result['status'];write_json(install/'active.json',new)
+        except BaseException:
+            if active:restore_activation(install,active,retained)
             raise
-        new['verification']=result['status'];write_json(install/'active.json',new)
         if result['status']=='passed':prune_versions(install)
-        if source_fingerprint(SOURCE)!=fingerprint:raise SetupError('ALDER_SOURCE','Repository changed during setup. Retry against a stable revision.')
-        return {'status':result['status'],'version':version,'target':target,'installation':str(install),
+        return {'status':result['status'],'version':version,'previousVersion':active['version'] if active else None,'target':target,'installation':str(install),
                 'launcher':new['launcher'],'sourceUnchanged':True,'offlineRuntime':True,
                 'speechDevice':'cpu baseline','humanListeningApproval':False,'warnings':info['warnings']}
 
@@ -203,7 +224,7 @@ def report_failure(args, result):
     # Reporting must not hide the original error when a full/read-only disk is
     # itself the reason setup failed. Always emit the current result to stderr.
     try:
-        if (args.state_dir/'.alder-owned.json').is_file():
+        if not args.check and (args.state_dir/'.alder-owned.json').is_file():
             write_json(args.state_dir/'report.json',result)
     except OSError as error:
         result['reportWarning']=f'Could not save report.json: {error}'
@@ -215,17 +236,23 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['doctor','validate','install','verify','repair','update','rollback','uninstall','clean-cache'],nargs='?',default='doctor')
     parser.add_argument('--state-dir',type=Path,default=state_default())
-    parser.add_argument('--install-dir',type=Path,default=default_install())
+    parser.add_argument('--install-dir',type=Path,help='Existing managed root for update; application destination for install.')
+    parser.add_argument('--check',action='store_true',help='Update only: report installed/repository versions without building or activating.')
+    parser.add_argument('--expect-version',help='Update only: require this release, for example 0.11 (equivalent to package version 0.11.0).')
     parser.add_argument('--offline',action='store_true')
     parser.add_argument('--json',action='store_true')
     parser.add_argument('--noninteractive',action='store_true',help='Setup never prompts for credentials or runs elevated prerequisites.')
     parser.add_argument('--allow-experimental',action='store_true')
     parser.add_argument('--yes',action='store_true',help='Apply the clean-cache preview.')
     args=parser.parse_args(argv)
+    if (args.check or args.expect_version) and args.command!='update':
+        parser.error('--check and --expect-version apply only to update.')
     try:
         result=execute(args)
-        if args.command not in ('doctor','validate'):
+        if args.command not in ('doctor','validate') and not args.check:
             write_json(args.state_dir/'report.json',{'schemaVersion':1,'command':args.command,**result})
+            if args.command in ('install','update','repair','verify') and result.get('installation') and result.get('status')=='passed':
+                write_json(args.state_dir/'installation.json',{'schemaVersion':1,'installation':result['installation'],'version':result.get('version')})
         print(json.dumps(result,indent=2))
         return 2 if result.get('status')=='pending' else 0
     except SetupError as error:
