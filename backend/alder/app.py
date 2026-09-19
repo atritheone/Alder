@@ -24,6 +24,7 @@ from . import __version__, language
 from .models import ValidationError, now, text_document, uid
 from .store import ConflictError, Store
 from .platform_runtime import default_data_dir
+from .proofreading import ProofreadingService
 
 
 ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173", "alder://app"}
@@ -40,6 +41,9 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         speech = SpeechService(store.data_dir, root)
     except (ImportError, RuntimeError, OSError) as exc:
         speech_error = str(exc)
+    proofreading = ProofreadingService(
+        Path(os.environ.get("ALDER_RESOURCES_DIR", root / "resources")), store.data_dir,
+        speech_busy=getattr(speech, "has_active_generation", None))
     shutdown_lock = asyncio.Lock()
     speech_stopped = False
 
@@ -48,6 +52,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         async with shutdown_lock:
             already_stopped = speech_stopped
             if not speech_stopped:
+                await run_in_threadpool(proofreading.shutdown)
                 if speech:
                     try:
                         await run_in_threadpool(speech.shutdown)
@@ -65,8 +70,9 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     app = FastAPI(title="Alder", version=__version__, lifespan=lifespan)
     app.state.store = store
     app.state.speech = speech
+    app.state.proofreading = proofreading
     app.add_middleware(CORSMiddleware, allow_origins=sorted(ALLOWED_ORIGINS), allow_credentials=False,
-                       allow_methods=["GET", "POST", "PUT", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-Request-ID"])
+                       allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-Request-ID"])
 
     @app.middleware("http")
     async def protect_loopback(request: Request, call_next):
@@ -242,6 +248,33 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     @app.get("/api/language/capabilities")
     def language_capabilities():
         return language.capabilities()
+
+    @app.get("/api/proofreading/capabilities")
+    def proofreading_capabilities():
+        return proofreading.capabilities()
+
+    @app.get("/api/proofreading/dictionary")
+    def proofreading_dictionary():
+        return {"words": proofreading.personal_words()}
+
+    @app.put("/api/proofreading/dictionary")
+    async def proofreading_save_dictionary(request: Request):
+        data = await body(request)
+        return {"words": await run_in_threadpool(proofreading.save_personal_words, data.get("words"))}
+
+    @app.post("/api/proofreading/check")
+    async def proofreading_check(request: Request):
+        data = await body(request)
+        project = store.get(data["projectId"]) if data.get("projectId") else None
+        return proofreading.start(data, project)
+
+    @app.get("/api/proofreading/jobs/{job_id}")
+    def proofreading_job(job_id: str):
+        return proofreading.get(job_id)
+
+    @app.delete("/api/proofreading/jobs/{job_id}")
+    def proofreading_cancel(job_id: str):
+        return proofreading.cancel(job_id)
 
     @app.get("/api/publishing/capabilities")
     def publishing_capabilities():
@@ -474,8 +507,11 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         return speech.capabilities() if speech else {"available": False, "message": speech_error}
 
     @app.get("/api/speech/voices")
-    def voices(includeRemoved: bool = False):
-        return {"voices": speech_service().voices(include_removed=includeRemoved)}
+    def voices(includeRemoved: bool = False, refresh: bool = False):
+        service = speech_service()
+        rows = service.voices(include_removed=includeRemoved, refresh=refresh)
+        from .system_voices import status
+        return {"voices": rows, "providers": status()}
 
     @app.put("/api/speech/voices/{voice_id}")
     async def update_voice(voice_id: str, request: Request):

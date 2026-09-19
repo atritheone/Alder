@@ -96,3 +96,7 @@ Automatic approval review blocked removal of the old generated
 `work/desktop-builder-config.json` on the development host, stating only
 "blocked by policy". They are not required by repository setup. No VM disks were
 modified as part of this cleanup.
+
+## System voice provider work (20 September 2026)
+
+The shared speech pipeline now includes macOS AVSpeechSynthesizer and Linux eSpeak NG adapters alongside SAPI. Windows native synthesis/export and Ubuntu/WSL eSpeak synthesis, word timings, multilingual exports and cancellation were exercised. Mac dependencies were hash checked, but native Mac validation is pending because no Mac was available. These feature checks do not establish fresh installed acceptance for 0.11. See [system voices](system-voices.md) for details and limits.

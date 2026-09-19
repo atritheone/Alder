@@ -15,6 +15,8 @@ Start the Python service with `PYTHONPATH` set to the repository's `backend` dir
 
 ## Runtime resources
 
+The proofreading component is provisioned by managed setup using `resources/manifests/proofreading.json` and `resources/locks/proofreading-*.txt`. It has its own Python environment. See [offline proofreading](offline-proofreading.md) before making distribution or quality claims; advanced review is experimental and Mac qualification is pending.
+
 `work/bundle-resources/` contains:
 
 - `python/` — standalone core Python and application dependencies.

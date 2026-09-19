@@ -19,20 +19,24 @@ export const DEFAULT_SPEECH_OPTIONS: SpeechOptionsValue = {
   strictVerification: false,
 };
 type Props = {
+  embedded?: boolean;
   options: SpeechOptionsValue;
   onChange: (options: SpeechOptionsValue) => void;
 };
 
-export default function SpeechOptions({ options, onChange }: Props) {
+export default function SpeechOptions({
+  options,
+  onChange,
+  embedded = false,
+}: Props) {
   const change = (
     key: Exclude<keyof SpeechOptionsValue, "strictVerification">,
     value: number,
   ) => {
     if (Number.isFinite(value)) onChange({ ...options, [key]: value });
   };
-  return (
-    <details className="speech-options">
-      <summary>Speech options</summary>
+  const controls = (
+    <>
       <label>
         Boundary pause · seconds
         <input
@@ -66,8 +70,8 @@ export default function SpeechOptions({ options, onChange }: Props) {
         Strict wording verification
       </label>
       <p>
-        Off: playback continues through wording differences. On:
-        unresolved differences stop reading and require review before export.
+        Off: playback continues through wording differences. On: unresolved
+        differences stop reading and require review before export.
       </p>
       <label>
         Content-check retries
@@ -150,6 +154,14 @@ export default function SpeechOptions({ options, onChange }: Props) {
       <button onClick={() => onChange({ ...DEFAULT_SPEECH_OPTIONS })}>
         Restore speech defaults
       </button>
+    </>
+  );
+  return embedded ? (
+    <div className="speech-options">{controls}</div>
+  ) : (
+    <details className="speech-options">
+      <summary>Speech options</summary>
+      {controls}
     </details>
   );
 }

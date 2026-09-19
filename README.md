@@ -142,6 +142,11 @@ Use the **Sandbox** for alternate wording and independent drafts. Inserting a
 draft into a chapter copies its content; later sandbox experiments do not change
 the book. **Language Tools** offers checks and transformations you can preview.
 
+**Checks** adds local spelling and grammar for Australian, British and US English,
+with an experimental local model for advanced review. It needs the new proofreading
+resource pack. See [offline proofreading](docs/offline-proofreading.md) for controls,
+measured results and platform limitations. Grammarly parity is not yet established.
+
 Choose page size, margins, fonts, and styles to shape your document. Alder includes
 Liberation fonts and also discovers fonts installed on your machine. Available
 fonts can differ between Windows, Linux, and Mac. If a document uses a missing
@@ -180,8 +185,10 @@ formats and import limitations.
 ## Listen to your writing
 
 Alder includes **Chatterbox Turbo** for local narration, with reference voices and
-pronunciation preferences. **Windows SAPI** voices provide an additional option
-on Windows. No hosted speech account is required.
+pronunciation preferences. Optional **system voices** use Windows SAPI, Apple's
+macOS speech API, or installed eSpeak NG on Linux. Voice discovery runs when
+Alder starts. The macOS adapter still needs native acceptance on a Mac;
+see [system voices and validation](docs/system-voices.md). No hosted speech account is required.
 
 Read a selection, chapter, or book, follow the spoken words, pause, seek, and add
 bookmarks. Completed passages can play while later passages are being prepared.

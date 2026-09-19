@@ -16,11 +16,32 @@ export function NewDocument({
   onClose: () => void;
 }) {
   const [kind, setKind] = useState("txt");
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (!form.current || !document.querySelector(".start-screen")) return;
+    const element = form.current;
+    const fit = () => {
+      const rect = element.getBoundingClientRect();
+      const fields = element.querySelector<HTMLElement>(".modal-fields");
+      const overflow = fields
+        ? Math.max(0, fields.scrollHeight - fields.clientHeight)
+        : 0;
+      void window.alder?.setWindowLayout(
+        "start",
+        Math.max(590, rect.width + 160),
+        Math.max(460, rect.height + overflow + 160),
+      );
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [kind]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   return (
     <div className="modal-backdrop form-backdrop">
       <form
+        ref={form}
         className="modal new-document"
         aria-label="New document"
         role="dialog"
@@ -199,7 +220,7 @@ export function NewDocument({
           )}
           <p className="quiet">
             {kind === "book"
-              ? "Chapters flow onto pages as you write. Adjust typography and publication settings in Document setup."
+              ? "Chapters flow onto pages as you write. Adjust typography and publication settings in Edit → Settings."
               : `Write in a blank document and save a ${kind === "txt" ? "plain text (.txt)" : "Word (.docx)"} file.`}
           </p>
           {error && <p role="alert">{error}</p>}

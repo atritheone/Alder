@@ -295,7 +295,7 @@ try {
     async () =>
       (await window.alder.request("GET", "/api/speech/voices")).voices,
   );
-  const systemVoice = voiceRows.find((v) => v.kind === "sapi");
+  const systemVoice = voiceRows.find((v) => v.system || v.kind === "sapi");
   expect(systemVoice).toBeTruthy();
   await voiceLibrary
     .getByRole("button", {

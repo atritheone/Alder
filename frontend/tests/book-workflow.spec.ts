@@ -62,7 +62,7 @@ test("continuous chapter text flows, page moves preserve words, and edits surviv
   await page.screenshot({ path: "work/book-writing.png", fullPage: true });
 });
 
-test("new chapters own prose and SAPI reading follows spoken words", async ({
+test("new chapters own prose and system reading follows spoken words", async ({
   page,
   request,
 }) => {
@@ -90,10 +90,13 @@ test("new chapters own prose and SAPI reading follows spoken words", async ({
   await expect(page.locator(".save-status")).toHaveText("Saved");
   const choices = await page
     .locator(
-      'select[aria-label="Reading voice"] optgroup[label="Windows SAPI"] option',
+      'select[aria-label="Reading voice"] optgroup[label="System voices"] option',
     )
     .evaluateAll((nodes) => nodes.map((n) => (n as HTMLOptionElement).value));
-  test.skip(!choices.length, "No SAPI voice is installed on this host.");
+  test.skip(
+    !choices.length,
+    "No compatible system voice is installed on this host.",
+  );
   await page.getByLabel("Reading voice").selectOption(choices[0]);
   await page
     .locator(".document-reader")
@@ -111,7 +114,7 @@ test("new chapters own prose and SAPI reading follows spoken words", async ({
   const jobs = await (
     await request.get(`http://127.0.0.1:8765/api/projects/${created.id}/speech`)
   ).json();
-  expect(jobs.jobs[0].engine).toBe("sapi");
+  expect(["sapi", "macos", "espeak"]).toContain(jobs.jobs[0].engine);
   expect(jobs.jobs[0].chunks[0].wordTimings.length).toBeGreaterThan(5);
   await page.getByRole("button", { name: "Stop reading", exact: true }).click();
   await page

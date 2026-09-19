@@ -69,6 +69,8 @@ def validate_metadata(source):
             raise SetupError('ALDER_METADATA','Invalid macOS icon.')
     common=read_json(source/'resources/manifests/common.json')
     records=common['artifacts']+common['models']
+    proofreading=read_json(source/'resources/manifests/proofreading.json')
+    records += [proofreading['rules'],proofreading['model'],*proofreading['pythonBindings'].values(),*proofreading['notices']]
     for file in ('python','node','java','calibre','ffmpeg'):
         manifest=read_json(source/f'scripts/{file}-sources.json')
         for value in manifest.values(): records.extend(value if isinstance(value,list) else [value])
@@ -87,7 +89,7 @@ def validate_metadata(source):
         key=target.replace('win32','windows').replace('darwin','macos')
         if boot.get(target) != [py[key]['url'],py[key]['sha256']] or target not in nodes:
             raise SetupError('ALDER_METADATA',f'Bootstrap records disagree for {target}.')
-        for group in ('core','speech','qa'):
+        for group in ('core','speech','qa') + (('proofreading',) if target in proofreading['pythonBindings'] else ()):
             lock=source/f'resources/locks/{group}-{target}.txt'
             if not lock.is_file(): raise SetupError('ALDER_METADATA',f'Missing native lock: {lock.name}')
             lines=[x for x in lock.read_text().splitlines() if x and not x.startswith('#')]
@@ -126,12 +128,29 @@ def inspect_host(source, state, install, target, *, allow_experimental=False, ne
             raise SetupError('ALDER_PREREQUISITE', 'Missing Linux libraries: '+', '.join(missing)+'. See docs/setup/linux.md for distro-specific packages; do not run setup with sudo.')
         if not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
             warnings.append('No graphical session; installation verification will remain pending until verify runs from the desktop.')
+    if sys.platform=='win32':
+        vswhere=Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
+        compiler=None
+        if vswhere.is_file():
+            try:
+                compiler=subprocess.check_output([str(vswhere),'-latest','-products','*',
+                    '-version','[17.0,)','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+                    '-property','installationPath'],text=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW).strip()
+            except (OSError,subprocess.SubprocessError):pass
+        if not compiler:
+            raise SetupError('ALDER_PREREQUISITE','Building the Windows native menus requires Visual Studio Build Tools 2022 or newer with Desktop development with C++ and a Windows SDK. Install those components, then rerun setup. Packaged Alder does not require build tools.')
     if sys.platform=='darwin' and not shutil.which('xcrun'):
         raise SetupError('ALDER_PREREQUISITE','Install Apple Command Line Tools with xcode-select --install, then retry.')
     if need_space:
         check_space(state,(80 if target=='darwin-x64' else 45)*2**30)
         check_space(install,18*2**30)
-    return {**result,'target':target,'stateDirectory':str(state),'installation':str(install),
+    optional_voices = {'provider': 'sapi' if sys.platform == 'win32' else 'macos' if sys.platform == 'darwin' else 'espeak',
+                       'required': False, 'verification': 'Native rendering is checked after assembly.'}
+    if sys.platform == 'linux':
+        optional_voices['libraryFound'] = bool(os.environ.get('ALDER_ESPEAK_LIBRARY') or ctypes.util.find_library('espeak-ng'))
+        if not optional_voices['libraryFound']:
+            optional_voices['reason'] = 'Optional eSpeak NG library/voice data are absent; Chatterbox is independent.'
+    return {**result,'target':target,'stateDirectory':str(state),'installation':str(install), 'systemVoices': optional_voices,
             'memoryGiB':round(memory/2**30,1) if memory else None,
             'speechRuntime':'CPU wheels on Windows/Linux; native Torch on Mac; actual device is verified by inference',
             'warnings':warnings,'estimatedPeakGiB':80 if target=='darwin-x64' else 45,

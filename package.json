@@ -60,7 +60,8 @@
     "prettier": "3.8.3",
     "typescript": "^5.8.0",
     "vite": "^6.3.0",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.0",
+    "node-gyp": "12.4.0"
   },
   "build": {
     "appId": "org.alder.language",
@@ -142,6 +143,9 @@
         "mimeType": "application/x-alder",
         "role": "Editor"
       }
+    ],
+    "asarUnpack": [
+      "dist-electron/*.node"
     ]
   },
   "allowScripts": {

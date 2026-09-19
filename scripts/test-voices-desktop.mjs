@@ -77,8 +77,28 @@ try {
     async () =>
       (await window.alder.request("GET", "/api/speech/voices")).voices,
   );
-  const systemVoice = voiceRows.find((v) => v.kind === "sapi");
+  const systemVoice = voiceRows.find((v) => v.system || v.kind === "sapi");
   expect(systemVoice).toBeTruthy();
+  expect(voiceRows.find((v) => v.id === "default").name).toBe("Default");
+  await expect(
+    voiceLibrary
+      .locator(".voice-card")
+      .filter({
+        has: page.getByRole("button", {
+          name: "Select voice Default",
+          exact: true,
+        }),
+      })
+      .locator("small"),
+  ).toHaveText("AI");
+  await expect(
+    page
+      .getByLabel("Reading voice", { exact: true })
+      .locator('optgroup[label="AI"] option[value="default"]'),
+  ).toHaveText("Default");
+  await expect(
+    voiceLibrary.getByRole("button", { name: "Refresh voices", exact: true }),
+  ).toHaveCount(0);
   await voiceLibrary
     .getByRole("button", {
       name: `Select voice ${systemVoice.name}`,
@@ -126,7 +146,7 @@ try {
   const readingVoiceOption = page
     .getByLabel("Reading voice", { exact: true })
     .locator(`option[value="${systemVoice.id}"]`);
-  await expect(readingVoiceOption).toHaveText("Library Reading Voice");
+  await expect(readingVoiceOption).toContainText("Library Reading Voice");
   await expect(
     voiceLibrary.getByRole("button", { name: "Audition", exact: true }),
   ).toHaveCount(0);
@@ -177,6 +197,16 @@ try {
     }),
   ).toHaveCount(0);
   const addVoice = page.waitForEvent("filechooser");
+  await voiceLibrary.getByText("Hidden voices", { exact: true }).click();
+  await voiceLibrary
+    .getByRole("button", { name: "Restore Library Reading Voice", exact: true })
+    .click();
+  await expect(
+    voiceLibrary.getByRole("button", {
+      name: "Select voice Library Reading Voice",
+      exact: true,
+    }),
+  ).toBeVisible();
   await browser
     .getByRole("button", { name: "Add reference voice", exact: true })
     .click();
@@ -215,8 +245,14 @@ try {
     await expect(page.getByRole("dialog")).toHaveCount(0);
   }
   await expect(library.locator(".voice-card")).toHaveCount(2);
-  const readingActive = library.getByRole("checkbox", { name: "Active dictionary Reading.rex", exact: true });
-  const namesActive = library.getByRole("checkbox", { name: "Active dictionary Names.rex", exact: true });
+  const readingActive = library.getByRole("checkbox", {
+    name: "Active dictionary Reading.rex",
+    exact: true,
+  });
+  const namesActive = library.getByRole("checkbox", {
+    name: "Active dictionary Names.rex",
+    exact: true,
+  });
   await expect(readingActive).toBeChecked();
   await expect(namesActive).toBeChecked();
   await readingActive.uncheck();
@@ -242,11 +278,23 @@ try {
     }),
   });
   await expect(renamed).toContainText("2 Rules");
-  await expect(library.getByRole("checkbox", { name: "Active dictionary Reading Rules", exact: true })).not.toBeChecked();
+  await expect(
+    library.getByRole("checkbox", {
+      name: "Active dictionary Reading Rules",
+      exact: true,
+    }),
+  ).not.toBeChecked();
   await expect(namesActive).toBeChecked();
   await expect(page.locator(".save-status")).toHaveText("Saved");
-  const activeProject = await page.evaluate(async () => window.alder.request("GET", `/api/projects/${localStorage.getItem("alder.project")}`));
-  expect(activeProject.settings.disabledPronunciationDictionaries).toEqual(["Reading Rules"]);
+  const activeProject = await page.evaluate(async () =>
+    window.alder.request(
+      "GET",
+      `/api/projects/${localStorage.getItem("alder.project")}`,
+    ),
+  );
+  expect(activeProject.settings.disabledPronunciationDictionaries).toEqual([
+    "Reading Rules",
+  ]);
 
   await renamed
     .getByRole("button", {
@@ -283,7 +331,12 @@ try {
   await page
     .getByRole("button", { name: "Close Dictionary Editor", exact: true })
     .click();
-  await library.screenshot({ path: path.resolve("work/dictionary-cards.png") });
+  // Restoring a voice can make the combined sidebar taller than the viewport.
+  // Capture the visible page without repeatedly scrolling the nested panel.
+  await page.screenshot({
+    path: path.resolve("work/dictionary-cards.png"),
+    animations: "disabled",
+  });
   await renamed
     .getByRole("button", {
       name: "Remove dictionary Reading Rules",
@@ -306,8 +359,15 @@ try {
   await dictionaryInput.press("Enter");
   await expect(library.locator(".voice-card")).toContainText("0 Rules");
   await expect(page.locator(".save-status")).toHaveText("Saved");
-  const savedProject = await page.evaluate(async () => window.alder.request("GET", `/api/projects/${localStorage.getItem("alder.project")}`));
-  expect(savedProject.settings.pronunciationDictionaries).toContain("Empty Dictionary");
+  const savedProject = await page.evaluate(async () =>
+    window.alder.request(
+      "GET",
+      `/api/projects/${localStorage.getItem("alder.project")}`,
+    ),
+  );
+  expect(savedProject.settings.pronunciationDictionaries).toContain(
+    "Empty Dictionary",
+  );
   expect(savedProject.pronunciation).toHaveLength(0);
   await library
     .getByRole("button", { name: "Add or create dictionary" })

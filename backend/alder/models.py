@@ -267,6 +267,10 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         section.setdefault("role", "chapter")
     if not isinstance(p.setdefault("settings", {}), dict):
         raise ValidationError("Project settings must be an object.")
+    if p["settings"].get("proofreadingDialect", "en-GB") not in ("en-AU", "en-GB", "en-US"):
+        raise ValidationError("Proofreading dialect must be Australian, British or US English.")
+    if not isinstance(p["settings"].get("proofreadingStyle", False), bool):
+        raise ValidationError("Proofreading style advice must be true or false.")
     defaults = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22,
                 "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True}
     for k, v in defaults.items():

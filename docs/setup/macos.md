@@ -21,3 +21,5 @@ route is not a promise of a verified Intel Mac installation. A virtual Mac may
 have no usable Metal GPU; setup validates CPU inference independently.
 
 See the [platform validation status](../cross-platform.md) for what has been tested.
+
+The core Python locks now include the PyObjC bridge for optional Apple system voices. Voice discovery runs at Alder startup. Native Mac speech and installed acceptance remain pending; dependency availability alone is not a tested Mac installation. See [system voices](../system-voices.md).

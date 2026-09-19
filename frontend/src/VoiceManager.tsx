@@ -1,4 +1,5 @@
 import { openContextMenu } from "./ContextMenu";
+import { voiceLanguageLabel } from "./voiceLabels";
 import { useSpeechJob } from "./useSpeechJob";
 import { useSpeechTransport } from "./useSpeechTransport";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -49,7 +50,7 @@ export default function VoiceManager(p: Props) {
   const visible = all.filter((v) => !v.removed);
   useEffect(() => {
     let live = true;
-    api<{ voices: Voice[] }>("/api/speech/voices")
+    api<{ voices: Voice[] }>("/api/speech/voices?includeRemoved=true")
       .then((r) => {
         if (live) setAll(r.voices);
       })
@@ -80,7 +81,9 @@ export default function VoiceManager(p: Props) {
     [],
   );
   const refresh = async (removedId?: string) => {
-    const result = await api<{ voices: Voice[] }>("/api/speech/voices");
+    const result = await api<{ voices: Voice[] }>(
+      "/api/speech/voices?includeRemoved=true",
+    );
     setAll(result.voices);
     p.onChange(
       result.voices.filter((v) => !v.removed),
@@ -104,7 +107,7 @@ export default function VoiceManager(p: Props) {
       );
   };
   const test = async (voice: Voice) => {
-    if (voice.removed) return;
+    if (voice.removed || voice.available === false) return;
     if (testing && testingId === voice.id) {
       stopTest();
       return;
@@ -215,14 +218,18 @@ export default function VoiceManager(p: Props) {
       </header>
       <div className="voice-selector" aria-label="Available Voices">
         {[
-          visible.filter((v) => v.kind !== "sapi"),
-          visible.filter((v) => v.kind === "sapi"),
+          visible.filter((v) => !v.system && v.kind !== "sapi"),
+          visible.filter((v) => v.system || v.kind === "sapi"),
         ]
           .filter((group) => group.length > 0)
           .map((group) => (
             <div
               className="voice-group"
-              key={group[0].kind === "sapi" ? "sapi" : "chatterbox"}
+              key={
+                group[0].system || group[0].kind === "sapi"
+                  ? "system"
+                  : "chatterbox"
+              }
             >
               {group.map((v) => (
                 <div
@@ -244,7 +251,7 @@ export default function VoiceManager(p: Props) {
                             testing && testingId === v.id
                               ? "Stop test"
                               : "Test",
-                          disabled: busy,
+                          disabled: busy || v.available === false,
                           run: () => void test(v),
                         },
                         {
@@ -314,6 +321,20 @@ export default function VoiceManager(p: Props) {
                       </button>
                     )}
                   </div>
+                  {v.system || v.kind === "sapi" ? (
+                    <small>
+                      {v.available === false
+                        ? "Not installed on this computer"
+                        : v.provider === "macos"
+                          ? "macOS"
+                          : v.provider === "espeak"
+                            ? "eSpeak NG"
+                            : "Windows SAPI"}
+                      {v.culture ? ` · ${voiceLanguageLabel(v.culture)}` : ""}
+                    </small>
+                  ) : (
+                    <small>AI</small>
+                  )}
                   <div className="voice-card-actions">
                     <button
                       aria-label={`Rename voice ${v.name}`}
@@ -327,7 +348,7 @@ export default function VoiceManager(p: Props) {
                       aria-label={`${testing && testingId === v.id ? "Stop testing" : "Test voice"} ${v.name}`}
                       data-help="Listen to a short passage with this voice. Click again to stop."
                       aria-busy={testing && testingId === v.id && !playing}
-                      disabled={busy}
+                      disabled={busy || v.available === false}
                       onPointerEnter={() => {
                         void api("/api/speech/prepare", "POST", {
                           voiceId: v.id,
@@ -347,7 +368,7 @@ export default function VoiceManager(p: Props) {
                     </button>
                     <button
                       aria-label={`Remove voice ${v.name}`}
-                      data-help="Remove this voice from Alder. Saved narration and Windows voice installations are kept. At least one voice must remain."
+                      data-help="Hide this voice in Alder. Saved narration and system voice installations are kept. At least one voice must remain."
                       disabled={busy || visible.length <= 1}
                       onClick={() => void update(v, "remove")}
                     >
@@ -359,6 +380,36 @@ export default function VoiceManager(p: Props) {
             </div>
           ))}
       </div>
+      {all.some((v) => v.removed) && (
+        <details>
+          <summary>Hidden voices</summary>
+          {all
+            .filter((v) => v.removed)
+            .map((v) => (
+              <button
+                key={v.id}
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api(
+                      `/api/speech/voices/${encodeURIComponent(v.id)}`,
+                      "PUT",
+                      { removed: false },
+                    );
+                    await refresh();
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Restore {v.name}
+              </button>
+            ))}
+        </details>
+      )}
       {error && <p role="alert">{error}</p>}
       <audio
         ref={audio}

@@ -3,5 +3,3 @@
 ## todo
 
 make write show detailed backend by default.
-
-add spelling and grammar correction.

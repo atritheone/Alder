@@ -404,6 +404,21 @@
 .reader-controls input[type="number"] {
   width: 45px;
 }
+.system-voice-controls {
+  max-width: 240px;
+}
+.system-voice-controls small {
+  display: block;
+  margin: 6px 0;
+  line-height: 1.4;
+}
+.reader-controls .system-voice-controls label {
+  justify-content: space-between;
+  margin: 4px 0;
+}
+.reader-controls .system-voice-controls input[type="range"] {
+  width: 100px;
+}
 .reader-progress {
   display: flex;
   align-items: center;

@@ -96,7 +96,7 @@ try {
   });
   const voices = await page
     .locator(
-      'select[aria-label="Reading voice"] optgroup[label="Windows SAPI"] option',
+      'select[aria-label="Reading voice"] optgroup[label="System voices"] option',
     )
     .evaluateAll((nodes) => nodes.map((n) => n.value));
   if (!voices.length)

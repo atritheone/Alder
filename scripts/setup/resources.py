@@ -166,12 +166,29 @@ class Resources:
             return [java_dest,cal_dest,audio,self.output/'publishing-resource-manifest.json']
         self.component('native-tools',{'java':java,'calibre':calibre,'ffmpeg':ffmpeg},make)
 
+    def proofreading(self):
+        manifest=read_json(self.source/'resources/manifests/proofreading.json')
+        advanced=self.target in manifest['pythonBindings']
+        if advanced:
+            self.runtime('proofreading','proofreading/python')
+        def make():
+            spec=importlib.util.spec_from_file_location('proofreading_resources',self.source/'scripts/prepare-proofreading-resources.py')
+            module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            module.prepare(self.output/'proofreading',self.state/'cache/proofreading',self.offline,not advanced)
+            produced=[self.output/'proofreading/languagetool',self.output/'proofreading/rules-inventory.json',
+                      self.output/'proofreading/proofreading-owner.json',
+                      self.output/'proofreading/manifest.json',self.output/'proofreading/notices']
+            if advanced:produced.append(self.output/'proofreading/models')
+            return produced
+        self.component('proofreading-data',{'manifest':manifest,'advanced':advanced},make)
+
     def prepare(self):
         core=self.runtime('core','python')
         self.common_data()
         speech=self.runtime('speech','speech/python')
         qa=self.runtime('qa','speech/qa/python')
         self.native_tools()
+        self.proofreading()
         dest=self.output/'speech/chatterbox'
         self.fresh(dest)
         shutil.copytree(self.source/'chatterbox/src',dest/'src',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))

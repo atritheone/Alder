@@ -1,3 +1,5 @@
+import { useStoredPreference } from "./useStoredPreference";
+import { proofreadingTransaction, type ProofreadingEdit } from "./proofreadingEdits";
 import {
   changeCase,
   caseInputPlugin,
@@ -441,6 +443,7 @@ export type EditorHandle = {
   insert: (text: string) => void;
   replace: (text: string) => void;
   replaceRange: (start: number, end: number, text: string) => void;
+  applyProofreading: (edits: ProofreadingEdit[], expectedText: string) => void;
   selectRange: (start: number, end: number) => void;
   image: (src: string, assetId: string, alt: string) => void;
   link: (text: string, url: string) => void;
@@ -469,6 +472,7 @@ type Props = {
   onChange: (document: DocNode, text: string) => void;
   onSelection: (word: string, selection: string) => void;
   annotations?: Annotation[];
+  annotationText?: string;
   suppressChecks?: boolean;
   caseScope?: "selection" | "document";
   showStructure: boolean;
@@ -518,9 +522,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     props.caseScope === "document"
       ? "alder.sandboxSpellcheck"
       : "alder.writeSpellcheck";
-  const [spellcheck, setSpellcheck] = useState(
-    () => localStorage.getItem(spellcheckKey) !== "false",
+  const [spellcheckValue, setSpellcheck] = useStoredPreference(
+    spellcheckKey,
+    "true",
   );
+  const spellcheck = spellcheckValue !== "false";
   const visibleAnnotations = useMemo(
     () => (spellcheck && !props.suppressChecks ? props.annotations || [] : []),
     [props.annotations, spellcheck, props.suppressChecks],
@@ -791,6 +797,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         v.dispatch(v.state.tr.insertText(text, span.from, span.to));
         v.focus();
       },
+      applyProofreading(edits, expectedText) {
+        const v = editableView();
+        if (!v) throw new Error("The editor is not available for corrections.");
+        v.dispatch(proofreadingTransaction(v.state, expectedText, edits));
+        v.dispatch(closeHistory(v.state.tr));
+        v.focus();
+      },
       selectRange(start, end) {
         const v = editableView();
         if (!v) return;
@@ -947,6 +960,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           ),
           new Plugin({
             props: {
+              handleClick(_view, _position, event) {
+                const target = (event.target as HTMLElement)?.closest("[data-proofreading-id]");
+                if (!target) return false;
+                window.dispatchEvent(new CustomEvent("alder-proofreading-select", {
+                  detail: target.getAttribute("data-proofreading-id"),
+                }));
+                return false;
+              },
               decorations(state) {
                 if (blocked.current) return DecorationSet.empty;
                 if (
@@ -972,9 +993,22 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                       spans.push(
                         Decoration.inline(from, to, {
                           class: `annotation annotation-${annotation.type}${annotation.type === "spelling" ? "" : " annotation-grammar"}`,
-                          "data-help": `${annotation.type === "spelling" ? "Spelling" : "Grammar"}: ${annotation.message}`,
+                          "data-help": `${annotation.type}: ${annotation.message}`,
+                          "data-proofreading-id": annotation.id,
                         }),
                       );
+                    else if (annotation.alternatives?.length) {
+                      spans.push(Decoration.widget(from, () => {
+                        const marker = document.createElement("span");
+                        marker.className = "annotation-insertion";
+                        marker.textContent = "⌃";
+                        marker.setAttribute("role", "note");
+                        marker.setAttribute("aria-label", annotation.message);
+                        marker.setAttribute("data-help", annotation.message);
+                        marker.setAttribute("data-proofreading-id", annotation.id);
+                        return marker;
+                      }, { key: annotation.id, side: -1 }));
+                    }
                   } catch {
                     /* An outdated annotation must never address arbitrary editor positions. */
                   }
@@ -1228,11 +1262,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     if (v) {
       annotationSource.current =
         !blocked.current && props.annotations
-          ? projectText(v.state.doc).text
+          ? props.annotationText ?? projectText(v.state.doc).text
           : null;
       refreshEditorDecorations(v);
     }
-  }, [visibleAnnotations]);
+  }, [visibleAnnotations, props.annotationText]);
   useLayoutEffect(() => {
     if (view.current) refreshEditorDecorations(view.current);
   }, [props.showStructure]);
@@ -1637,12 +1671,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           aria-pressed={spellcheck}
           className={spellcheck ? "active" : ""}
           data-help="Show or hide spelling and grammar checks. Both are hidden during TTS playback."
-          onClick={() =>
-            setSpellcheck((current) => {
-              localStorage.setItem(spellcheckKey, String(!current));
-              return !current;
-            })
-          }
+          onClick={() => setSpellcheck(String(!spellcheck))}
         >
           <SpellCheck />
         </button>

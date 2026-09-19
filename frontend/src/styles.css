@@ -249,7 +249,7 @@ button.danger {
   align-items: center;
   padding: 0 7px;
   gap: 1px;
-  border-bottom: 1px solid #8b8b8b;
+  border-bottom: 0;
   z-index: 12;
 }
 .menubar > span {
@@ -2455,9 +2455,6 @@ button.danger {
   max-width: 600px;
   text-align: center;
 }
-.high-contrast {
-  filter: contrast(1.2);
-}
 @media (max-width: 1200px) {
   .transport {
     gap: 8px;
@@ -2566,7 +2563,7 @@ button.danger {
   background: #272727;
 }
 .theme-neutral .menubar {
-  background: #cbcbcb;
+  background: #909090;
 }
 .theme-neutral .transport {
   background: #9c9c9c;
@@ -2772,7 +2769,7 @@ button.danger {
   background: #c6c6c6;
 }
 .alder-app .menubar {
-  background: #dedede;
+  background: transparent;
   height: 30px;
 }
 .window-brand {
@@ -3675,3 +3672,6 @@ button.library-add-button:hover {
 .sandbox-reader .reader-controls input[type="number"] {
   width: 4ch;
 }
+
+/* Hide the stationary mouse pointer during prose input, without rerendering editors. */
+html.alder-typing-pointer, html.alder-typing-pointer * { cursor: none !important; }

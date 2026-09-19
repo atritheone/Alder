@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "rulesVersion": "6.6",
+  "rules": {
+    "name": "LanguageTool-6.6.zip",
+    "url": "https://languagetool.org/download/LanguageTool-6.6.zip",
+    "sha256": "53600506b399bb5ffe1e4c8dec794fd378212f14aaf38ccef9b6f89314d11631",
+    "bytes": 251998221,
+    "license": "LGPL-2.1-or-later and component licences",
+    "sourceUrl": "https://github.com/languagetool-org/languagetool/tree/v6.6"
+  },
+  "model": {
+    "name": "Qwen3.5-4B-Q4_K_M.gguf",
+    "file": "models/Qwen3.5-4B-Q4_K_M.gguf",
+    "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf",
+    "revision": "e87f176479d0855a907a41277aca2f8ee7a09523",
+    "sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+    "bytes": 2740937888,
+    "license": "Apache-2.0",
+    "sourceUrl": "https://huggingface.co/Qwen/Qwen3.5-4B",
+    "quality": "experimental; human benchmark not yet passed"
+  },
+  "pythonBindings": {
+    "win32-x64": {
+      "name": "llama_cpp_python-0.3.35-py3-none-win_amd64.whl",
+      "url": "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35/llama_cpp_python-0.3.35-py3-none-win_amd64.whl",
+      "sha256": "31590ea000d5aff6f05f1e428048e72318a83709288159a5bd4dabec530080bb"
+    },
+    "linux-x64": {
+      "name": "llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35/llama_cpp_python-0.3.35-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "d172f3d3c8cdd194c3c47c71cb077ed6e61354a2d0f939ceeac0c8fd29999596"
+    },
+    "darwin-arm64": {
+      "name": "llama_cpp_python-0.3.35-py3-none-macosx_11_0_arm64.whl",
+      "url": "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35/llama_cpp_python-0.3.35-py3-none-macosx_11_0_arm64.whl",
+      "sha256": "f16df6e77c2b9ced0ebe7b50de33a125b4d0463f758edf7b516e2b1296fbbcf5"
+    }
+  },
+  "notices": [
+    {
+      "name": "Qwen3.5-LICENSE.txt",
+      "url": "https://huggingface.co/Qwen/Qwen3.5-4B/resolve/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/LICENSE",
+      "sha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"
+    }
+  ]
+}

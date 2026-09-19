@@ -183,6 +183,9 @@ export type Annotation = {
   rule: string;
   ruleId?: string;
   ruleName?: string;
+  originalText?: string;
+  alternatives?: { label: string; edits: import("./proofreadingEdits").ProofreadingEdit[] }[];
+  engine?: string;
 };
 export type Analysis = {
   annotations: Annotation[];
@@ -256,6 +259,10 @@ export type SpeechReviewRequest = {
   note?: string;
 };
 export type SpeechChunk = {
+  provider?: string;
+  buffering?: "immediate" | "reserve";
+  timingSource?: string;
+  timingEvidence?: "synthesis-events" | "recognition" | "unavailable";
   playbackEligible?: boolean;
   processingSeconds?: number;
   verificationStatus?: string;
@@ -325,7 +332,16 @@ export type Job = {
     comparisonVersion?: number;
   };
 };
-export type Voice = { id: string; name: string; [key: string]: any };
+export type Voice = {
+  id: string;
+  name: string;
+  system?: boolean;
+  provider?: string;
+  available?: boolean;
+  culture?: string;
+  reason?: string;
+  [key: string]: any;
+};
 export type NativeMenuEntry = {
   id: string;
   label: string;
@@ -335,8 +351,10 @@ export type NativeMenuEntry = {
 declare global {
   interface Window {
     alder?: {
+      setWindowLayout: (mode: "start" | "workspace", width?: number, height?: number) => Promise<void>;
       setNativeMenu: (
         menus: { label: string; items: NativeMenuEntry[] }[] | null,
+        background?: string,
       ) => Promise<void>;
       editCommand?: (
         command: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll",

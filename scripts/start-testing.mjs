@@ -201,6 +201,35 @@ async function main() {
     }
     const env = { ...process.env, ALDER_RESOURCES_DIR: resources };
     delete env.ELECTRON_RUN_AS_NODE;
+    // Older core/speech bundles predate proofreading. Keep the new pack in
+    // the owned external workspace so normal start.cmd launches can use it.
+    const bundledProofreading = path.join(resources, "proofreading");
+    const hasProofreading =
+      (await exists(path.join(bundledProofreading, "manifest.json"))) &&
+      (await exists(
+        path.join(bundledProofreading, "languagetool/languagetool-server.jar"),
+      )) &&
+      (await exists(path.join(bundledProofreading, "python/python.exe")));
+    if (!env.ALDER_PROOFREADING_RESOURCES && !hasProofreading) {
+      const proofreadingState = path.join(workspace, "proofreading-state");
+      console.log(
+        "Preparing local spelling and grammar resources (the first run may download the pack).",
+      );
+      await run(
+        path.join(resources, "python/python.exe"),
+        [
+          path.join(source, "scripts/prepare-testing-proofreading.py"),
+          "--state",
+          proofreadingState,
+          ...(process.argv.includes("--offline") ? ["--offline"] : []),
+        ],
+        env,
+      );
+      env.ALDER_PROOFREADING_RESOURCES = path.join(
+        proofreadingState,
+        "resources/win32-x64/proofreading",
+      );
+    }
     const dependencies = createHash("sha256")
       .update(await fs.readFile(path.join(workspace, "package.json")))
       .update(await fs.readFile(path.join(workspace, "package-lock.json")))
@@ -232,6 +261,8 @@ async function main() {
           revision,
           executable,
           resources,
+          proofreadingResources:
+            env.ALDER_PROOFREADING_RESOURCES || bundledProofreading,
           builtAt: new Date().toISOString(),
         },
         null,

@@ -35,3 +35,5 @@ Electron requires a working sandbox and desktop session. Setup will not add
 `--no-sandbox`, change system security settings or run Electron as root. Headless
 assembly can leave verification pending; run `bash setup.sh verify` after logging
 into the graphical desktop.
+
+Optional system voices use the distribution-provided eSpeak NG library and data (Ubuntu: libespeak-ng1 and espeak-ng-data). Chatterbox does not require them. Restart Alder after installing voice packages. Doctor reports whether the optional library is found; installed checks report unavailable rather than passed when no voices exist. See [system voices](../system-voices.md).

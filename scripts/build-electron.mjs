@@ -1,3 +1,4 @@
+import { buildWindowsMenu } from "./build-windows-menu.mjs";
 import { build } from "esbuild";
 await build({
   entryPoints: ["electron/main.ts", "electron/preload.ts"],
@@ -13,3 +14,5 @@ await build({
 
 const { brandDesktop } = await import("./brand-desktop.mjs");
 await brandDesktop();
+
+buildWindowsMenu();

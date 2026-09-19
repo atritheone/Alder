@@ -9,6 +9,16 @@ const job = (voiceId = "default") =>
     ],
   }) as Job;
 describe("reading buffer", () => {
+  it("uses the declared buffering policy for new native providers", () => {
+    for (const id of ["macos-voice", "espeak-voice"]) {
+      const reading = job(id);
+      expect(readingBufferReady(reading, 0)).toBe(false);
+      reading.chunks[0].buffering = "immediate";
+      expect(readingBufferReady(reading, 0)).toBe(true);
+      reading.chunks[0].playbackEligible = false;
+      expect(readingBufferReady(reading, 0)).toBe(false);
+    }
+  });
   it("starts with a rolling reserve while the rest remains queued", () => {
     const reading = job();
     reading.chunks[0].seconds = 12;

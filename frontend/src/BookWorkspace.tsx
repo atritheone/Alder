@@ -40,6 +40,7 @@ type Props = {
   onComplete?: () => void;
   onRead: (chapter: Chapter) => void;
   annotations?: Annotation[];
+  annotationText?: string;
   readingRange?: { start: number; end: number } | null;
   previewActive: boolean;
   onPreview: (open: boolean) => void;
@@ -385,6 +386,7 @@ export default function BookWorkspace(p: Props) {
               onSelection={p.onSelection}
               onFocus={p.onFocus}
               annotations={annotations}
+              annotationText={p.annotationText}
               suppressChecks={speechPlaying || p.externalPlayback}
               readingRange={showRaw ? null : readingRange}
               persistentCaret

@@ -16,7 +16,8 @@ import wave
 from .speech import SpeechService, _hash, _now, _atomic_json, _replace, _wav_info, compare_transcript
 from .speech_metrics import SpeechMetrics
 from .pronunciation import compare_pronounced
-from .sapi import NATIVE_TIMING_VERSION, native_timings
+from .system_voices import TIMING_VERSION as NATIVE_TIMING_VERSION, native_timings
+from . import system_voices
 from .speech_quality import QUALITY_VERSION, inspect_pcm, projected_sections, valid_timings, speech_projection
 from .reading import word_timings, TIMING_VERSION
 from .speech_comparison import VERSION as COMPARISON_VERSION, recognition_hint
@@ -67,7 +68,7 @@ class SpeechPipeline(SpeechService):
         if not isinstance(strict, bool):
             raise ValueError("strictVerification must be true or false.")
         sources = self._sources(project, request)
-        if strict and any(not s["voiceId"].startswith("sapi-") for s in sources) and not self.capabilities()["verification"]["available"]:
+        if strict and any(not system_voices.is_system(s["voiceId"]) for s in sources) and not self.capabilities()["verification"]["available"]:
             raise ValueError("Speech checking is unavailable. Repair Alder's speech resources before reading.")
         result = super().submit(project, {**request, "verify": False, "strictVerification": strict})
         self._metric("submitted", result, sections=len(result["chunks"]), inputHash=_hash(result["text"]))
@@ -207,10 +208,8 @@ class SpeechPipeline(SpeechService):
     def prepare(self, voice_id):
         voice = self._voice(voice_id)
         self._last_work = time.monotonic()
-        if voice_id.startswith("sapi-"):
-            from .sapi import prepare
-            prepare(voice["name"])
-            return {"ready": True, "engine": "sapi"}
+        if system_voices.is_system(voice_id):
+            return system_voices.prepare(voice_id)
         if not self.capabilities()["verification"]["available"]:
             raise ValueError("Speech checking resources are missing.")
         checked_future = self._prepared.submit(self._prepare_checker)
@@ -249,7 +248,7 @@ class SpeechPipeline(SpeechService):
             return True
         recent = job["chunks"][max(0, current - 4):current + 8]
         recovery = max((c.get("processingSeconds", 0) for c in recent), default=0)
-        chatterbox = not job["chunks"][current]["voiceId"].startswith("sapi-")
+        chatterbox = not system_voices.is_system(job["chunks"][current]["voiceId"])
         reserve = min(90, max(45, recovery * 3)) if chatterbox else min(45, max(12, recovery * 1.5))
         budget = (4 if d.get("mode") == "paused" else reserve) * d.get("speed", 1)
         ahead = sum(c.get("seconds", max(.3, len(c["spokenText"].split()) / 2.5)) + job["settings"]["pauseSeconds"] for c in job["chunks"][current:index])
@@ -318,10 +317,10 @@ class SpeechPipeline(SpeechService):
         _replace(temporary, destination)
 
     def _take(self, job, chunk, seed):
-        cache = self.root / "cache" / (_hash({"synthesis": chunk["cacheKey"], "seed": seed, **({"nativeTimings": NATIVE_TIMING_VERSION} if chunk["voiceId"].startswith("sapi-") else {})}) + ".wav")
+        cache = self.root / "cache" / (_hash({"synthesis": chunk["cacheKey"], "seed": seed, **({"nativeTimings": NATIVE_TIMING_VERSION} if system_voices.is_system(chunk["voiceId"]) else {})}) + ".wav")
         try:
             _wav_info(cache)
-            if chunk["voiceId"].startswith("sapi-"):
+            if system_voices.is_system(chunk["voiceId"]):
                 json.loads(cache.with_suffix(".native.json").read_text("utf-8"))["words"]
             if self._cancelled(job):
                 raise InterruptedError("Reading stopped.")
@@ -334,7 +333,7 @@ class SpeechPipeline(SpeechService):
                 raise InterruptedError("Reading stopped.")
             try:
                 _wav_info(cache)
-                if chunk["voiceId"].startswith("sapi-"):
+                if system_voices.is_system(chunk["voiceId"]):
                     json.loads(cache.with_suffix(".native.json").read_text("utf-8"))["words"]
                 cached = True
             except (OSError, ValueError, KeyError, wave.Error, EOFError):
@@ -342,13 +341,13 @@ class SpeechPipeline(SpeechService):
             if not cached:
                 self._last_work = time.monotonic()
                 started = time.monotonic()
-                if chunk["voiceId"].startswith("sapi-"):
-                    from .sapi import render
-                    response = render(chunk["voiceId"], chunk["spokenText"], cache, job["settings"].get("sapiRate", 0), job["settings"].get("sapiVolume", 100), job["settings"].get("sapiPitch", 0))
+                if system_voices.is_system(chunk["voiceId"]):
+                    from .system_voices import render
+                    response = render(chunk["voiceId"], chunk["spokenText"], cache, job["settings"].get("sapiRate", 0), job["settings"].get("sapiVolume", 100), job["settings"].get("sapiPitch", 0), ffmpeg=self.runtime.get("ffmpeg"), cancel=self.root / "jobs" / job["id"] / "cancel.flag", expected_hash=chunk.get("voiceHash"))
                     native = response.get("words", [])
                     seconds = _wav_info(cache)["seconds"]
                     words = native_timings(native, seconds)
-                    _atomic_json(cache.with_suffix(".native.json"), {"words": words})
+                    _atomic_json(cache.with_suffix(".native.json"), {"words": words, "timingSource": response.get("timingSource", "sapi-events")})
                 else:
                     response = self._invoke_worker({"operation": "generate", "text": chunk["spokenText"], "seed": seed,
                         "settings": job["settings"], "voiceHash": chunk["voiceHash"], "output": str(cache),
@@ -371,7 +370,7 @@ class SpeechPipeline(SpeechService):
     def _check_locked(self, job, chunk, cache):
         audio_hash = hashlib.sha256(cache.read_bytes()).hexdigest()
         identity = _hash({"audio": audio_hash, "text": chunk["spokenText"], "pronunciation": chunk.get("pronunciationMap", []), "pronunciationComparison": 1, "spellingRecovery": 1, "strictVerification": job.get("strictVerification", True), "version": QUALITY_VERSION,
-                          "model": self.runtime.get("qaModelRevision"), "secondary": self.runtime.get("qaSecondaryRevision"), "voice": chunk["voiceId"], "comparison": COMPARISON_VERSION, **({"nativeTimings": NATIVE_TIMING_VERSION} if chunk["voiceId"].startswith("sapi-") else {})})
+                          "model": self.runtime.get("qaModelRevision"), "secondary": self.runtime.get("qaSecondaryRevision"), "voice": chunk["voiceId"], "culture": chunk.get("culture", "en"), "comparison": COMPARISON_VERSION, **({"nativeTimings": NATIVE_TIMING_VERSION} if system_voices.is_system(chunk["voiceId"]) else {})})
         path = self.root / "cache" / (identity + ".check.json")
         try:
             check = json.loads(path.read_text("utf-8"))
@@ -384,7 +383,7 @@ class SpeechPipeline(SpeechService):
         except (OSError, ValueError):
             pass
         try:
-            acoustic = inspect_pcm(cache, chunk["spokenText"])
+            acoustic = inspect_pcm(cache, chunk["spokenText"], chunk.get("culture", "en"))
         except (OSError, ValueError, wave.Error, EOFError) as exc:
             return {"status": "needs_review", "matched": False, "audioHash": audio_hash,
                     "error": str(exc)}, False
@@ -394,7 +393,7 @@ class SpeechPipeline(SpeechService):
         def unavailable(message):
             return {"status": "error", "matched": False, "error": message, "audioHash": audio_hash,
                     "acoustic": acoustic, "words": [], "checkedAt": _now()}, False
-        if not chunk["voiceId"].startswith("sapi-") and not self.capabilities()["verification"]["available"]:
+        if not system_voices.is_system(chunk["voiceId"]) and not self.capabilities()["verification"]["available"]:
             if not job.get("strictVerification", True):
                 return unavailable("Speech recognition is unavailable; the audio passed its integrity checks.")
         with self._lock:
@@ -402,11 +401,17 @@ class SpeechPipeline(SpeechService):
             chunk["verificationStatus"] = "checking"
             self._persist(job)
         started = time.monotonic()
-        if chunk["voiceId"].startswith("sapi-"):
-            response = json.loads(cache.with_suffix(".native.json").read_text("utf-8"))
+        native = json.loads(cache.with_suffix(".native.json").read_text("utf-8")) if system_voices.is_system(chunk["voiceId"]) else None
+        if native and native.get("words"):
+            response = native
             transcript = " ".join(w["text"] for w in response["words"])
-            model = "sapi-events"
+            model = response.get("timingSource", "sapi-events")
         else:
+            if native is not None and (not chunk.get("culture", "en").lower().startswith("en") or not self.capabilities()["verification"]["available"]):
+                message = "This voice did not supply word timings; recognition for its language is unavailable. Passage highlighting is available."
+                if job.get("strictVerification", True):
+                    raise RuntimeError(message + " Turn off strict checking or choose a voice with timings.")
+                return unavailable(message)
             response = None
             for attempt in range(2 if job.get("strictVerification", True) else 1):
                 if self._cancelled(job):
@@ -426,7 +431,7 @@ class SpeechPipeline(SpeechService):
             transcript = response["transcript"]
             model = "faster-whisper-base.en"
         check = compare_pronounced(chunk, transcript)
-        if job.get("strictVerification", True) and not check["matched"] and model != "sapi-events" and self.runtime.get("qaSecondaryModel"):
+        if job.get("strictVerification", True) and not check["matched"] and not system_voices.is_system(chunk["voiceId"]) and self.runtime.get("qaSecondaryModel"):
             if self._cancelled(job):
                 raise InterruptedError("Reading stopped.")
             try:
@@ -443,7 +448,7 @@ class SpeechPipeline(SpeechService):
                 check["secondaryError"] = str(exc)
         # A vocabulary hint is limited to one similar long-word substitution.
         # Never supply the sentence or use this to recover omissions/additions.
-        hint = recognition_hint(check) if job.get("strictVerification", True) and model != "sapi-events" else None
+        hint = recognition_hint(check) if job.get("strictVerification", True) and not system_voices.is_system(chunk["voiceId"]) else None
         if hint and self.runtime.get("qaSecondaryModel"):
             try:
                 if self._cancelled(job):
@@ -461,6 +466,8 @@ class SpeechPipeline(SpeechService):
         check.update(audioHash=audio_hash, words=response.get("words", []), acoustic=acoustic,
                      model=model, modelRevision=self.runtime.get("qaSecondaryRevision") if model == "faster-whisper-small.en" else self.runtime.get("qaModelRevision"), checkedAt=_now(),
                      recognitionSeconds=time.monotonic() - started)
+        if native is not None and native.get("words"):
+            check.update(evidence="synthesis-events", modelRevision=chunk.get("voiceHash"), note="Native events describe synthesized source spans, not an independent transcription or listening review.")
         self._metric("checked", job, chunk, seconds=check["recognitionSeconds"], matched=check["matched"])
         # A wording mismatch is reusable; playback depends on the job acceptance policy.
         # Worker errors and incomplete checks never reach this publication point.
@@ -480,6 +487,8 @@ class SpeechPipeline(SpeechService):
             # sequence that an explicit Play retry used to require, automatically.
             leaf = chunk.get("splitDepth") or (len(chunk["spokenText"]) <= 125 and len(chunk["spokenText"].split()) <= 22)
             attempts_allowed = 6 if job.get("interactive") and leaf else 1 + min(1, job.get("verificationRetries", 1))
+            if system_voices.is_system(chunk["voiceId"]):
+                attempts_allowed = 1  # Changing a random seed cannot repair deterministic native speech.
             for index in range(attempts_allowed):
                 if self._cancelled(job):
                     raise InterruptedError("Reading stopped.")
@@ -529,6 +538,7 @@ class SpeechPipeline(SpeechService):
             timings = word_timings(chunk["text"], chunk["spokenText"], check.get("words", []), chunk.get("pronunciationMap", []))
             with self._lock:
                 chunk.update(status="ready", qa=check, qaComplete=True, selectedAttempt=selected["index"], selectedSeed=selected["seed"],
+                             timingSource=check.get("model", "unavailable"), timingEvidence=check.get("evidence", "recognition" if check.get("model", "").startswith("faster-whisper") else "unavailable"),
                              seconds=info["seconds"], sampleRate=info["sampleRate"], processingSeconds=time.monotonic() - started,
                              verificationStatus="accepted" if check["matched"] else "warning" if self._advisory(job, check) else "needs_review",
                              wordTimings=valid_timings(timings, chunk["text"], info["seconds"]), timingVersion=TIMING_VERSION,
@@ -591,6 +601,8 @@ class SpeechPipeline(SpeechService):
             parts.append({**part, "id": chunk["id"] + f"-split-{n}", "cacheKey": key,
                 "sourceStart": chunk["sourceStart"] + part["sourceStart"], "sourceEnd": chunk["sourceStart"] + part["sourceEnd"],
                 "voiceId": chunk["voiceId"], "voiceHash": chunk["voiceHash"], "seed": chunk["seed"],
+                "provider": chunk.get("provider", system_voices.provider_id(chunk["voiceId"])),
+                "culture": chunk.get("culture", "en"), "buffering": chunk.get("buffering", "reserve"),
                 "status": "queued", "verificationStatus": "pending", "splitDepth": 1, "budgetRoot": root})
         at = job["chunks"].index(chunk)
         job["chunks"][at:at+1] = parts
@@ -696,7 +708,7 @@ class SpeechPipeline(SpeechService):
             if self._serial.acquire(blocking=False):
                 try:
                     self._close_worker()
-                    from .sapi import shutdown
+                    from .system_voices import shutdown
                     shutdown()
                 finally:
                     self._serial.release()
@@ -739,5 +751,5 @@ class SpeechPipeline(SpeechService):
         self._pool.shutdown(wait=True, cancel_futures=True)
         self._exports.shutdown(wait=True, cancel_futures=True)
         self._prepared.shutdown(wait=True, cancel_futures=True)
-        from .sapi import shutdown
+        from .system_voices import shutdown
         shutdown()

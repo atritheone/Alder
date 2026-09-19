@@ -108,7 +108,7 @@ def projected_sections(text, entries, voice_id, max_chars=220, max_words=40, lea
     return result
 
 
-def inspect_pcm(path, text):
+def inspect_pcm(path, text, language="en"):
     with wave.open(str(path), "rb") as audio:
         if audio.getsampwidth() != 2 or audio.getnchannels() != 1 or audio.getframerate() != 24000:
             raise ValueError("Expected mono 24 kHz 16-bit speech audio.")
@@ -124,6 +124,10 @@ def inspect_pcm(path, text):
     clipped = sum(abs(v) >= 32760 for v in samples) / len(samples)
     seconds = frames / 24000
     words = max(1, len(text.split()))
+    if language.lower().split("-")[0] in {"zh", "cmn", "yue", "ja", "ko", "th", "lo", "km", "my"}:
+        # These languages do not consistently delimit speech units with spaces.
+        # Use a conservative character bound for integrity, not word alignment.
+        words = max(words, len(re.sub(r"\s", "", text)) / 3)
     reasons = []
     if peak < .0001 or rms < .00001:
         reasons.append("silent audio")

@@ -1,3 +1,4 @@
+import { WindowsMenu } from "./windows-menu";
 import {
   app,
   BrowserWindow,
@@ -11,6 +12,7 @@ import {
   clipboard,
   globalShortcut,
   nativeImage,
+  screen,
 } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
@@ -59,6 +61,59 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
+let windowsMenu: WindowsMenu | null = null;
+let applicationMenu: Menu | null = null;
+let workspaceWindow = false;
+let workspaceBounds: Electron.Rectangle | null = null;
+function sizeWindow(mode: "start" | "workspace", width = 590, height = 460) {
+  if (!window || window.isDestroyed()) return;
+  const workspace = mode === "workspace";
+  if (workspace && workspaceWindow) return;
+  const previous = window.getBounds();
+  if (!workspace && workspaceWindow) {
+    workspaceBounds = window.getNormalBounds();
+    if (window.isMaximized()) window.unmaximize();
+  }
+  workspaceWindow = workspace;
+  window.setMinimumSize(workspace ? 900 : 480, workspace ? 680 : 400);
+  if (window.isMaximized() || window.isFullScreen()) return;
+  const area = screen.getDisplayMatching(previous).workArea;
+  const content = window.getContentBounds();
+  const desired = workspace
+    ? (workspaceBounds ?? { width: 1550, height: 980 })
+    : {
+        width: width + previous.width - content.width,
+        height: height + previous.height - content.height,
+      };
+  const w = Math.min(desired.width, area.width),
+    h = Math.min(desired.height, area.height);
+  window.setBounds({
+    width: w,
+    height: h,
+    x: Math.max(
+      area.x,
+      Math.min(
+        area.x + area.width - w,
+        Math.round(previous.x + (previous.width - w) / 2),
+      ),
+    ),
+    y: Math.max(
+      area.y,
+      Math.min(
+        area.y + area.height - h,
+        Math.round(previous.y + (previous.height - h) / 2),
+      ),
+    ),
+  });
+  if (workspace) window.maximize();
+}
+function installMenu(menu: Menu, background = "#e6e6e6") {
+  applicationMenu = menu;
+  if (process.platform === "win32") {
+    if (windowsMenu) windowsMenu.set(menu, background);
+    else Menu.setApplicationMenu(null);
+  } else Menu.setApplicationMenu(menu);
+}
 let window: BrowserWindow | null = null,
   backend: ChildProcess | null = null,
   base = "",
@@ -245,93 +300,119 @@ async function registerProtocols() {
   });
 }
 function registerIPC() {
+  ipcMain.handle(
+    "alder:window-layout",
+    (event, mode: unknown, width = 590, height = 460) => {
+      trusted(event);
+      if (
+        (mode !== "start" && mode !== "workspace") ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(height)
+      )
+        throw new Error("Invalid window layout");
+      sizeWindow(
+        mode,
+        Math.max(480, Math.min(2000, Math.ceil(width))),
+        Math.max(400, Math.min(1600, Math.ceil(height))),
+      );
+    },
+  );
+
   ipcMain.handle("alder:files-ready", (event) => {
     trusted(event);
     rendererReady = true;
     sendFiles();
   });
-  ipcMain.handle("alder:set-menu", (event, menus: unknown) => {
-    trusted(event);
-    if (menus === null) {
-      setMenu();
-      return;
-    }
-    if (!Array.isArray(menus) || menus.length > 12)
-      throw new Error("Invalid menu");
-    const template: Electron.MenuItemConstructorOptions[] = menus.map(
-      (group) => {
-        if (
-          typeof group.label !== "string" ||
-          group.label.length > 50 ||
-          !Array.isArray(group.items) ||
-          group.items.length > 60
-        )
-          throw new Error("Invalid menu group");
-        const buildItems = (
-          items: unknown[],
-          depth = 0,
-        ): Electron.MenuItemConstructorOptions[] =>
-          items.map((value) => {
-            if (!value || typeof value !== "object" || depth > 3)
-              throw new Error("Invalid menu item");
-            const item = value as {
-              id: string;
-              label: string;
-              checked?: boolean;
-              submenu?: unknown[];
-            };
-            if (
-              typeof item.label !== "string" ||
-              item.label.length > 120 ||
-              typeof item.id !== "string" ||
-              !/^native:[A-Za-z]+:\d+(?::\d+){0,3}$/.test(item.id) ||
-              (item.checked !== undefined && typeof item.checked !== "boolean")
-            )
-              throw new Error("Invalid menu item");
-            if (item.submenu !== undefined) {
-              if (!Array.isArray(item.submenu) || item.submenu.length > 60)
-                throw new Error("Invalid submenu");
+  ipcMain.handle(
+    "alder:set-menu",
+    (event, menus: unknown, background = "#909090") => {
+      if (typeof background !== "string" || !/^#[0-9a-f]{6}$/i.test(background))
+        throw new Error("Invalid menu background");
+      trusted(event);
+      if (menus === null) {
+        setMenu();
+        return;
+      }
+      if (!Array.isArray(menus) || menus.length > 12)
+        throw new Error("Invalid menu");
+      const template: Electron.MenuItemConstructorOptions[] = menus.map(
+        (group) => {
+          if (
+            typeof group.label !== "string" ||
+            group.label.length > 50 ||
+            !Array.isArray(group.items) ||
+            group.items.length > 60
+          )
+            throw new Error("Invalid menu group");
+          const buildItems = (
+            items: unknown[],
+            depth = 0,
+          ): Electron.MenuItemConstructorOptions[] =>
+            items.map((value) => {
+              if (!value || typeof value !== "object" || depth > 3)
+                throw new Error("Invalid menu item");
+              const item = value as {
+                id: string;
+                label: string;
+                checked?: boolean;
+                submenu?: unknown[];
+              };
+              if (
+                typeof item.label !== "string" ||
+                item.label.length > 120 ||
+                typeof item.id !== "string" ||
+                !/^native:[A-Za-z]+:\d+(?::\d+){0,3}$/.test(item.id) ||
+                (item.checked !== undefined &&
+                  typeof item.checked !== "boolean")
+              )
+                throw new Error("Invalid menu item");
+              if (item.submenu !== undefined) {
+                if (!Array.isArray(item.submenu) || item.submenu.length > 60)
+                  throw new Error("Invalid submenu");
+                return {
+                  label: item.label,
+                  submenu: buildItems(item.submenu, depth + 1),
+                };
+              }
+              const accelerator = item.label.startsWith("New Project")
+                ? "CmdOrCtrl+N"
+                : item.label.startsWith("Open Document")
+                  ? "CmdOrCtrl+O"
+                  : item.label.startsWith("Save ")
+                    ? "CmdOrCtrl+S"
+                    : item.label.startsWith("Find And Replace")
+                      ? "CmdOrCtrl+F"
+                      : item.label === "Settings…"
+                        ? "CmdOrCtrl+,"
+                        : undefined;
               return {
                 label: item.label,
-                submenu: buildItems(item.submenu, depth + 1),
+                type: item.checked === undefined ? "normal" : "radio",
+                checked: item.checked,
+                accelerator,
+                click: () => command(item.id),
               };
-            }
-            const accelerator = item.label.startsWith("New Project")
-              ? "CmdOrCtrl+N"
-              : item.label.startsWith("Open Document")
-                ? "CmdOrCtrl+O"
-                : item.label.startsWith("Save ")
-                  ? "CmdOrCtrl+S"
-                  : item.label.startsWith("Find And Replace")
-                    ? "CmdOrCtrl+F"
-                    : undefined;
-            return {
-              label: item.label,
-              type: item.checked === undefined ? "normal" : "radio",
-              checked: item.checked,
-              accelerator,
-              click: () => command(item.id),
-            };
-          });
-        const submenu = buildItems(group.items);
-        if (group.label === "File")
-          submenu.push({ type: "separator" }, { role: "quit" });
-        if (group.label === "Edit")
-          submenu.push(
-            { type: "separator" },
-            { role: "cut" },
-            { role: "copy" },
-            { role: "paste" },
-            { role: "selectAll" },
-          );
-        if (group.label === "View")
-          submenu.push({ type: "separator" }, { role: "togglefullscreen" });
-        return { label: group.label, submenu };
-      },
-    );
-    Menu.setApplicationMenu(Menu.buildFromTemplate(platformMenu(template)));
-    window?.setMenuBarVisibility(true);
-  });
+            });
+          const submenu = buildItems(group.items);
+          if (group.label === "File")
+            submenu.push({ type: "separator" }, { role: "quit" });
+          if (group.label === "Edit")
+            submenu.push(
+              { type: "separator" },
+              { role: "cut" },
+              { role: "copy" },
+              { role: "paste" },
+              { role: "selectAll" },
+            );
+          if (group.label === "View")
+            submenu.push({ type: "separator" }, { role: "togglefullscreen" });
+          return { label: group.label, submenu };
+        },
+      );
+      installMenu(Menu.buildFromTemplate(platformMenu(template)), background);
+      if (process.platform !== "win32") window?.setMenuBarVisibility(true);
+    },
+  );
   ipcMain.handle("alder:edit-command", (event, command: string) => {
     trusted(event);
     switch (command) {
@@ -462,7 +543,7 @@ function registerIPC() {
   });
 }
 function setMenu() {
-  Menu.setApplicationMenu(
+  installMenu(
     Menu.buildFromTemplate(
       platformMenu([
         {
@@ -498,6 +579,12 @@ function setMenu() {
             { role: "copy" },
             { role: "paste" },
             { role: "selectAll" },
+            { type: "separator" },
+            {
+              label: "Settings…",
+              accelerator: "CmdOrCtrl+,",
+              click: () => command("settings"),
+            },
           ],
         },
         {
@@ -525,12 +612,14 @@ async function createWindow() {
     throw new Error(
       "The Alder application icon is missing. Rebuild the application.",
     );
+  workspaceWindow = false;
   window = new BrowserWindow({
     icon: appIcon,
-    width: 1550,
-    height: 980,
-    minWidth: 900,
-    minHeight: 680,
+    width: 590,
+    height: 460,
+    useContentSize: true,
+    minWidth: 480,
+    minHeight: 400,
     backgroundColor: "#e6e6e6",
     title: "Alder",
     show:
@@ -547,6 +636,10 @@ async function createWindow() {
       backgroundThrottling: false,
     },
   });
+  if (process.platform === "win32") {
+    windowsMenu = new WindowsMenu(window);
+    if (applicationMenu) windowsMenu.set(applicationMenu);
+  }
   window.on("close", (event) => {
     if (!closeAllowed) {
       event.preventDefault();
@@ -554,6 +647,7 @@ async function createWindow() {
     }
   });
   window.on("closed", () => {
+    windowsMenu = null;
     window = null;
     rendererReady = false;
   });

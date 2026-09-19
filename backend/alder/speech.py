@@ -22,6 +22,7 @@ import unicodedata
 import uuid
 import wave
 from .platform_runtime import resource_executable
+from . import system_voices
 from datetime import datetime, timezone
 
 
@@ -317,6 +318,9 @@ class SpeechService:
                 self._persist(job)
             except (ValueError, KeyError, OSError):
                 continue  # Retain a damaged manifest on disk for recovery.
+        # OS voice discovery is refreshed once per application startup. Library
+        # renames/hides only re-read preferences; no manual rescan UI is needed.
+        self.voices(refresh=True)
         self._thread = threading.Thread(target=self._run, name="alder-speech-supervisor", daemon=True)
         self._thread.start()
 
@@ -329,11 +333,15 @@ class SpeechService:
         if not self.runtime["modelPresent"]:
             missing.append("Alder's bundled Turbo model is incomplete. Repair or reinstall Alder.")
         verification_available = bool(self.runtime.get("qaPythonPresent") and self.runtime.get("qaModelPresent"))
-        return {"available": not missing, "engine": "chatterbox-turbo", "engines": [{"id": "chatterbox-turbo", "name": "Chatterbox Turbo", "languages": ["en"], "available": not missing}, {"id":"sapi", "name":"Windows SAPI", "available":bool(__import__("alder.sapi", fromlist=["voices"]).voices())}], "reason": " ".join(missing), "formats": ["wav", "mp3", "flac"] if self.runtime["ffmpeg"] else ["wav"], "voiceCloning": True, "referenceMinimumSeconds": 5, "referenceMaximumSeconds": 120, "wordTimestamps": verification_available, "timingMethods": ["sapi-events", "local-recognition"], "streaming": False, "chunkPlayback": True, "controls": ["voiceId", "seed", "temperature", "topP", "topK", "repetitionPenalty", "pauseSeconds", "verify", "verificationRetries"], "unsupportedControls": ["exaggeration", "cfgWeight", "minP", "ssml", "phonemes", "exactWpm"], "modelRevision": self.runtime["modelRevision"], "sourceRevision": self.runtime["sourceRevision"], "runtimeVerified": self._worker_health is not None, "worker": self._worker_health, "verification": {"available": verification_available, "model": "faster-whisper-base.en", "modelRevision": self.runtime.get("qaModelRevision"), "languages": ["en"], "device": "cpu", "maximumRetries": 2, "worker": self._qa_health, "reason": "" if verification_available else "The local speech content-check runtime or base.en model is missing."}}
+        return {"available": not missing or bool(system_voices.voices()), "engine": "chatterbox-turbo", "engines": [{"id": "chatterbox-turbo", "name": "Chatterbox Turbo", "languages": ["en"], "available": not missing}, *system_voices.status()], "reason": " ".join(missing), "formats": ["wav", "mp3", "flac"] if self.runtime["ffmpeg"] else ["wav"], "voiceCloning": True, "referenceMinimumSeconds": 5, "referenceMaximumSeconds": 120, "wordTimestamps": verification_available or bool(system_voices.voices()), "timingMethods": ["sapi-events", "macos-markers", "espeak-events", "local-recognition"], "streaming": False, "chunkPlayback": True, "controls": ["voiceId", "seed", "temperature", "topP", "topK", "repetitionPenalty", "pauseSeconds", "verify", "verificationRetries"], "unsupportedControls": ["exaggeration", "cfgWeight", "minP", "ssml", "phonemes", "exactWpm"], "modelRevision": self.runtime["modelRevision"], "sourceRevision": self.runtime["sourceRevision"], "runtimeVerified": self._worker_health is not None, "worker": self._worker_health, "verification": {"available": verification_available, "model": "faster-whisper-base.en", "modelRevision": self.runtime.get("qaModelRevision"), "languages": ["en"], "device": "cpu", "maximumRetries": 2, "worker": self._qa_health, "reason": "" if verification_available else "The local speech content-check runtime or base.en model is missing."}}
 
-    def voices(self, include_removed=False):
-        from .sapi import voices as windows_voices
-        result = [{"id": "default", "name": "Built-in Turbo voice", "kind": "builtin", "engine": "chatterbox-turbo"}, *windows_voices()]
+    def voices(self, include_removed=False, refresh=False):
+        native = system_voices.voices(refresh=refresh)
+        known = system_voices.references(self.root, native)
+        present = {v["id"] for v in native}
+        absent = [dict(v, name=v.get("name", v["id"]), kind="system", system=True, engine=v["provider"],
+                       available=False, reason="Not installed on this computer") for v in known.values() if v["id"] not in present]
+        result = [{"id": "default", "name": "Default", "kind": "builtin", "engine": "chatterbox-turbo"}, *native, *absent]
         for path in sorted((self.root / "voices").glob("*/voice.json")):
             try:
                 value = json.loads(path.read_text(encoding="utf-8"))
@@ -357,7 +365,7 @@ class SpeechService:
                 raise ValueError("Give the voice a name of 1 to 100 characters.")
             if removed is not None and not isinstance(removed, bool):
                 raise ValueError("The removed setting must be true or false.")
-            if removed and not voice["removed"] and len(self.voices()) <= 1:
+            if removed and not voice["removed"] and voice.get("available") is not False and len([v for v in self.voices() if v.get("available") is not False]) <= 1:
                 raise ValueError("Keep at least one voice available in Alder.")
             path = self.root / "voices" / "library.json"
             preferences = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -465,12 +473,12 @@ class SpeechService:
             raise ValueError("Speech settings must be finite numbers.")
         if not (0.05 <= settings["temperature"] <= 2 and 0 < settings["topP"] <= 1 and 1 <= settings["topK"] <= 6563 and 1 <= settings["repetitionPenalty"] <= 3 and 0 <= settings["pauseSeconds"] <= 5):
             raise ValueError("Speech sampling or pause settings are out of range.")
-        sapi_rate, sapi_volume = request.get("sapiRate", 0), request.get("sapiVolume", 100)
+        sapi_rate, sapi_volume = request.get("rate", request.get("sapiRate", 0)), request.get("volume", request.get("sapiVolume", 100))
         if not isinstance(sapi_rate, int) or not -10 <= sapi_rate <= 10 or not isinstance(sapi_volume, int) or not 0 <= sapi_volume <= 100:
-            raise ValueError("SAPI rate must be -10 to 10 and volume 0 to 100.")
-        sapi_pitch = request.get("sapiPitch", 0)
+            raise ValueError("System voice rate must be -10 to 10 and volume 0 to 100.")
+        sapi_pitch = request.get("pitch", request.get("sapiPitch", 0))
         if not isinstance(sapi_pitch, int) or not -10 <= sapi_pitch <= 10:
-            raise ValueError("SAPI pitch must be -10 to 10 semitones.")
+            raise ValueError("System voice pitch must be -10 to 10 (engine-dependent).")
         settings.update({"sapiRate": sapi_rate, "sapiVolume": sapi_volume, "sapiPitch": sapi_pitch})
         seed = int(request.get("seed", 42))
         if not 0 <= seed <= 2**32 - 1:
@@ -492,17 +500,19 @@ class SpeechService:
         chunks, source_offset, occurrences = [], 0, {}
         for source in sources:
             voice = self._voice(source["voiceId"])
+            if voice.get("available") is False:
+                raise ValueError(f'{voice["name"]} is not installed on this computer. Choose an available replacement voice.')
             from .speech_quality import projected_sections
-            lead_chars = 80 if request.get("interactive") and not chunks and not voice["id"].startswith("sapi-") else None
+            lead_chars = 80 if request.get("interactive") and not chunks and not system_voices.is_system(voice["id"]) else None
             for chunk in projected_sections(source["text"], pronunciation, voice["id"], lead_chars=lead_chars):
                 spoken, mappings = chunk["spokenText"], chunk["pronunciationMap"]
                 content = _hash({"text": spoken, "voice": voice.get("hash", "default"), "segmentVersion": SEGMENT_VERSION})
                 chunk_seed = (seed + int(content[:8], 16)) % 2**32
                 key = _hash({"content": content, "seed": chunk_seed, "settings": {k: v for k, v in settings.items() if k != "pauseSeconds"}, "model": self.runtime["modelRevision"], "source": self.runtime["sourceRevision"], "watermark": True})
                 occurrences[key] = occurrences.get(key, 0) + 1
-                chunks.append({**chunk, "id": key[:20] + "-" + str(occurrences[key]), "cacheKey": key, "spokenText": spoken, "pronunciationMap": mappings, "voiceId": voice["id"], "voiceHash": voice.get("hash", "default"), "seed": chunk_seed, "clipId": source.get("clipId"), "sectionId": source.get("sectionId"), "sourceStart": chunk["sourceStart"] + source_offset, "sourceEnd": chunk["sourceEnd"] + source_offset, "status": "queued"})
+                chunks.append({**chunk, "id": key[:20] + "-" + str(occurrences[key]), "cacheKey": key, "spokenText": spoken, "pronunciationMap": mappings, "voiceId": voice["id"], "voiceHash": voice.get("hash", "default"), "provider": voice.get("provider", "chatterbox-turbo"), "culture": voice.get("culture", "en"), "buffering": "immediate" if system_voices.is_system(voice["id"]) else "reserve", "seed": chunk_seed, "clipId": source.get("clipId"), "sectionId": source.get("sectionId"), "sourceStart": chunk["sourceStart"] + source_offset, "sourceEnd": chunk["sourceEnd"] + source_offset, "status": "queued"})
             source_offset += len(source["text"]) + 2
-        job = {"id": uuid.uuid4().hex, "projectId": project["id"], "sourceRevision": project.get("revision", 0), "status": "queued", "progress": 0, "message": "Queued for narration.", "text": source_text, "chunks": chunks, "createdAt": _now(), "updatedAt": _now(), "request": copy.deepcopy(request), "settings": settings, "format": output_format, "engine": "sapi" if all(c["voiceId"].startswith("sapi-") for c in chunks) else "chatterbox-turbo", "modelRevision": self.runtime["modelRevision"], "sourceFingerprint": self.runtime["sourceRevision"], "sourceOffsetUnit": "unicodeCodePoint", "seed": seed, "follow": bool(request.get("follow", False)), "verify": verify, "verificationRetries": verification_retries, "verificationModelRevision": self.runtime.get("qaModelRevision") if verify else None}
+        job = {"id": uuid.uuid4().hex, "projectId": project["id"], "sourceRevision": project.get("revision", 0), "status": "queued", "progress": 0, "message": "Queued for narration.", "text": source_text, "chunks": chunks, "createdAt": _now(), "updatedAt": _now(), "request": copy.deepcopy(request), "settings": settings, "format": output_format, "engine": next(iter({c["provider"] for c in chunks})) if len({c["provider"] for c in chunks}) == 1 else "mixed", "modelRevision": self.runtime["modelRevision"], "sourceFingerprint": self.runtime["sourceRevision"], "sourceOffsetUnit": "unicodeCodePoint", "seed": seed, "follow": bool(request.get("follow", False)), "verify": verify, "verificationRetries": verification_retries, "verificationModelRevision": self.runtime.get("qaModelRevision") if verify else None}
         with self._lock:
             self._initialize_job(job, project, request)
             self._jobs[job["id"]] = job
@@ -578,6 +588,12 @@ class SpeechService:
             self._persist(job)
             return self._public(job)
 
+    def has_active_generation(self):
+        """Let optional background inference yield to narration without exposing jobs."""
+        with self._lock:
+            return any(job["status"] in ("queued", "generating", "checking", "cancelling")
+                       for job in self._jobs.values())
+
     def list_jobs(self, project_id):
         with self._lock:
             return [self._public(j) for j in sorted(self._jobs.values(), key=lambda j: j["createdAt"], reverse=True) if j["projectId"] == project_id]
@@ -594,6 +610,7 @@ class SpeechService:
     def cancel(self, job_id):
         with self._lock:
             job = self._job(job_id)
+            (self.root / "jobs" / job_id / "cancel.flag").touch()
             if job["status"] not in TERMINAL:
                 active = any(c["status"] in ("generating", "checking") for c in job["chunks"])
                 job["status"] = "cancelling" if active else "cancelled"
@@ -608,6 +625,7 @@ class SpeechService:
                 return self._public(job)
             if job.get("modelRevision") != self.runtime["modelRevision"] or job.get("sourceFingerprint") != self.runtime["sourceRevision"]:
                 raise ValueError("The speech engine changed since this job was frozen. Start a new narration to avoid mixing engine versions.")
+            (self.root / "jobs" / job_id / "cancel.flag").unlink(missing_ok=True)
             for chunk in job["chunks"]:
                 if chunk["status"] == "ready":
                     try:
@@ -700,11 +718,11 @@ class SpeechService:
                 valid_cache = True
             except (OSError, ValueError, wave.Error, EOFError):
                 pass
-        is_sapi = chunk["voiceId"].startswith("sapi-")
+        is_sapi = system_voices.is_system(chunk["voiceId"])
         timing_cache = cached.with_suffix(".words.json")
         if is_sapi and (not valid_cache or not timing_cache.is_file()):
-            from .sapi import render, native_timings
-            response = render(chunk["voiceId"], chunk["spokenText"], cached, job["settings"].get("sapiRate", 0), job["settings"].get("sapiVolume", 100), job["settings"].get("sapiPitch", 0))
+            from .system_voices import render, native_timings
+            response = render(chunk["voiceId"], chunk["spokenText"], cached, job["settings"].get("sapiRate", 0), job["settings"].get("sapiVolume", 100), job["settings"].get("sapiPitch", 0), ffmpeg=self.runtime.get("ffmpeg"), cancel=self.root / "jobs" / job["id"] / "cancel.flag", expected_hash=chunk.get("voiceHash"))
             native = response.get("words", [])
             seconds = _wav_info(cached)["seconds"]
             timings = native_timings(native, seconds)
@@ -738,7 +756,7 @@ class SpeechService:
                         raise RuntimeError(alignment.get("error", "Timing alignment failed."))
                     timing_words = alignment.get("words", [])
                 chunk["wordTimings"] = word_timings(chunk["text"], chunk["spokenText"], timing_words, chunk.get("pronunciationMap", []))
-                chunk["timingSource"] = "sapi-events" if is_sapi else "local-recognition"
+                chunk["timingSource"] = (system_voices.provider_id(chunk["voiceId"]) + "-events") if is_sapi else "local-recognition"
             except Exception as exc:
                 chunk["wordTimings"] = []
                 chunk["timingError"] = str(exc)
@@ -841,7 +859,7 @@ class SpeechService:
         attempts = chunk.setdefault("qaAttempts", [])
         if job.get("verificationModelRevision") != self.runtime.get("qaModelRevision"):
             raise RuntimeError("The verification model changed since this job was frozen. Start a new verified narration.")
-        maximum_attempts = 1 if chunk["voiceId"].startswith("sapi-") else 1 + job.get("verificationRetries", 1)
+        maximum_attempts = 1 if system_voices.is_system(chunk["voiceId"]) else 1 + job.get("verificationRetries", 1)
         destination = self._chunk_path(job, chunk)
         for attempt_index in range(maximum_attempts):
             with self._lock:
@@ -880,11 +898,21 @@ class SpeechService:
                 take = {"index": attempt_index, "seed": attempt_seed, "file": take_path.name, "seconds": _wav_info(take_path)["seconds"], "createdAt": _now()}
                 attempts.append(take)
             try:
-                response = self._invoke_qa_worker({"operation": "transcribe", "path": str(take_path)}, timeout=180)
-                if not response.get("ok"):
-                    raise RuntimeError(response.get("error", "Local speech verification failed."))
+                if system_voices.is_system(chunk["voiceId"]):
+                    timing_path = (self.root / "cache" / (chunk["cacheKey"] + ".wav")).with_suffix(".words.json")
+                    response = json.loads(timing_path.read_text("utf-8"))
+                    if not response.get("words"):
+                        raise RuntimeError("This system voice did not provide word timings. Disable checking or choose another voice.")
+                    response["transcript"] = " ".join(w["text"] for w in response["words"])
+                else:
+                    response = self._invoke_qa_worker({"operation": "transcribe", "path": str(take_path)}, timeout=180)
+                    if not response.get("ok"):
+                        raise RuntimeError(response.get("error", "Local speech verification failed."))
                 qa = compare_transcript(chunk["spokenText"], response["transcript"])
                 qa.update({"model": "faster-whisper-base.en", "modelRevision": self.runtime.get("qaModelRevision"), "checkedAt": _now(), "recognitionSeconds": response.get("seconds"), "segments": response.get("segments", []), "words": response.get("words", [])})
+                if system_voices.is_system(chunk["voiceId"]):
+                    qa.update(model=system_voices.provider_id(chunk["voiceId"]) + "-events", modelRevision=None,
+                              evidence="synthesis-events", note="Native source events are not an independent transcription.")
             except Exception as exc:
                 if self._stopping.is_set():
                     raise
@@ -1045,10 +1073,13 @@ class SpeechService:
 
     def shutdown(self):
         self._stopping.set()
+        for job_id in self._jobs:
+            (self.root / "jobs" / job_id / "cancel.flag").touch()
         self._thread.join(timeout=2)
         self._close_worker()
         self._close_qa_worker()
         self._thread.join(timeout=5)
+        system_voices.shutdown()
         with self._lock:
             for job in self._jobs.values():
                 if job["status"] not in TERMINAL:

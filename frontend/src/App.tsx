@@ -1,3 +1,4 @@
+import { useTypingPointer } from "./useTypingPointer";
 import DocumentReader from "./DocumentReader";
 import { useSpeechTransport } from "./useSpeechTransport";
 import { useSpeechJob } from "./useSpeechJob";
@@ -8,7 +9,10 @@ import NativeMenu from "./NativeMenu";
 import MenuItems, { type MenuEntry } from "./MenuItems";
 import { ArrangementGlyph, WriteGlyph } from "./WorkspaceGlyphs";
 import AlderLogo from "./AlderLogo";
-import { useInstalledFonts } from "./useInstalledFonts";
+import SettingsWindow, { type SettingsCategory } from "./SettingsWindow";
+import { useStoredPreference } from "./useStoredPreference";
+import { useProofreading } from "./useProofreading";
+import ProofreadingPanel from "./ProofreadingPanel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Play,
@@ -77,10 +81,9 @@ import BookWorkspace from "./BookWorkspace";
 import { bookText, newChapter } from "./book";
 import Editor, { type EditorHandle } from "./Editor";
 import DefinitionStudio from "./DefinitionStudio";
-import RulesManager from "./RulesManager";
 import NarrationReview from "./NarrationReview";
 import StylesManager from "./StylesManager";
-import SpeechOptions, { DEFAULT_SPEECH_OPTIONS } from "./SpeechOptions";
+import { DEFAULT_SPEECH_OPTIONS } from "./SpeechOptions";
 
 import StartScreen, { NewDocument } from "./StartScreen";
 import { openDocuments } from "./openDocuments";
@@ -223,9 +226,16 @@ function savedNumber(key: string, fallback: number, min: number, max: number) {
     : fallback;
 }
 export default function App() {
+  useTypingPointer();
   const { project, change, load, flush, saveState, error, setError, history } =
     useProject();
-  const installedFonts = useInstalledFonts(project?.settings.fontFamily);
+  const workspaceOpen = Boolean(project);
+  useEffect(() => {
+    void window.alder?.setWindowLayout(workspaceOpen ? "workspace" : "start");
+  }, [workspaceOpen]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsCategory, setSettingsCategory] =
+    useState<SettingsCategory>("Appearance");
   const [newOpen, setNewOpen] = useState(false);
   const {
     speed,
@@ -245,7 +255,10 @@ export default function App() {
     "Hover over a control or focus it with the keyboard to learn what it does.",
   );
   const [dropping, setDropping] = useState(false);
-  const [audioFormat, setAudioFormat] = useState("wav");
+  const [audioFormat, setAudioFormat] = useStoredPreference(
+    "alder.narrationFormat",
+    "wav",
+  );
   const [completion, setCompletion] = useState<string[]>([]);
   const [writePreview, setWritePreview] = useState(false);
   useEffect(() => setWritePreview(false), [project?.id]);
@@ -258,7 +271,7 @@ export default function App() {
     [selected, setSelected] = useState<string | null>(null),
     [ideas, setIdeas] = useState<Idea[]>([]),
     [voices, setVoices] = useState<Voice[]>([
-      { id: "default", name: "Built-in voice" },
+      { id: "default", name: "Default" },
     ]),
     [jobs, setJobs] = useState<Job[]>([]),
     [capabilities, setCapabilities] = useState<any>(null);
@@ -288,7 +301,6 @@ export default function App() {
     [lexicon, setLexicon] = useState<Lexicon | null>(null),
     [lexTab, setLexTab] = useState("Alternatives"),
     [candidate, setCandidate] = useState(""),
-    [analysis, setAnalysis] = useState<Analysis | null>(null),
     [form, setForm] = useState<FormSpec | null>(null),
     [panel, setPanel] = useState<string | null>(null),
     [menu, setMenu] = useState<string | null>(null),
@@ -306,9 +318,6 @@ export default function App() {
     } | null>(null);
   const [uiScale, setUiScale] = useState(() =>
       savedChoice("alder.uiScale", UI_SCALES, "1"),
-    ),
-    [contrast, setContrast] = useState(
-      () => localStorage.getItem("alder.highContrast") === "true",
     ),
     [browserWidth, setBrowserWidth] = useState(() =>
       savedNumber("alder.browserWidth", 342, 240, 800),
@@ -401,6 +410,31 @@ export default function App() {
   const activeContent = writingFocus && chapter ? chapter : content;
   const targetEditor = () =>
     writingFocus ? bookEditor.current : editor.current;
+  const proofreading = useProofreading(
+    activeContent?.text,
+    `${project?.id || ""}:${writingFocus ? "chapter:" + chapter?.id : "clip:" + clip?.id + ":" + clip?.activeVariantId}`,
+    project,
+    flush,
+  );
+  const analysis = proofreading.result;
+  useEffect(() => {
+    const select = (event: Event) => {
+      setDetail("Clip");
+      setDetailOpen(true);
+      setLexTab("Checks");
+      const id = (event as CustomEvent<string>).detail;
+      requestAnimationFrame(() => {
+        const item = document.querySelector<HTMLElement>(
+          `[data-review-id="${CSS.escape(id)}"]`,
+        );
+        item?.scrollIntoView({ block: "nearest" });
+        item?.querySelector<HTMLButtonElement>("button")?.focus();
+      });
+    };
+    window.addEventListener("alder-proofreading-select", select);
+    return () =>
+      window.removeEventListener("alder-proofreading-select", select);
+  }, []);
   const run = useCallback(
     async (fn: () => Promise<void>) => {
       try {
@@ -505,52 +539,6 @@ export default function App() {
     }
   }, [speed, loop]);
   useEffect(() => {
-    setAnalysis(null);
-    if (!activeContent || !project) {
-      return;
-    }
-    let cancelled = false;
-    const text = activeContent.text;
-    const rules = track?.devices
-      .filter(
-        (d) =>
-          d.enabled &&
-          [
-            "spelling",
-            "repetition",
-            "verbosity",
-            "sentence_length",
-            "terminology",
-          ].includes(d.type),
-      )
-      .map((d) => d.type);
-    const timer = setTimeout(() => {
-      api<Analysis>("/api/analyze", "POST", {
-        text,
-        projectId: project.id,
-        rules: rules?.length ? [...rules, "custom"] : undefined,
-      })
-        .then((a) => {
-          if (!cancelled) setAnalysis(a);
-        })
-        .catch(() => {});
-    }, 650);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [
-    activeContent?.text,
-    writingFocus,
-    chapter?.id,
-    clip?.id,
-    clip?.activeVariantId,
-    project?.id,
-    track?.devices,
-    project?.settings.customRules,
-    project?.settings.ignoredRuleIds,
-  ]);
-  useEffect(() => {
     let cancelled = false;
     if (!word.trim()) {
       setLexicon(null);
@@ -593,7 +581,6 @@ export default function App() {
       browserOpen,
       detailOpen,
       uiScale,
-      highContrast: contrast,
       browserWidth,
       bookSandboxHeight: detailHeight,
     }))
@@ -606,7 +593,6 @@ export default function App() {
     browserOpen,
     detailOpen,
     uiScale,
-    contrast,
     browserWidth,
     detailHeight,
   ]);
@@ -760,8 +746,28 @@ export default function App() {
     });
     setHint(`Project saved to ${result.path}`);
   };
+  const openSettings = (category?: SettingsCategory) => {
+    if (category) setSettingsCategory(category);
+    setMenu(null);
+    setPanel(null);
+    setSettingsOpen(true);
+  };
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    void run(flush);
+  };
   const openPanel = (name: string) => {
     setMenu(null);
+    if (["settings", "rules", "accessibility"].includes(name)) {
+      openSettings(
+        name === "rules"
+          ? "Language Rules"
+          : name === "accessibility"
+            ? "Appearance"
+            : undefined,
+      );
+      return;
+    }
     if (!project && name === "projects") {
       window.dispatchEvent(new Event("alder-open-start"));
       return;
@@ -987,6 +993,12 @@ export default function App() {
     });
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+        e.preventDefault();
+        openSettings();
+        return;
+      }
+      if ((e.target as HTMLElement).closest("dialog[open]")) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
         newProject();
@@ -1036,6 +1048,7 @@ export default function App() {
         if (command === "new") newProject();
         if (command === "open") openPanel("projects");
         if (command === "export") openPanel("export");
+        if (command === "settings") openSettings();
       }),
     [project],
   );
@@ -1113,10 +1126,46 @@ export default function App() {
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", done);
   };
+  const settingsWindow = settingsOpen && (
+    <SettingsWindow
+      category={settingsCategory}
+      onCategory={setSettingsCategory}
+      project={project}
+      onChange={change}
+      uiScale={uiScale}
+      onScale={setUiScale}
+      onClose={closeSettings}
+      saveState={saveState}
+      saveError={error}
+      onManage={(name) => {
+        closeSettings();
+        openPanel(name);
+      }}
+    />
+  );
   if (!project)
     return (
       <>
         <StartScreen onOpen={load} />
+        {settingsWindow}
+        {!window.alder && (
+          <div className="start-settings-menu">
+            <button
+              aria-haspopup="menu"
+              onClick={() => setMenu(menu === "Edit" ? null : "Edit")}
+            >
+              Edit
+            </button>
+            {menu === "Edit" && (
+              <div className="menu-popup" role="menu">
+                <MenuItems
+                  items={[{ label: "Settings…", action: () => openSettings() }]}
+                  onClose={() => setMenu(null)}
+                />
+              </div>
+            )}
+          </div>
+        )}
         {newOpen && (
           <NewDocument
             onCreate={(p) => {
@@ -1333,6 +1382,7 @@ export default function App() {
       },
       { label: "Find and replace…", action: findReplace },
       { label: "Project dictionary…", action: () => openPanel("dictionary") },
+      { label: "Settings…", action: () => openSettings() },
     ],
     Create: [
       {
@@ -1396,25 +1446,15 @@ export default function App() {
         label: structure ? "Hide structure" : "Show structure",
         action: () => setStructure((v) => !v),
       },
-      {
-        label: "UI Scale",
-        submenu: UI_SCALES.map((scale) => ({
-          label: `${Math.round(Number(scale) * 100)}%`,
-          checked: uiScale === scale,
-          action: () => setUiScale(scale),
-        })),
-      },
     ],
     Options: [
-      { label: "Document setup…", action: () => openPanel("settings") },
       { label: "Styles…", action: () => openPanel("styles") },
-      { label: "Language rules…", action: () => openPanel("rules") },
       { label: "Project Assets…", action: () => openPanel("assets") },
     ],
   };
   return (
     <div
-      className={"alder-app theme-neutral" + (contrast ? " high-contrast" : "")}
+      className="alder-app theme-neutral"
       onMouseOver={(e) => {
         if (helpOpen) {
           const text = helpFor(e.target);
@@ -1435,6 +1475,7 @@ export default function App() {
         } as React.CSSProperties
       }
     >
+      {settingsWindow}
       {window.alder ? (
         <NativeMenu items={menuItems} onError={setError} />
       ) : (
@@ -1622,7 +1663,7 @@ export default function App() {
             onChapter={(id) => {
               setChapterId(id);
               setWritingFocus(true);
-              setAnalysis(null);
+              proofreading.recheck();
             }}
             editorRef={bookEditor}
             onSelection={(w, selection) => {
@@ -1667,6 +1708,7 @@ export default function App() {
               void run(() => startSpeech(undefined, "selection", c.text))
             }
             annotations={writingFocus ? analysis?.annotations : undefined}
+            annotationText={analysis?.sourceText}
             previewActive={view === "Write" && writePreview}
             onPreview={(open) => {
               if (!open) {
@@ -1950,6 +1992,7 @@ export default function App() {
                     annotations={
                       !writingFocus ? analysis?.annotations : undefined
                     }
+                    annotationText={analysis?.sourceText}
                     showStructure={structure}
                     onToggleStructure={() => setStructure((v) => !v)}
                     onImage={() => imageFile.current?.click()}
@@ -2051,71 +2094,18 @@ export default function App() {
                     </div>
                     <div className="word-results">
                       {lexTab === "Checks" ? (
-                        analysis?.annotations.length ? (
-                          analysis.annotations.map((a) => (
-                            <div className="check-item" key={a.id}>
-                              <button
-                                onClick={() =>
-                                  targetEditor()?.selectRange(a.start, a.end)
-                                }
-                              >
-                                <span className="check-type">{a.type}</span>
-                                {a.message}
-                              </button>
-                              {a.suggestion && (
-                                <button
-                                  className="suggestion-button"
-                                  onClick={() =>
-                                    targetEditor()?.replaceRange(
-                                      a.start,
-                                      a.end,
-                                      a.suggestion!,
-                                    )
-                                  }
-                                >
-                                  Use “{a.suggestion}”
-                                </button>
-                              )}
-                              <button
-                                className="ignore-rule"
-                                onClick={() =>
-                                  setAnalysis((a0) =>
-                                    a0
-                                      ? {
-                                          ...a0,
-                                          annotations: a0.annotations.filter(
-                                            (x) => x.id !== a.id,
-                                          ),
-                                        }
-                                      : a0,
-                                  )
-                                }
-                              >
-                                Ignore once
-                              </button>
-                              {a.ruleId && (
-                                <button
-                                  className="ignore-rule"
-                                  onClick={() =>
-                                    change((p) => {
-                                      p.settings.ignoredRuleIds = [
-                                        ...(p.settings.ignoredRuleIds || []),
-                                        a.ruleId,
-                                      ];
-                                    })
-                                  }
-                                >
-                                  Ignore rule in project
-                                </button>
-                              )}
-                            </div>
-                          ))
-                        ) : (
-                          <div className="no-findings">
-                            <Check size={20} />
-                            <p>No findings in this text.</p>
-                          </div>
-                        )
+                        <ProofreadingPanel
+                          controller={proofreading}
+                          project={project}
+                          change={change}
+                          editor={targetEditor}
+                          flush={flush}
+                          onChapter={(id) => {
+                            setChapterId(id);
+                            setWritingFocus(true);
+                            setView("Write");
+                          }}
+                        />
                       ) : lexTab === "Definition" ? (
                         <>
                           {lexicon?.definitions.map((d, i) => (
@@ -2470,17 +2460,10 @@ export default function App() {
                       ))}
                     </select>
                   </label>
-                  <SpeechOptions
-                    options={{
-                      ...DEFAULT_SPEECH_OPTIONS,
-                      ...(project.settings.speechOptions || {}),
-                    }}
-                    onChange={(options) =>
-                      change((p) => {
-                        p.settings.speechOptions = options;
-                      })
-                    }
-                  />
+                  <button onClick={() => openSettings("Speech")}>
+                    <Settings2 size={13} />
+                    Speech settings…
+                  </button>
 
                   <button
                     className="accent"
@@ -2706,6 +2689,33 @@ export default function App() {
           />
           {saveState}
         </span>
+        <button
+          className="proofreading-status"
+          aria-label="Open spelling and grammar"
+          title={[
+            proofreading.status,
+            ...(proofreading.result?.warnings || []),
+          ].join(" ")}
+          onClick={() => {
+            setDetail("Clip");
+            setDetailOpen(true);
+            setLexTab("Checks");
+          }}
+        >
+          Spelling &amp; grammar:{" "}
+          {proofreading.error
+            ? "error"
+            : proofreading.capabilities?.engines.rules.available === false
+              ? "basic only"
+              : proofreading.result?.status === "partial" ||
+                  proofreading.result?.status === "failed"
+                ? "incomplete"
+                : proofreading.result?.status === "cancelled"
+                  ? "cancelled"
+                  : proofreading.result?.status === "completed"
+                    ? `${proofreading.result.annotations.length} suggestions`
+                    : "checking…"}
+        </button>
         <span className="status-project-count">
           {words(bookText(project))} words
         </span>
@@ -2857,8 +2867,6 @@ export default function App() {
               <strong>
                 {(
                   {
-                    rules: "Language rules",
-                    settings: "Document setup",
                     voices: "Voices & pronunciation",
                     projects: "Projects",
                     dictionary: "Project dictionary",
@@ -2867,7 +2875,6 @@ export default function App() {
                     export: "Export book",
                     help: "Getting started",
                     about: "About Alder",
-                    accessibility: "Accessibility",
                     templates: "Project templates",
                   } as Record<string, string>
                 )[panel] || panel}
@@ -2877,205 +2884,6 @@ export default function App() {
               </button>
             </header>
             <div className="manager-content">
-              {panel === "rules" && (
-                <RulesManager
-                  project={project}
-                  onChange={change}
-                  onError={setError}
-                />
-              )}
-              {panel === "settings" && (
-                <div className="settings-grid">
-                  {[
-                    ["publisher", "Publisher"],
-                    ["subject", "Subject"],
-                    ["rights", "Rights statement"],
-                    ["identifier", "Book identifier (ISBN or URI)"],
-                  ].map(([key, label]) => (
-                    <label key={key}>
-                      {label}
-                      <input
-                        value={project.settings[key] || ""}
-                        onChange={(e) =>
-                          change((p) => {
-                            p.settings[key] = e.target.value;
-                          })
-                        }
-                      />
-                    </label>
-                  ))}
-                  <label>
-                    Ebook cover
-                    <select
-                      value={project.settings.coverAssetId || ""}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.coverAssetId = e.target.value || null;
-                        })
-                      }
-                    >
-                      <option value="">No cover</option>
-                      {project.assets
-                        .filter((asset) => asset.mime.startsWith("image/"))
-                        .map((asset) => (
-                          <option key={asset.id} value={asset.id}>
-                            {asset.name}
-                          </option>
-                        ))}
-                    </select>
-                    <small>Choose an image collected in Project Assets.</small>
-                  </label>
-                  <label>
-                    Author
-                    <input
-                      value={project.settings.author}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.author = e.target.value;
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Description
-                    <textarea
-                      value={project.settings.description}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.description = e.target.value;
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Page size
-                    <select
-                      value={project.settings.pageSize}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.pageSize = e.target.value;
-                        })
-                      }
-                    >
-                      {["A4", "A5", "Letter", "Legal", "6x9"].map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Orientation
-                    <select
-                      value={project.settings.orientation || "portrait"}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.orientation = e.target.value;
-                        })
-                      }
-                    >
-                      <option value="portrait">Portrait</option>
-                      <option value="landscape">Landscape</option>
-                    </select>
-                  </label>
-                  <label>
-                    Start page numbering at
-                    <input
-                      type="number"
-                      min="1"
-                      max="9999"
-                      step="1"
-                      value={project.settings.firstPageNumber || 1}
-                      onChange={(e) => {
-                        const n = e.target.valueAsNumber;
-                        if (Number.isInteger(n) && n >= 1 && n <= 9999)
-                          change((p) => {
-                            p.settings.firstPageNumber = n;
-                          });
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Margins (mm)
-                    <input
-                      type="number"
-                      min="5"
-                      max="60"
-                      value={project.settings.marginMm}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.marginMm = Number(e.target.value);
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Body font
-                    <select
-                      value={project.settings.fontFamily}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.fontFamily = e.target.value;
-                        })
-                      }
-                    >
-                      {installedFonts.map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Body size (pt)
-                    <input
-                      type="number"
-                      min="8"
-                      max="32"
-                      value={project.settings.fontSize}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.fontSize = Number(e.target.value);
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Line height
-                    <input
-                      type="number"
-                      min="1"
-                      max="3"
-                      step=".1"
-                      value={project.settings.lineHeight}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.lineHeight = Number(e.target.value);
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Running header
-                    <input
-                      value={project.settings.header}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.header = e.target.value;
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={project.settings.footer}
-                      onChange={(e) =>
-                        change((p) => {
-                          p.settings.footer = e.target.checked;
-                        })
-                      }
-                    />
-                    Page numbers in footer
-                  </label>
-                </div>
-              )}
               {panel === "dictionary" && (
                 <>
                   <p>
@@ -3255,37 +3063,6 @@ export default function App() {
                 </>
               )}
 
-              {panel === "accessibility" && (
-                <div className="settings-grid">
-                  <label>
-                    Interface size
-                    <select
-                      value={uiScale}
-                      onChange={(e) => setUiScale(e.target.value)}
-                    >
-                      <option value="1">Standard</option>
-                      <option value="1.15">Large</option>
-                      <option value="1.3">Larger</option>
-                    </select>
-                  </label>
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={contrast}
-                      onChange={(e) => setContrast(e.target.checked)}
-                    />
-                    High contrast
-                  </label>
-                  <p>
-                    Use the Write and Pages views to write and arrange your
-                    book. Space controls playback outside text fields.{" "}
-                    {window.alder?.platform === "darwin"
-                      ? "⌘+S saves; ⌘+F finds text."
-                      : "Ctrl+S saves; Ctrl+F finds text."}{" "}
-                    Chapter and page navigation are keyboard accessible.
-                  </p>
-                </div>
-              )}
               {panel === "about" && (
                 <div className="about-panel">
                   <AlderLogo />

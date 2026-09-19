@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useStoredPreference } from "./useStoredPreference";
 
-function savedLevel(key: string, fallback: number, min: number, max: number) {
-  const raw = localStorage.getItem(key);
-  const value = raw === null || !raw.trim() ? fallback : Number(raw);
+function level(raw: string, fallback: number, min: number, max: number) {
+  const value = raw.trim() ? Number(raw) : fallback;
   return Number.isFinite(value)
     ? Math.max(min, Math.min(max, value))
     : fallback;
@@ -12,15 +12,20 @@ function savedLevel(key: string, fallback: number, min: number, max: number) {
 export function usePlaybackSettings(
   scope: "reading" | "narration" | "sandbox",
 ) {
-  const [speed, setSpeed] = useState(() =>
-    savedLevel(`alder.${scope}Speed`, 1, 0.25, 3),
+  const [speed, saveSpeed] = useStoredPreference(`alder.${scope}Speed`, "1");
+  const [volume, saveVolume] = useStoredPreference(`alder.${scope}Volume`, "2");
+  const setSpeed = useCallback(
+    (value: number) => saveSpeed(String(level(String(value), 1, 0.25, 3))),
+    [saveSpeed],
   );
-  const [volume, setVolume] = useState(() =>
-    savedLevel(`alder.${scope}Volume`, 2, 0, 4),
+  const setVolume = useCallback(
+    (value: number) => saveVolume(String(level(String(value), 2, 0, 4))),
+    [saveVolume],
   );
-  useEffect(() => {
-    localStorage.setItem(`alder.${scope}Speed`, String(speed));
-    localStorage.setItem(`alder.${scope}Volume`, String(volume));
-  }, [scope, speed, volume]);
-  return { speed, setSpeed, volume, setVolume };
+  return {
+    speed: level(speed, 1, 0.25, 3),
+    setSpeed,
+    volume: level(volume, 2, 0, 4),
+    setVolume,
+  };
 }

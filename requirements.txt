@@ -1,4 +1,5 @@
 fastapi>=0.115,<1
+pyobjc-framework-AVFoundation==12.2.2; sys_platform == "darwin"
 uvicorn>=0.30,<1
 python-multipart>=0.0.18
 httpx>=0.28,<1

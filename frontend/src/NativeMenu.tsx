@@ -30,8 +30,23 @@ export default function NativeMenu({
     })),
   );
   useEffect(() => {
+    let surface = document.querySelector(".workspace-topline");
+    let background = "#c6c6c6";
+    while (surface) {
+      const rgb = getComputedStyle(surface).backgroundColor.match(/[\d.]+/g);
+      if (rgb && (rgb.length < 4 || Number(rgb[3]) > 0)) {
+        background =
+          "#" +
+          rgb
+            .slice(0, 3)
+            .map((value) => Number(value).toString(16).padStart(2, "0"))
+            .join("");
+        break;
+      }
+      surface = surface.parentElement;
+    }
     void window.alder
-      ?.setNativeMenu(JSON.parse(description))
+      ?.setNativeMenu(JSON.parse(description), background)
       .catch((e) => onError(e.message));
   }, [description, onError]);
   useEffect(() => {

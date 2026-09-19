@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("alder", {
-  setNativeMenu: (menus: unknown) =>
-    ipcRenderer.invoke("alder:set-menu", menus),
+  setWindowLayout: (
+    mode: "start" | "workspace",
+    width?: number,
+    height?: number,
+  ) => ipcRenderer.invoke("alder:window-layout", mode, width, height),
+  setNativeMenu: (menus: unknown, background?: string) =>
+    ipcRenderer.invoke("alder:set-menu", menus, background),
   editCommand: (command: string) =>
     ipcRenderer.invoke("alder:edit-command", command),
   readClipboard: () => ipcRenderer.invoke("alder:clipboard-text"),

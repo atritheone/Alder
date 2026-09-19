@@ -4,6 +4,8 @@ Alder's Windows application ships its own Python runtime, speech runtime and mod
 
 `ALDER_RESOURCES_DIR` identifies the resource directory in development and packaged builds. The desktop launcher supplies the packaged location, disables the Python user site, and passes explicit resource paths to child processes. Heavy runtime files are generated in `work/bundle-resources`; they are not source files to commit to Git.
 
+Proofreading adds a separate Python model runtime and local grammar data under `proofreading/`. Managed setup provisions the pinned pack outside the checkout; runtime checks never download it. See [offline proofreading](offline-proofreading.md) for exact components, platform limits and verification status.
+
 ## Publishing tools
 
 Run `powershell -ExecutionPolicy Bypass -File scripts/prepare-publishing-tools.ps1` from a Windows development machine. This is a build step with network access. Downloads use fixed versions and SHA-256 checks; an already cached download is also checked before reuse. The completed application uses the extracted payload and performs no installation step.

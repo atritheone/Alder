@@ -36,7 +36,16 @@ def capabilities(workspace,resources,target,env,logs):
     run([resources/layout['python'],'-I',workspace/'scripts/verify-publishing-tools.py','--resources',resources,
          '--output',logs/'publishing'],workspace,clean,logs,'publishing',timeout=600)
     run([resources/layout['ffmpeg'],'-y','-i',audio,logs/'setup-speech.mp3'],workspace,clean,logs,'audio-export',timeout=120)
+    run([resources/layout['python'],'-s',workspace/'scripts/verify-system-voices.py',
+         '--output',logs/'system-voices','--ffmpeg',resources/layout['ffmpeg']],
+         workspace,clean,logs,'system-voices',timeout=180)
     report={'speech':speech,'recognition':qa,'publishing':'passed','audioExport':'passed','humanListeningApproval':False}
+    report['systemVoices']=read_json(logs/'system-voices/system-voices.json')
+    proofreading_args=[resources/layout['python'],'-s',workspace/'scripts/verify-proofreading.py',
+                       '--resources',resources,'--output',logs/'proofreading.json']
+    if target=='darwin-x64':proofreading_args.append('--rules-only')
+    run(proofreading_args,workspace,clean,logs,'proofreading',timeout=300)
+    report['proofreading']=read_json(logs/'proofreading.json')
     write_json(logs/'capabilities.json',report)
     return report
 

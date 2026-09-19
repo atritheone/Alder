@@ -253,7 +253,9 @@ try {
     return visit(Menu.getApplicationMenu());
   });
   expect(opened).toBe(true);
-  await page.getByText("Speech options", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Speech settings…", exact: true })
+    .click();
   const strict = page.getByRole("checkbox", {
     name: "Strict wording verification",
     exact: true,

@@ -50,3 +50,5 @@ SAPI timing events can split one written number or abbreviation into several adj
 Chatterbox input expands numeric en-dash ranges (and hyphenated four-digit year ranges) to “to”, with source mappings retained for highlighting. Transcript comparison recognises those range forms without dropping negative signs or changed numbers. Numbered headings stay attached to their following text and separate from preceding citations, avoiding duplicate reference/list numbers in one synthesis chunk.
 
 Ordinal numerals such as “20th”, “21st” and “112th” compare with their spelled-out forms. Changed ordinal/cardinal values still fail checking. Numbered headings also end at their source line boundary, preserving their grammatical context instead of joining them to the following paragraph and splitting them into incomplete retry fragments.
+
+System voices now also have macOS and Linux eSpeak NG adapters. Discovery runs at Alder startup; restart after changing installed voices. See [provider behavior, portability and native validation](system-voices.md). Mac native acceptance is pending.

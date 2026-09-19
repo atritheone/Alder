@@ -1,0 +1,48 @@
+{
+  "status": "passed",
+  "scope": "Windows source-testing launcher regression and status bar",
+  "normalLaunch": "start.cmd / scripts/start-testing.mjs --offline",
+  "provisioning": "Pinned setup builder; external testing workspace; verified cached downloads; no developer runtime override",
+  "checks": {
+    "backendProofreadingTests": 32,
+    "frontendTests": 74,
+    "typecheckAndProductionBuild": "passed",
+    "desktopWorkflow": {
+      "status": "passed",
+      "checks": [
+        "inline review",
+        "dialect",
+        "replacement",
+        "undo",
+        "repeated word",
+        "selection",
+        "real model",
+        "book review",
+        "sandbox isolation"
+      ]
+    },
+    "missingPack": {
+      "status": "passed",
+      "checks": [
+        "visible basic status",
+        "fallback spelling underline",
+        "fallback correction",
+        "incomplete grammar warning"
+      ]
+    },
+    "statusBar": {
+      "status": "passed",
+      "checks": [
+        "spelling underline",
+        "grammar underline",
+        "Saved immediately before spelling status",
+        "transparent background",
+        "no border or outline",
+        "click opens review"
+      ]
+    }
+  },
+  "limitations": [
+    "This regression verification does not establish Grammarly parity or qualify macOS/Linux desktop distribution."
+  ]
+}

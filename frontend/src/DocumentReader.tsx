@@ -1,4 +1,5 @@
 import { readingBufferReady, highlightClock } from "./readingBuffer";
+import { voiceLanguageLabel } from "./voiceLabels";
 import {
   useSpeechJob,
   useSpeechDemand,
@@ -61,7 +62,7 @@ type Snapshot = {
 export default function DocumentReader(p: Props) {
   const sourceChapters = p.sandbox ? [p.chapter] : p.project.book?.chapters;
   const [voices, setVoices] = useState<Voice[]>([
-      { id: "default", name: "Chatterbox Turbo", kind: "builtin" },
+      { id: "default", name: "Default", kind: "builtin" },
     ]),
     [voice, setVoice] = useState("default");
   const [voicesReady, setVoicesReady] = useState(false);
@@ -167,11 +168,6 @@ export default function DocumentReader(p: Props) {
         .then((r) => {
           setVoices(r.voices);
           setVoicesReady(true);
-          setVoice((current) =>
-            r.voices.some((v) => v.id === current)
-              ? current
-              : r.voices[0]?.id || "default",
-          );
         })
         .catch((e) => setError(e.message));
     void refresh();
@@ -470,9 +466,6 @@ export default function DocumentReader(p: Props) {
           text,
           voiceId: voice,
           follow: true,
-          sapiRate: 0,
-          sapiPitch: 0,
-          sapiVolume: 100,
           ...(p.project.settings.speechOptions || {}),
           format,
           verify: true,
@@ -777,21 +770,38 @@ export default function DocumentReader(p: Props) {
               });
           }}
         >
-          <optgroup label="Chatterbox · local">
+          {!voices.some((v) => v.id === voice) && (
+            <option value={voice} disabled>
+              Missing voice · choose a replacement
+            </option>
+          )}
+          <optgroup label="AI">
             {voices
-              .filter((v) => v.kind !== "sapi")
+              .filter((v) => !v.system && v.kind !== "sapi")
               .map((v) => (
-                <option key={v.id} value={v.id}>
+                <option
+                  key={v.id}
+                  value={v.id}
+                  disabled={v.available === false}
+                >
                   {v.name}
+                  {v.culture ? ` · ${voiceLanguageLabel(v.culture)}` : ""}
+                  {v.available === false ? " · Not installed" : ""}
                 </option>
               ))}
           </optgroup>
-          <optgroup label="Windows SAPI">
+          <optgroup label="System voices">
             {voices
-              .filter((v) => v.kind === "sapi")
+              .filter((v) => v.system || v.kind === "sapi")
               .map((v) => (
-                <option key={v.id} value={v.id}>
+                <option
+                  key={v.id}
+                  value={v.id}
+                  disabled={v.available === false}
+                >
                   {v.name}
+                  {v.culture ? ` · ${voiceLanguageLabel(v.culture)}` : ""}
+                  {v.available === false ? " · Not installed" : ""}
                 </option>
               ))}
           </optgroup>
@@ -840,6 +850,46 @@ export default function DocumentReader(p: Props) {
         >
           <Square size={12} />
         </button>
+        {voices.find((v) => v.id === voice)?.system && (
+          <details className="system-voice-controls">
+            <summary>Voice controls</summary>
+            <small>
+              Changes apply when reading starts again. Rate and pitch depend on
+              the voice.
+            </small>
+            {(["rate", "pitch", "volume"] as const).map((control) => (
+              <label key={control}>
+                {control === "rate"
+                  ? "Voice rate"
+                  : control === "pitch"
+                    ? "Voice pitch"
+                    : "Voice volume"}
+                <input
+                  type="range"
+                  min={control === "volume" ? 0 : -10}
+                  max={control === "volume" ? 100 : 10}
+                  step={1}
+                  value={
+                    p.project.settings.speechOptions?.[control] ??
+                    p.project.settings.speechOptions?.[
+                      `sapi${control[0].toUpperCase()}${control.slice(1)}`
+                    ] ??
+                    (control === "volume" ? 100 : 0)
+                  }
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    p.change((project) => {
+                      project.settings.speechOptions = {
+                        ...project.settings.speechOptions,
+                        [control]: value,
+                      };
+                    });
+                  }}
+                />
+              </label>
+            ))}
+          </details>
+        )}
         <span className="speed-control">
           Speed{" "}
           <PlaybackSpeed

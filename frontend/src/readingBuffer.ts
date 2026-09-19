@@ -9,7 +9,12 @@ export function readingBufferReady(
 ): boolean {
   const chunk = job?.chunks[index];
   if (!chunk?.playbackEligible || !chunk.audioUrl) return false;
-  if (chunk.voiceId?.startsWith("sapi-") || primed) return true;
+  if (
+    chunk.buffering === "immediate" ||
+    (!chunk.buffering && chunk.voiceId?.startsWith("sapi-")) ||
+    primed
+  )
+    return true;
   const recent = job!.chunks.slice(Math.max(0, index - 4), index + 8);
   const recovery = Math.max(0, ...recent.map((c) => c.processingSeconds || 0));
   const target = Math.min(45, Math.max(20, recovery * 2)) * speed;

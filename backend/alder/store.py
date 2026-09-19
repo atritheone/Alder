@@ -16,6 +16,7 @@ from threading import RLock
 from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 
 from .models import ValidationError, create_project, now, uid, validate_project
+from .system_voices import is_system, references
 
 
 class ConflictError(ValueError):
@@ -210,12 +211,16 @@ class Store:
             prior = conn.execute("SELECT digest FROM archives WHERE path=?", (str(destination),)).fetchone()
         if destination.exists() and prior and not overwrite_external and hashlib.sha256(destination.read_bytes()).hexdigest() != prior[0]:
             raise ConflictError("This project file changed outside Alder. Use Save As to preserve both versions.")
-        entries: dict[str, bytes] = {"project.json": json.dumps(p, ensure_ascii=False, indent=2).encode("utf-8")}
         voice_ids = {entry.get("voiceId") for entry in p["tracks"] + p["clips"] + p.get("book", {}).get("chapters", []) + p.get("pronunciation", [])} - {None, "", "default"}
+        metadata = references(self.data_dir / "speech")
+        entries: dict[str, bytes] = {"project.json": json.dumps(p, ensure_ascii=False, indent=2).encode("utf-8")}
+        if any(is_system(v) for v in voice_ids):
+            saved_system = [metadata.get(v, {"id": v, "name": v}) for v in sorted(voice_ids) if is_system(v)]
+            entries["system-voices.json"] = json.dumps(saved_system, ensure_ascii=False).encode("utf-8")
         saved_voices = []
         for voice_id in sorted(voice_ids):
-            if str(voice_id).startswith("sapi-"):
-                continue  # Windows voices remain optional machine resources, never archived.
+            if is_system(voice_id):
+                continue  # System voices are machine resources, never archived.
             if not isinstance(voice_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", voice_id):
                 raise ValidationError("A project refers to an invalid voice profile.")
             voice_dir = self.data_dir / "speech" / "voices" / voice_id
@@ -292,6 +297,13 @@ class Store:
         except (BadZipFile, KeyError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValidationError("This is not a complete, readable Alder project archive.") from exc
         original_id = p["id"]
+        try:
+            saved_system = json.loads(payloads.get("system-voices.json", b"[]"))
+            if not isinstance(saved_system, list):
+                raise ValueError("Expected a list.")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ValidationError("Invalid system voice metadata.") from exc
+        references(self.data_dir / "speech", saved_system)
         for voice_id in manifest.get("voices", []):
             if not isinstance(voice_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", voice_id):
                 raise ValidationError("Archive contains an invalid voice identity.")

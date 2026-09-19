@@ -1,0 +1,66 @@
+{
+  "python": "3.11",
+  "source": "https://pypi.org",
+  "packages": {
+    "pyobjc-framework-AVFoundation": {
+      "version": "12.2.2",
+      "wheels": [
+        {
+          "name": "pyobjc_framework_avfoundation-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/97/4f/9d53f29d06f57de1398b56a0e535a3c9e85ca3ecb83607b83cafce318df6/pyobjc_framework_avfoundation-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "6a1baf030b9c7997b99e38450e84ea7398c8ca9e762660ba9019c20837e733a0"
+        }
+      ]
+    },
+    "pyobjc-framework-Quartz": {
+      "version": "12.2.2",
+      "wheels": [
+        {
+          "name": "pyobjc_framework_quartz-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/b9/e8/16d07170d4e1bd182a8e6084abdf283fac90979384b8f53107be9eb110e6/pyobjc_framework_quartz-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "4b01e325b0cdc121e78730dde9756e971b23069bf141cd62efbcaac76d7b6dbb"
+        }
+      ]
+    },
+    "pyobjc-framework-Cocoa": {
+      "version": "12.2.2",
+      "wheels": [
+        {
+          "name": "pyobjc_framework_cocoa-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/f6/a7/370f12143661dff66f2c68a735938afab6530aa3b153f6a7a6f12b5eabab/pyobjc_framework_cocoa-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "851dca4c16e70b405e5cd5a8c166cf7c445ae54a4cdd95ce9a523803172f32d1"
+        }
+      ]
+    },
+    "pyobjc-core": {
+      "version": "12.2.2",
+      "wheels": [
+        {
+          "name": "pyobjc_core-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/ce/8e/18284fec7913ef78b25a1c97f9689ebef98bc14038386191491516abeb25/pyobjc_core-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "b9cdd686e32db8e451feb19f8a85bc4cd52c2893103881d04aca51e1f35371d1"
+        }
+      ]
+    },
+    "pyobjc-framework-CoreAudio": {
+      "version": "12.2.2",
+      "wheels": [
+        {
+          "name": "pyobjc_framework_coreaudio-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/10/75/556b8f887a8b68c3125aa64e8281c26cce42d5e7338b90ef5474d8a519b1/pyobjc_framework_coreaudio-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "2217911fb21cd6d8002d0895f6353a15fd6ce2c4e191b3f4cb6e16ad7a428591"
+        }
+      ]
+    },
+    "pyobjc-framework-CoreMedia": {
+      "version": "12.2.2",
+      "wheels": [
+        {
+          "name": "pyobjc_framework_coremedia-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/38/18/5931478200f803db87be5cd6cb9af492d9ef2f2ac07cbfe019ecfa97db5a/pyobjc_framework_coremedia-12.2.2-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "f6f8150428e6ae40d6b97714f6933b8c4322f3fb94de9bfcb206d00cb021f464"
+        }
+      ]
+    }
+  }
+}

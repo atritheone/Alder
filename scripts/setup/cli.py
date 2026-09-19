@@ -53,7 +53,7 @@ def state_default():
 
 def environment(state):
     env=dict(os.environ)
-    for key in ('PYTHONHOME','PYTHONPATH','PYTHONUSERBASE','VIRTUAL_ENV','CONDA_PREFIX','ELECTRON_RUN_AS_NODE','ALDER_RESOURCES_DIR','ALDER_DATA_DIR'):
+    for key in ('PYTHONHOME','PYTHONPATH','PYTHONUSERBASE','VIRTUAL_ENV','CONDA_PREFIX','ELECTRON_RUN_AS_NODE','ALDER_RESOURCES_DIR','ALDER_DATA_DIR','ALDER_PROOFREADING_RESOURCES','ALDER_PROOFREADING_PYTHON'):
         env.pop(key,None)
     scratch=state/'scratch';scratch.mkdir(parents=True,exist_ok=True)
     env.update(PYTHONNOUSERSITE='1',PYTHONDONTWRITEBYTECODE='1',PYTHONUTF8='1',

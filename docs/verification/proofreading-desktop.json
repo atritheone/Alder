@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "checks": [
+    "inline review",
+    "dialect",
+    "replacement",
+    "undo",
+    "repeated word",
+    "selection",
+    "real model",
+    "book review",
+    "sandbox isolation"
+  ]
+}

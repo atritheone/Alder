@@ -20,6 +20,9 @@ const required = [
   "speech/models/turbo/ve.safetensors",
   "fonts/LiberationSerif-Regular.ttf",
   "tools/tika/tika-app-3.3.2.jar",
+  "proofreading/manifest.json",
+  "proofreading/rules-inventory.json",
+  "proofreading/languagetool/languagetool-server.jar",
 ];
 const files = [];
 function walk(p) {
@@ -46,6 +49,12 @@ for (const [name, test] of [
   if (!files.some((f) => test.test(f))) missing.push(name);
 if (missing.length)
   throw new Error("Incomplete self-contained resources: " + missing.join(", "));
+const proofreading = JSON.parse(fs.readFileSync(path.join(root, "proofreading/manifest.json"), "utf8"));
+if (proofreading.pythonBindings[`${process.platform}-${process.arch}`]) {
+  for (const relative of [proofreading.model.file, process.platform === "win32" ? "python/python.exe" : "python/bin/python3"])
+    if (!fs.existsSync(path.join(root, "proofreading", relative)))
+      throw new Error(`Missing advanced proofreading resource: ${relative}`);
+}
 const tika = path.join(root, "tools/tika/tika-app-3.3.2.jar");
 if (
   createHash("sha512").update(fs.readFileSync(tika)).digest("hex") !==
