@@ -16,6 +16,15 @@ const cell = (text = ""): DocNode => ({
 });
 
 describe("canonical document text and source boundaries", () => {
+  it("reuses unchanged documents without serving stale positions after an edit", () => {
+    const doc = document(paragraph("Read this 🌲 sentence."));
+    const before = projectText(doc);
+    expect(projectText(doc)).toBe(before);
+    const edited = EditorState.create({ doc }).tr.insertText("new ", 1).doc;
+    expect(projectText(edited).text).toBe("new Read this 🌲 sentence.");
+    expect(projectText(edited)).not.toBe(before);
+    expect(projectText(doc)).toBe(before);
+  });
   it("preserves leading, consecutive and trailing empty paragraphs", () => {
     const doc = document(
       paragraph(),

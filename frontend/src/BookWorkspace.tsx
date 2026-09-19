@@ -19,6 +19,7 @@ import "./book-workspace.css";
 import DocumentReader from "./DocumentReader";
 import { sourceForChapter, parseRawSource, rawTextDocument } from "./rawSource";
 import { documentText } from "./textProjection";
+import type { ReadingPosition } from "./readingCursor";
 
 type Props = {
   flush: () => Promise<void>;
@@ -47,6 +48,10 @@ type Props = {
 export default function BookWorkspace(p: Props) {
   const isBook = !["txt", "docx"].includes(p.project.settings.documentKind);
   const chapters = p.project.book?.chapters || [];
+  const wordCounts = useMemo(
+    () => chapters.map((chapter) => words(chapter.text)),
+    [chapters],
+  );
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
   const [rawActive, setRawActive] = useState(false);
   const [rawOpenError, setRawOpenError] = useState("");
@@ -67,11 +72,33 @@ export default function BookWorkspace(p: Props) {
   const [zoom, setZoom] = useState(0.8);
   const [arrangementZoom, setArrangementZoom] = useState(0.8);
   const [speechPlaying, setSpeechPlaying] = useState(false);
+  const [readingPosition, setReadingPosition] =
+    useState<ReadingPosition | null>(null);
   const [readerKeyboardOpen, setReaderKeyboardOpen] = useState(false);
   const [readingRange, setReadingRange] = useState<{
     start: number;
     end: number;
   } | null>(null);
+  const annotations = useMemo(
+    () =>
+      showRaw
+        ? []
+        : speechPlaying || p.externalPlayback
+          ? p.annotations?.filter((item) => item.type !== "spelling")
+          : p.annotations,
+    [showRaw, speechPlaying, p.externalPlayback, p.annotations],
+  );
+  useEffect(() => {
+    if (
+      !speechPlaying ||
+      showRaw ||
+      !readingPosition ||
+      readingPosition.chapterId !== chapter?.id
+    )
+      return;
+    const page = p.editorRef.current?.pageAtTextOffset(readingPosition.offset);
+    if (page !== null && page !== undefined) setPageNumber(String(page + 1));
+  }, [speechPlaying, readingPosition, pages, chapter?.id, showRaw]);
   const layout = useMemo(() => {
     const size: Record<string, [number, number]> = {
       A4: [210, 297],
@@ -197,7 +224,7 @@ export default function BookWorkspace(p: Props) {
                   <span>
                     {item.title || p.project.name}
                     <small>
-                      {words(item.text)} words
+                      {wordCounts[index]} words
                       {!item.include ? " · excluded" : ""}
                     </small>
                   </span>
@@ -255,6 +282,7 @@ export default function BookWorkspace(p: Props) {
               onChapter={p.onChapter}
               onHighlight={setReadingRange}
               onPlaybackChange={setSpeechPlaying}
+              onPosition={setReadingPosition}
             />
           </div>
         )}
@@ -355,7 +383,7 @@ export default function BookWorkspace(p: Props) {
               }
               onSelection={p.onSelection}
               onFocus={p.onFocus}
-              annotations={showRaw ? [] : p.annotations}
+              annotations={annotations}
               readingRange={showRaw ? null : readingRange}
               persistentCaret
               pageLayout={layout}
@@ -372,6 +400,7 @@ export default function BookWorkspace(p: Props) {
               onVisiblePage={(page) => {
                 if (
                   p.view === "Write" &&
+                  !speechPlaying &&
                   document.activeElement?.getAttribute("aria-label") !==
                     "Go To Page"
                 )
@@ -428,9 +457,30 @@ export default function BookWorkspace(p: Props) {
               </label>
               <span>of {Math.max(1, pages.length)}</span>
               <span className="writing-counts">
-                {words(chapters.map((c) => c.text).join(" "))} Words
+                {wordCounts.reduce((total, count) => total + count, 0)} Words
                 {isBook && ` · ${chapters.length} Chapters`}
               </span>
+              {p.view === "Write" &&
+                !showRaw &&
+                readingPosition?.chapterId === chapter.id && (
+                  <span
+                    className="reading-progress"
+                    aria-label="Reading progress"
+                    title="TTS position through this chapter's text"
+                  >
+                    {Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        readingPosition.length
+                          ? (100 * readingPosition.offset) /
+                              readingPosition.length
+                          : 0,
+                      ),
+                    ).toFixed(0)}
+                    %
+                  </span>
+                )}
               <label className="writing-zoom">
                 Zoom{" "}
                 <select

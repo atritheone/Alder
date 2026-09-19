@@ -1,7 +1,15 @@
 import { useSpeechJob } from "./useSpeechJob";
 import { useSpeechTransport } from "./useSpeechTransport";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AudioLines, LoaderCircle, Play, Square } from "lucide-react";
+import {
+  AudioLines,
+  LoaderCircle,
+  Pencil,
+  Play,
+  Plus,
+  Square,
+  X,
+} from "lucide-react";
 import { api, mediaUrl } from "./api";
 import { useNarrationGain } from "./audioPlayback";
 import type { Job, Voice } from "./types";
@@ -17,6 +25,10 @@ export default function VoiceManager(p: Props) {
   const [all, setAll] = useState(p.voices);
   const [selectedId, setSelectedId] = useState(p.voices[0]?.id || "default");
   const [name, setName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = useRef<string | null>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [testing, setTesting] = useState(false);
@@ -34,7 +46,6 @@ export default function VoiceManager(p: Props) {
   );
   useEffect(() => () => p.onPlaybackChange(false), [p.onPlaybackChange]);
   const visible = all.filter((v) => !v.removed);
-  const selected = visible.find((v) => v.id === selectedId) || visible[0];
   useEffect(() => {
     let live = true;
     api<{ voices: Voice[] }>("/api/speech/voices")
@@ -48,10 +59,19 @@ export default function VoiceManager(p: Props) {
       live = false;
     };
   }, [p.voices]);
-  useEffect(
-    () => setName(selected?.name || ""),
-    [selected?.id, selected?.name],
-  );
+  useEffect(() => {
+    if (editingId) {
+      nameInput.current?.focus();
+      nameInput.current?.select();
+    }
+  }, [editingId]);
+  const rename = (voice: Voice) => {
+    if (busy) return;
+    setSelectedId(voice.id);
+    setName(voice.name);
+    editing.current = voice.id;
+    setEditingId(voice.id);
+  };
   useEffect(
     () => () => {
       request.current++;
@@ -72,6 +92,7 @@ export default function VoiceManager(p: Props) {
     transport.stop();
     audio.current?.pause();
     setTesting(false);
+    setTestingId(null);
     setPlaying(false);
     if (
       job &&
@@ -81,12 +102,15 @@ export default function VoiceManager(p: Props) {
         setError(e.message),
       );
   };
-  const test = async () => {
-    if (!selected || selected.removed) return;
-    if (testing) {
+  const test = async (voice: Voice) => {
+    if (voice.removed) return;
+    if (testing && testingId === voice.id) {
       stopTest();
       return;
     }
+    if (testing) stopTest();
+    setSelectedId(voice.id);
+    setTestingId(voice.id);
     const attempt = ++request.current;
     transport.prepare();
     setError("");
@@ -100,7 +124,7 @@ export default function VoiceManager(p: Props) {
         {
           scope: "selection",
           text: "This is how this voice sounds when reading in Alder.",
-          voiceId: selected.id,
+          voiceId: voice.id,
           format: "wav",
           verify: true,
         },
@@ -147,118 +171,158 @@ export default function VoiceManager(p: Props) {
       });
     }
   }, [job, testing]);
-  const update = async (action: "rename" | "remove") => {
-    if (!selected) return;
+  const update = async (voice: Voice, action: "rename" | "remove") => {
+    if (busy) return;
+    if (action === "rename") {
+      if (editing.current !== voice.id) return;
+      editing.current = null;
+      setEditingId(null);
+      if (!name.trim() || name.trim() === voice.name) return;
+    }
     setBusy(true);
     setError("");
-    if (action === "remove") stopTest();
+    if (action === "remove" && testingId === voice.id) stopTest();
     try {
       await api(
-        `/api/speech/voices/${encodeURIComponent(selected.id)}`,
+        `/api/speech/voices/${encodeURIComponent(voice.id)}`,
         action === "remove" ? "DELETE" : "PUT",
         action === "rename" ? { name: name.trim() } : undefined,
       );
-      await refresh(action === "remove" ? selected.id : undefined);
+      await refresh(action === "remove" ? voice.id : undefined);
     } catch (e) {
       setError((e as Error).message);
+      if (action === "rename") {
+        editing.current = voice.id;
+        setEditingId(voice.id);
+      }
     } finally {
       setBusy(false);
     }
   };
   return (
     <section className="voice-manager" aria-label="Voice Library">
-      <button
-        className="accent"
-        onClick={p.onAdd}
-        data-help="Add a reference voice from a clean recording longer than five seconds, ideally about ten seconds. Recordings are processed locally."
-      >
-        Add Reference Voice…
-      </button>
-      <div className="voice-selector" aria-label="Available Voices">
-        {visible.map((v) => (
-          <button
-            key={v.id}
-            aria-label={`Select Voice ${v.name}`}
-            aria-pressed={selected?.id === v.id}
-            data-help={`Select ${v.name} to rename, test, or remove it from Alder.`}
-            onClick={() => {
-              if (v.id !== selected?.id) stopTest();
-              setSelectedId(v.id);
-              void api("/api/speech/prepare", "POST", { voiceId: v.id }).catch(
-                () => {},
-              );
-            }}
-          >
-            <AudioLines size={15} />
-            <span>{v.name}</span>
-            <small>
-              {v.removed
-                ? "Removed"
-                : v.kind === "sapi"
-                  ? "Windows"
-                  : v.kind === "builtin"
-                    ? "Built-In"
-                    : "Reference"}
-            </small>
-          </button>
-        ))}
-      </div>
-      {selected && (
-        <form
-          className="voice-actions"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void update("rename");
-          }}
+      <header className="voice-library-heading">
+        <h3>Voices</h3>
+        <button
+          className="library-add-button"
+          aria-label="Add reference voice"
+          onClick={p.onAdd}
+          data-help="Add a reference voice from a clean recording longer than five seconds, ideally about ten seconds. Recordings are processed locally."
         >
-          <label>
-            Voice Name
-            <input
-              aria-label="Voice Name"
-              data-help="The name displayed for this voice in Alder. Edit it and choose Rename to save it."
-              value={name}
-              maxLength={100}
-              required
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <div className="voice-action-buttons">
-            <button
-              type="submit"
-              disabled={busy || !name.trim() || name.trim() === selected.name}
+          <Plus size={19} />
+        </button>
+      </header>
+      <div className="voice-selector" aria-label="Available Voices">
+        {[
+          visible.filter((v) => v.kind !== "sapi"),
+          visible.filter((v) => v.kind === "sapi"),
+        ]
+          .filter((group) => group.length > 0)
+          .map((group) => (
+            <div
+              className="voice-group"
+              key={group[0].kind === "sapi" ? "sapi" : "chatterbox"}
             >
-              Rename
-            </button>
-            <button
-              type="button"
-              disabled={selected.removed || busy}
-              aria-label={testing ? "Stop Voice Test" : "Test Voice"}
-              data-help="Listen to a short passage with the selected voice. Stop Test ends the preview."
-              aria-busy={testing && !playing}
-              onClick={() => void test()}
-            >
-              {testing ? (
-                playing ? (
-                  <Square size={12} />
-                ) : (
-                  <LoaderCircle size={12} className="reading-spinner" />
-                )
-              ) : (
-                <Play size={12} />
-              )}
-              {testing ? "Stop Test" : "Test"}
-            </button>
-            <button
-              type="button"
-              disabled={busy || all.filter((v) => !v.removed).length <= 1}
-              data-help="Remove this voice from Alder's library. Windows installations and saved narration are kept. At least one voice must remain available."
-              onClick={() => void update("remove")}
-            >
-              Remove
-            </button>
-          </div>
-        </form>
-      )}
+              {group.map((v) => (
+                <div
+                  className={`voice-card${selectedId === v.id ? " selected" : ""}`}
+                  key={v.id}
+                  onClick={(e) => {
+                    if (!(e.target as Element).closest("button, input, form"))
+                      setSelectedId(v.id);
+                  }}
+                >
+                  <div className="voice-card-name">
+                    <AudioLines size={17} aria-hidden="true" />
+                    {editingId === v.id ? (
+                      <form
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void update(v, "rename");
+                        }}
+                      >
+                        <input
+                          ref={nameInput}
+                          aria-label="Voice name"
+                          value={name}
+                          maxLength={100}
+                          required
+                          onChange={(event) => setName(event.target.value)}
+                          onBlur={() => void update(v, "rename")}
+                          onKeyDown={(event) => {
+                            event.stopPropagation();
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              editing.current = null;
+                              setEditingId(null);
+                            }
+                          }}
+                        />
+                      </form>
+                    ) : (
+                      <button
+                        className="voice-name-button"
+                        aria-label={`Select voice ${v.name}`}
+                        aria-pressed={selectedId === v.id}
+                        data-help="Double-click to rename this voice."
+                        onClick={() => setSelectedId(v.id)}
+                        onDoubleClick={() => rename(v)}
+                        onKeyDown={(event) => {
+                          if (event.key === "F2") {
+                            event.preventDefault();
+                            rename(v);
+                          }
+                        }}
+                      >
+                        {v.name}
+                      </button>
+                    )}
+                  </div>
+                  <div className="voice-card-actions">
+                    <button
+                      aria-label={`Rename voice ${v.name}`}
+                      data-help="Rename this voice. Press Enter to save or Escape to cancel."
+                      disabled={busy}
+                      onClick={() => rename(v)}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      aria-label={`${testing && testingId === v.id ? "Stop testing" : "Test voice"} ${v.name}`}
+                      data-help="Listen to a short passage with this voice. Click again to stop."
+                      aria-busy={testing && testingId === v.id && !playing}
+                      disabled={busy}
+                      onPointerEnter={() => {
+                        void api("/api/speech/prepare", "POST", {
+                          voiceId: v.id,
+                        }).catch(() => {});
+                      }}
+                      onClick={() => void test(v)}
+                    >
+                      {testing && testingId === v.id ? (
+                        playing ? (
+                          <Square size={14} />
+                        ) : (
+                          <LoaderCircle size={14} className="reading-spinner" />
+                        )
+                      ) : (
+                        <Play size={14} />
+                      )}
+                    </button>
+                    <button
+                      aria-label={`Remove voice ${v.name}`}
+                      data-help="Remove this voice from Alder. Saved narration and Windows voice installations are kept. At least one voice must remain."
+                      disabled={busy || visible.length <= 1}
+                      onClick={() => void update(v, "remove")}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+      </div>
       {error && <p role="alert">{error}</p>}
       <audio
         ref={audio}

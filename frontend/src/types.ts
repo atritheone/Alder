@@ -142,6 +142,8 @@ export type Project = {
   pronunciation: Pronunciation[];
   styles: NamedStyle[];
   settings: {
+    pronunciationDictionaries?: string[];
+    disabledPronunciationDictionaries?: string[];
     author: string;
     description: string;
     pageSize: string;

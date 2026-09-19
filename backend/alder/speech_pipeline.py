@@ -65,20 +65,19 @@ class SpeechPipeline(SpeechService):
         sources = self._sources(project, request)
         if any(not s["voiceId"].startswith("sapi-") for s in sources) and not self.capabilities()["verification"]["available"]:
             raise ValueError("Speech checking is unavailable. Repair Alder's speech resources before reading.")
-        with self._lock:
-            # Base storage creates the frozen source and cache identities. Every
-            # new pipeline job is checked, regardless of an older client's flag.
-            result = super().submit(project, {**request, "verify": False})
-            job = self._jobs[result["id"]]
-            job.update(schemaVersion=2, verify=True, follow=True, verificationModelRevision=self.runtime.get("qaModelRevision"),
-                       interactive=bool(request.get("interactive", False)), _pronunciation=copy.deepcopy(project.get("pronunciation", [])), _budgets={})
-            for c in job["chunks"]:
-                c["verificationStatus"] = "pending"
-                c["playbackEligible"] = False
-            self._demand[job["id"]] = {"index": 0, "speed": 1., "mode": "playing", "at": time.monotonic()}
-            self._persist(job)
-            self._metric("submitted", job, sections=len(job["chunks"]), inputHash=_hash(job["text"]))
-            return self._public(job)
+        result = super().submit(project, {**request, "verify": False})
+        self._metric("submitted", result, sections=len(result["chunks"]), inputHash=_hash(result["text"]))
+        return result
+
+    def _initialize_job(self, job, project, request):
+        # Freeze acceptance policy before the first save/enqueue. Avoid writing
+        # and copying the entire manuscript twice before generation can start.
+        job.update(schemaVersion=2, verify=True, follow=True, verificationModelRevision=self.runtime.get("qaModelRevision"),
+                   interactive=bool(request.get("interactive", False)), _pronunciation=copy.deepcopy(project.get("pronunciation", [])), _budgets={})
+        for c in job["chunks"]:
+            c["verificationStatus"] = "pending"
+            c["playbackEligible"] = False
+        self._demand[job["id"]] = {"index": 0, "speed": 1., "mode": "playing", "at": time.monotonic()}
 
     def _eligible(self, job, chunk):
         return bool(job.get("schemaVersion") == 2 and chunk["status"] == "ready" and
@@ -198,7 +197,7 @@ class SpeechPipeline(SpeechService):
         self._last_work = time.monotonic()
         if voice_id.startswith("sapi-"):
             from .sapi import prepare
-            prepare()
+            prepare(voice["name"])
             return {"ready": True, "engine": "sapi"}
         if not self.capabilities()["verification"]["available"]:
             raise ValueError("Speech checking resources are missing.")
@@ -596,7 +595,10 @@ class SpeechPipeline(SpeechService):
             (self.root / "jobs" / job_id / "cancel.flag").unlink(missing_ok=True)
             for c in job["chunks"]:
                 try:
-                    valid = self._eligible(job, c) and inspect_pcm(self._chunk_path(job, c), c["spokenText"])["accepted"]
+                    # Eligibility verifies the hash of the already checked PCM.
+                    # Decoding every retained section again blocks Resume and
+                    # all event/media requests behind this job lock.
+                    valid = self._eligible(job, c)
                 except (OSError, ValueError, wave.Error, EOFError):
                     valid = False
                 if not valid:

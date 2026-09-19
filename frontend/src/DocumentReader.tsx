@@ -6,6 +6,7 @@ import {
 import { useSpeechTransport } from "./useSpeechTransport";
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -25,7 +26,11 @@ import type { EditorHandle } from "./Editor";
 
 import { useNarrationGain } from "./audioPlayback";
 import { spokenWord } from "./wordFollowing";
-import { readingCursorOffset } from "./readingCursor";
+import {
+  readingCursorOffset,
+  readingPosition,
+  type ReadingPosition,
+} from "./readingCursor";
 import PlaybackSpeed from "./PlaybackSpeed";
 import { useWheelSlider } from "./useWheelSlider";
 import { usePlaybackSettings } from "./usePlaybackSettings";
@@ -39,6 +44,7 @@ type Props = {
   onChapter: (id: string) => void;
   onPlaybackChange: (playing: boolean) => void;
   onHighlight: (range: { start: number; end: number } | null) => void;
+  onPosition?: (position: ReadingPosition | null) => void;
 };
 type Snapshot = {
   chapters: {
@@ -54,6 +60,25 @@ export default function DocumentReader(p: Props) {
       { id: "default", name: "Chatterbox Turbo", kind: "builtin" },
     ]),
     [voice, setVoice] = useState("default");
+  const [voicesReady, setVoicesReady] = useState(false);
+  const preparedVoice = useRef<{ id: string; at: number } | null>(null);
+  const prepareVoice = useCallback((id: string) => {
+    if (
+      preparedVoice.current?.id === id &&
+      Date.now() - preparedVoice.current.at < 240_000
+    )
+      return;
+    const preparation = { id, at: Date.now() };
+    preparedVoice.current = preparation;
+    void api("/api/speech/prepare", "POST", { voiceId: id }).catch(() => {
+      if (preparedVoice.current === preparation) preparedVoice.current = null;
+    });
+  }, []);
+  useEffect(() => {
+    if (!voicesReady) return;
+    const timer = setTimeout(() => prepareVoice(voice), 400);
+    return () => clearTimeout(timer);
+  }, [voice, voicesReady, prepareVoice]);
   const [active, setActive] = useState(false);
   const [job, setJob] = useState<Job | null>(null),
     [error, setError] = useState("");
@@ -114,6 +139,8 @@ export default function DocumentReader(p: Props) {
   const [range, setRange] = useState<{ start: number; end: number } | null>(
     null,
   );
+  const position = useRef<ReadingPosition | null>(null);
+  useEffect(() => () => p.onPosition?.(null), [p.onPosition]);
   useEffect(() => {
     setVoice(p.chapter.voiceId || "default");
   }, [p.chapter.id]);
@@ -122,6 +149,7 @@ export default function DocumentReader(p: Props) {
       api<{ voices: Voice[] }>("/api/speech/voices")
         .then((r) => {
           setVoices(r.voices);
+          setVoicesReady(true);
           setVoice((current) =>
             r.voices.some((v) => v.id === current)
               ? current
@@ -143,31 +171,8 @@ export default function DocumentReader(p: Props) {
   useEffect(() => {
     const chunk = job?.chunks[chunkIndex];
     const key = job ? `${job.id}:${chunkIndex}` : "";
-    if (
-      job &&
-      chunk &&
-      !loaded.current &&
-      shouldPlay.current &&
-      !["ready", "needs_review", "failed", "cancelled", "interrupted"].includes(
-        job.status,
-      ) &&
-      (chunk.processingSeconds || 0) > (chunk.seconds || 1) / speed
-    ) {
-      const ready = [];
-      for (const next of job.chunks.slice(chunkIndex)) {
-        if (!next.playbackEligible) break;
-        ready.push(next);
-      }
-      // Slow hardware and fast listening need a small initial buffer. Bounds
-      // remain below the scheduler's eight-section limit; never wait past an
-      // unresolved passage, and leave retained/decoded resume immediate.
-      if (
-        ready.length < Math.min(3, job.chunks.length - chunkIndex) &&
-        ready.reduce((seconds, c) => seconds + (c.seconds || 0), 0) < 4 * speed
-      )
-        return;
-    }
-
+    // Start the first accepted section immediately; bounded lookahead and
+    // nextAudio preload prepare later sections while it plays.
     if (
       active &&
       !fullAudio.current &&
@@ -194,20 +199,30 @@ export default function DocumentReader(p: Props) {
     if (!playing) return;
     // Audio can keep playing while Chromium suspends animation frames for an
     // obscured window. Sample its clock independently of paint scheduling.
+    const chunk = job?.chunks[chunkIndex];
+    const base = job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0;
+    let lastWord: ReturnType<typeof spokenWord> | undefined;
+    let lastCursor = -1;
     const tick = () => {
-      if (audio.current)
-        setTime(
-          audio.current.currentTime +
-            (job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0),
-        );
+      if (!audio.current) return;
+      const seconds = audio.current.currentTime;
+      const word = spokenWord(chunk?.wordTimings, seconds);
+      const cursor = chunk ? readingCursorOffset(chunk, seconds) : 0;
+      // Sample the audio clock often, but update React only at a word boundary.
+      if (fullAudio.current || word !== lastWord || cursor !== lastCursor) {
+        lastWord = word;
+        lastCursor = cursor;
+        setTime(seconds + base);
+      }
     };
     tick();
-    const timer = setInterval(tick, 25);
+    const timer = setInterval(tick, 16);
     return () => clearInterval(timer);
   }, [playing, job, chunkIndex]);
   useLayoutEffect(() => {
     let next: { start: number; end: number } | null = null;
-    if (active && follow && job && snapshot.current) {
+    let nextPosition: ReadingPosition | null = null;
+    if (active && job && snapshot.current) {
       const chunk = fullAudio.current
         ? job.chunks
             .map((c, i) => ({ ...c, startSeconds: chunkStart(job, i) }))
@@ -234,7 +249,8 @@ export default function DocumentReader(p: Props) {
             ? time - (chunk.startSeconds || 0)
             : audio.current?.currentTime || 0;
           const word = spokenWord(chunk.wordTimings, relative);
-          if (word) {
+          nextPosition = readingPosition(chunk, relative, source);
+          if (follow && word) {
             const base = (chunk.sourceStart || 0) - source.offset;
             next = {
               start:
@@ -242,9 +258,17 @@ export default function DocumentReader(p: Props) {
               end: source.base + (source.offsets[base + word.sourceEnd] ?? 0),
             };
           }
-          if (current.id !== p.chapter.id) p.onChapter(current.id);
+          if (follow && current.id !== p.chapter.id) p.onChapter(current.id);
         }
       }
+    }
+    if (
+      position.current?.chapterId !== nextPosition?.chapterId ||
+      position.current?.offset !== nextPosition?.offset ||
+      position.current?.length !== nextPosition?.length
+    ) {
+      position.current = nextPosition;
+      p.onPosition?.(nextPosition);
     }
     if (range?.start !== next?.start || range?.end !== next?.end) {
       setRange(next);
@@ -356,6 +380,7 @@ export default function DocumentReader(p: Props) {
     requestInFlight.current = true;
     const request = ++playbackRequest.current;
     transport.prepare();
+    prepareVoice(voice);
     shouldPlay.current = true;
     const requestedConfiguration = currentConfiguration();
     setRequesting(true);
@@ -501,12 +526,13 @@ export default function DocumentReader(p: Props) {
       (!job?.chunks[chunkIndex]?.playbackEligible || !loaded.current));
   useLayoutEffect(() => {
     p.onPlaybackChange(playing || (active && shouldPlay.current));
-  }, [playing, active, rendering, buffering]);
+  }, [playing, active, rendering, buffering, shouldPlay.current]);
   useEffect(() => () => p.onPlaybackChange(false), [p.onPlaybackChange]);
   const togglePlayback = () => {
     if (playing || (loading && shouldPlay.current)) {
       shouldPlay.current = false;
       transport.pause();
+      p.onPlaybackChange(false);
       setActive(true);
       setBuffering(false);
       parkCursor();
@@ -637,19 +663,13 @@ export default function DocumentReader(p: Props) {
       <div className="reader-controls">
         <select
           aria-label="Reading voice"
-          onFocus={() =>
-            void api("/api/speech/prepare", "POST", { voiceId: voice }).catch(
-              () => {},
-            )
-          }
+          onFocus={() => prepareVoice(voice)}
           value={voice}
           onChange={(e) => {
             const id = e.target.value;
             stop();
             setVoice(id);
-            void api("/api/speech/prepare", "POST", { voiceId: id }).catch(
-              () => {},
-            );
+            prepareVoice(id);
             p.change((project) => {
               const c = project.book!.chapters.find(
                 (c) => c.id === p.chapter.id,
@@ -688,6 +708,8 @@ export default function DocumentReader(p: Props) {
           data-help="Read from the text cursor. Pause or Stop moves the cursor to the spoken position; Play continues from there. Move the cursor yourself to choose a new starting point."
           aria-busy={loading}
           disabled={false}
+          onPointerEnter={() => prepareVoice(voice)}
+          onFocus={() => prepareVoice(voice)}
           onMouseDown={(e) => e.preventDefault()}
           onClick={togglePlayback}
         >

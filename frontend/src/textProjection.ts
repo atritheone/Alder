@@ -65,7 +65,13 @@ function join(
   return result;
 }
 
+// ProseMirror documents are immutable. Reuse their mapping across selection,
+// highlighting and page updates instead of allocating one entry per character
+// for every spoken word. Bound retention even when undo history holds old docs.
+const projections = new Map<PMNode, TextProjection>();
 export function projectText(doc: PMNode): TextProjection {
+  const cached = projections.get(doc);
+  if (cached) return cached;
   function visit(
     node: PMNode,
     position: number,
@@ -95,7 +101,11 @@ export function projectText(doc: PMNode): TextProjection {
           : "";
     return join(children, separator, contentStart);
   }
-  return visit(doc, 0, true);
+  const projection = visit(doc, 0, true);
+  if (projections.size >= 4)
+    projections.delete(projections.keys().next().value!);
+  projections.set(doc, projection);
+  return projection;
 }
 
 function splitsSurrogate(text: string, offset: number): boolean {

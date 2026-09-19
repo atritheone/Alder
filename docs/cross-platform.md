@@ -70,8 +70,8 @@ removed. The same repository-driven local workflow must serve all supported
 platforms. Generated artifacts from the retired process are ignored and unused.
 
 Automatic approval review blocked removal of the old generated
-`release/build-kits/Alder-0.1.0-linux-build/`,
-`release/build-kits/Alder-0.1.0-mac-build/`, `work/dist-downloads/`, and
+`release/build-kits/Alder-0.11.0-linux-build/`,
+`release/build-kits/Alder-0.11.0-mac-build/`, `work/dist-downloads/`, and
 `work/desktop-builder-config.json` on the development host, stating only
 "blocked by policy". They are not required by repository setup. No VM disks were
 modified as part of this cleanup.

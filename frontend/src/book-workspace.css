@@ -214,6 +214,11 @@
 .page-navigation button {
   font-size: 10px;
 }
+.reading-progress {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  margin-inline: 8px;
+}
 .arranging-pages > .chapter-toolbar {
   order: -1;
 }

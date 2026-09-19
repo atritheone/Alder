@@ -41,7 +41,7 @@ def request(original_script, payload):
 while ($null -ne ($line = [Console]::ReadLine())) {
   try {
     $request = $line | ConvertFrom-Json
-    if ($request.operation -eq 'prepare') { @{ready=$true} | ConvertTo-Json -Compress }
+    if ($request.operation -eq 'prepare') { [AlderSapi]::Prepare($request.voice); @{ready=$true} | ConvertTo-Json -Compress }
     elseif ($request.operation -eq 'voices') {
       $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
       try { @{voices=@($s.GetInstalledVoices() | Where-Object Enabled | ForEach-Object { @{name=$_.VoiceInfo.Name; culture=$_.VoiceInfo.Culture.Name} })} | ConvertTo-Json -Depth 5 -Compress }

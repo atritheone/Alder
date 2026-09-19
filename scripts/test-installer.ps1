@@ -1,4 +1,4 @@
-param([string]$InstallerDirectory = 'release/Alder-0.1.0-Windows-x64')
+param([string]$InstallerDirectory = 'release/Alder-0.11.0-Windows-x64')
 $ErrorActionPreference = 'Stop'
 $workspacePath = (Get-Location).Path
 $validationRoot = Join-Path $workspacePath ('work/installer-validation-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())

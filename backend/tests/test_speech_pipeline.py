@@ -66,6 +66,33 @@ def test_acceptance_required_even_for_legacy_clients(service):
     assert service.audio_path(done['id']).exists()
 
 
+def test_interactive_lead_preserves_source_and_pronunciation_boundaries():
+    text = 'The writer carefully arranges a long sentence about the distant northern mountain range before listening to the complete passage and checking every word.'
+    entries = [{'word': 'northern mountain range', 'spoken': 'northern mountain range'}]
+    regular = projected_sections(text, entries, 'default')
+    fast = projected_sections(text, entries, 'default', lead_chars=100)
+    assert len(regular) == 1 and len(fast) == 2
+    assert len(fast[0]['text']) <= 100
+    assert not fast[0]['paragraphEnd'] and fast[-1]['paragraphEnd']
+    assert ''.join(''.join(c['text'].split()) for c in fast) == ''.join(text.split())
+    assert all(text[c['sourceStart']:c['sourceEnd']] == c['text'] for c in fast)
+    assert any('northern mountain range' in c['text'] for c in fast)
+
+
+def test_resume_reuses_verified_pcm_but_detects_changed_audio(service, monkeypatch):
+    done = finish(service, submit(service))
+    with service._lock:
+        service._jobs[done['id']]['status'] = 'cancelled'
+    def unexpected_scan(*args):
+        raise AssertionError('Retained, hash-verified audio should not be decoded again')
+    monkeypatch.setattr('alder.speech_pipeline.inspect_pcm', unexpected_scan)
+    resumed = service.resume(done['id'])
+    assert resumed['chunks'][0]['playbackEligible']
+    # Content replacement invalidates the acceptance hash before any playback.
+    pcm(service._chunk_path(service._jobs[done['id']], done['chunks'][0]), silent=True)
+    assert not service.get_job(done['id'])['chunks'][0]['playbackEligible']
+
+
 @pytest.mark.parametrize('heard', ['', 'Unrelated nonsense.', 'Alder reads reads reads clearly.', 'Alder reads.'])
 def test_rejected_audio_cannot_autoplay_or_export(service, monkeypatch, heard):
     monkeypatch.setattr(service, '_invoke_qa_worker', lambda *a, **kw: {'ok': True, 'transcript': heard, 'words': []})

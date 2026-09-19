@@ -149,7 +149,7 @@ export function NewDocument({
                   <option>A5</option>
                   <option>Letter</option>
                   <option>Legal</option>
-                  <option value="6x9">6 Ã— 9 in</option>
+                  <option value="6x9">6 × 9 in</option>
                 </select>
               </label>
               <label>
@@ -210,7 +210,7 @@ export function NewDocument({
             Cancel
           </button>
           <button type="submit" className="accent" disabled={busy}>
-            {busy ? "Creatingâ€¦" : "Create"}
+            {busy ? "Creating…" : "Create"}
           </button>
         </footer>
       </form>
@@ -273,7 +273,7 @@ export default function StartScreen({
         <section className="start-open" aria-label="Open document">
           <div className="manager-actions">
             <button disabled={busy} onClick={() => file.current?.click()}>
-              Open document fileâ€¦
+              Open document file…
             </button>
             {window.alder && (
               <button
@@ -290,7 +290,7 @@ export default function StartScreen({
                   })
                 }
               >
-                Open .alder archiveâ€¦
+                Open .alder archive…
               </button>
             )}
           </div>
@@ -312,7 +312,7 @@ export default function StartScreen({
           ))}
         </section>
       )}
-      {busy && <p role="status">Openingâ€¦</p>}
+      {busy && <p role="status">Opening…</p>}
       {error && <p role="alert">{error}</p>}
       <input
         ref={file}

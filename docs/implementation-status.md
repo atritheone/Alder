@@ -1,4 +1,4 @@
-# Alder 0.1 implementation record
+# Alder 0.11 implementation record
 
 The current interface is a book word processor with a separate lower language sandbox. The original track grid and lane arrangement have been removed. See [Book and reading](book-and-reading.md) for the current contract and verified behaviour.
 

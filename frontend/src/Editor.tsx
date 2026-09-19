@@ -55,6 +55,7 @@ import {
 import { dropCursor } from "prosemirror-dropcursor";
 import {
   paginatePages,
+  pageAtPosition,
   rearrangePages,
   PAGE_GAP,
   type FlowPage,
@@ -73,6 +74,7 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  AlignJustify,
   Undo2,
   Redo2,
   WrapText,
@@ -413,6 +415,7 @@ export function namedStyleTransaction(
   return tr;
 }
 export type EditorHandle = {
+  pageAtTextOffset: (offset: number) => number | null;
   moveUnit: (unit: ArrangementUnit, destination: number) => void;
   getText: () => string;
   replaceAll: (find: string, replacement: string) => void;
@@ -629,8 +632,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         if (!v) return { start: 0, end: 0 };
         const { map, text } = projectText(v.state.doc);
         const offset = (position: number) => {
-          const at = map.findIndex((p) => p >= position);
-          return at < 0 ? text.length : at;
+          let low = 0,
+            high = map.length;
+          while (low < high) {
+            const middle = (low + high) >>> 1;
+            if (map[middle] < position) low = middle + 1;
+            else high = middle;
+          }
+          return Math.min(low, text.length);
         };
         // Native cursor movement can precede ProseMirror's selectionchange
         // observer. Read the live caret before a toolbar action takes focus.
@@ -655,6 +664,16 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
       getText() {
         return view.current ? projectText(view.current.state.doc).text : "";
+      },
+      pageAtTextOffset(offset) {
+        const v = view.current;
+        if (!v) return null;
+        try {
+          const { from } = projectedRange(v.state.doc, offset, offset);
+          return pageAtPosition(measuredPages.current, from);
+        } catch {
+          return null;
+        }
       },
       insertDocument(document) {
         const v = editableView();
@@ -824,6 +843,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     lastJSON.current = JSON.stringify(props.document);
     pageDecorations.current = DecorationSet.empty;
     measuredPages.current = [];
+    let annotationsCache: {
+      doc: PMNode;
+      annotations: Annotation[];
+      source: string | null;
+      decorations: DecorationSet;
+    } | null = null;
     const v = new EditorView(host.current, {
       state: EditorState.create({
         doc,
@@ -900,6 +925,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             props: {
               decorations(state) {
                 if (blocked.current) return DecorationSet.empty;
+                if (
+                  annotationsCache?.doc === state.doc &&
+                  annotationsCache.annotations === decos.current &&
+                  annotationsCache.source === annotationSource.current
+                )
+                  return annotationsCache.decorations;
                 const projection = projectText(state.doc);
                 if (annotationSource.current !== projection.text)
                   return DecorationSet.empty;
@@ -924,7 +955,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                     /* An outdated annotation must never address arbitrary editor positions. */
                   }
                 }
-                return DecorationSet.create(state.doc, spans);
+                const decorations = DecorationSet.create(state.doc, spans);
+                annotationsCache = {
+                  doc: state.doc,
+                  annotations: decos.current,
+                  source: annotationSource.current,
+                  decorations,
+                };
+                return decorations;
               },
             },
           }),
@@ -1106,14 +1144,43 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     const v = view.current;
     if (!v) return;
     refreshEditorDecorations(v);
-    if (props.readingRange)
-      v.dom.querySelector(".reading-word")?.scrollIntoView({
-        block: "nearest",
-        inline: "nearest",
-        behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "auto"
-          : "smooth",
-      });
+    if (props.readingRange && props.layoutVisible !== false) {
+      try {
+        const { from } = projectedRange(
+          v.state.doc,
+          props.readingRange.start,
+          props.readingRange.end,
+        );
+        const { node } = v.domAtPos(from, 1);
+        const element =
+          node.nodeType === Node.TEXT_NODE
+            ? node.parentElement
+            : (node as HTMLElement);
+        const word =
+          element?.closest<HTMLElement>(".reading-word") ||
+          element?.querySelector<HTMLElement>(".reading-word");
+        const viewport = v.dom.closest(".editor-scroll");
+        if (word && viewport) {
+          const rect = word.getBoundingClientRect(),
+            bounds = viewport.getBoundingClientRect();
+          // Scroll only when speech reaches an offscreen line. Restarting a
+          // smooth scroll at every word keeps the viewport chasing the audio.
+          if (
+            rect.top < bounds.top ||
+            rect.bottom > bounds.bottom ||
+            rect.left < bounds.left ||
+            rect.right > bounds.right
+          )
+            word.scrollIntoView({
+              block: "nearest",
+              inline: "nearest",
+              behavior: "instant",
+            });
+        }
+      } catch {
+        /* Stale speech ranges must not move the viewport. */
+      }
+    }
   }, [props.readingRange]);
   useLayoutEffect(() => {
     const layout = props.pageLayout;
@@ -1416,6 +1483,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               onClick={() => align("right")}
             >
               <AlignRight />
+            </button>
+            <button
+              data-help-label="Justify"
+              aria-label="Justify"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => align("justify")}
+            >
+              <AlignJustify />
             </button>
             <button
               data-help-label="Bullet list"

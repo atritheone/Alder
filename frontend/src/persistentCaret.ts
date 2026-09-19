@@ -10,6 +10,13 @@ export function persistentCaret() {
       caret.className = "write-caret";
       caret.setAttribute("aria-hidden", "true");
       host.append(caret);
+      // offsetWidth rounds to an integer. Even a tiny scale error accumulates
+      // into a whole line on later pages. Measure the actual positioning basis.
+      const basis = document.createElement("span");
+      basis.setAttribute("aria-hidden", "true");
+      basis.style.cssText =
+        "position:absolute;left:0;top:0;width:100px;height:100px;margin:0;padding:0;border:0;visibility:hidden;pointer-events:none;";
+      host.append(basis);
       const update = (current: EditorView) => {
         caret.classList.toggle(
           "is-editing",
@@ -32,13 +39,14 @@ export function persistentCaret() {
         }
         caret.hidden = !empty;
         if (caret.hidden) return;
-        const box = host.getBoundingClientRect();
-        if (!box.width || !host.offsetWidth) return;
-        const scale = box.width / host.offsetWidth;
+        const box = basis.getBoundingClientRect();
+        if (!box.width || !box.height) return;
+        const scaleX = box.width / 100,
+          scaleY = box.height / 100;
         const point = current.coordsAtPos(head);
-        caret.style.left = `${(point.left - box.left) / scale}px`;
-        caret.style.top = `${(point.top - box.top) / scale}px`;
-        caret.style.height = `${(point.bottom - point.top) / scale}px`;
+        caret.style.left = `${(point.left - box.left) / scaleX}px`;
+        caret.style.top = `${(point.top - box.top) / scaleY}px`;
+        caret.style.height = `${(point.bottom - point.top) / scaleY}px`;
       };
       const refresh = () => update(view);
       const observer = new ResizeObserver(refresh);
@@ -67,6 +75,7 @@ export function persistentCaret() {
           document.fonts.removeEventListener("loadingdone", refresh);
           document.removeEventListener("selectionchange", refresh);
           caret.remove();
+          basis.remove();
         },
       };
     },

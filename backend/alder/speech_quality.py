@@ -54,7 +54,7 @@ def speech_projection(text, entries, voice_id):
     return normalize_spoken(spoken, mappings), mappings
 
 
-def projected_sections(text, entries, voice_id, max_chars=220, max_words=40):
+def projected_sections(text, entries, voice_id, max_chars=220, max_words=40, lead_chars=None):
     from .speech import split_narration, pronunciation_projection
     pending = split_narration(text, max_chars, max_words)
     _, global_mappings = pronunciation_projection(text, entries, voice_id)
@@ -66,6 +66,22 @@ def projected_sections(text, entries, voice_id, max_chars=220, max_words=40):
         else:
             merged.append(part)
     pending = merged
+    # Interactive neural reading starts with a short clause, then returns to
+    # normal section sizes. Keep complete words and pronunciation replacements.
+    if lead_chars and pending and len(pending[0]['text']) > lead_chars:
+        first = pending[0]
+        boundaries = [m.start() for m in re.finditer(r'\S+', first['text'])
+                      if 0 < m.start() <= lead_chars and not any(
+                          rule['sourceStart'] < first['sourceStart'] + m.start() < rule['sourceEnd']
+                          for rule in global_mappings)]
+        clauses = [at for at in boundaries if at >= lead_chars // 4 and first['text'][:at].rstrip().endswith((',', ';', ':'))]
+        if boundaries:
+            boundary = (clauses or boundaries)[-1]
+            left = first['text'][:boundary].rstrip()
+            pending[:1] = [
+                {**first, 'text': left, 'sourceEnd': first['sourceStart'] + len(left), 'paragraphEnd': False},
+                {**first, 'text': first['text'][boundary:], 'sourceStart': first['sourceStart'] + boundary},
+            ]
     result = []
     while pending:
         part = pending.pop(0)

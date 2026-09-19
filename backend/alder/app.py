@@ -461,6 +461,9 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             rules = data.get("rules", [])
             for rule in rules: validate_rule(rule)
             project["pronunciation"] = rules
+            # Explicit audition rules are already selected by the editor, including
+            # single-rule previews of dictionaries disabled for normal narration.
+            project.setdefault("settings", {})["disabledPronunciationDictionaries"] = []
             text = data.get("text", "")
             if not isinstance(text,str) or not text.strip() or len(text)>1000: raise ValueError("Test between 1 and 1,000 characters.")
             return await run_in_threadpool(speech_service().submit, project, {"scope":"selection", "text":text,"voiceId":data.get("voiceId","default"),"format":"wav"})

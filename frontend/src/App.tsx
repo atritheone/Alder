@@ -1126,7 +1126,6 @@ export default function App() {
     );
   const voiceManager = (
     <div className="voice-dictionary-panel">
-      <h3>Voices</h3>
       <VoiceManager
         onPlaybackChange={setVoiceTestPlaying}
         projectId={project.id}
@@ -1150,7 +1149,6 @@ export default function App() {
             });
         }}
       />
-      <h3 className="dictionary-section-heading">Dictionaries</h3>
       <PronunciationManager
         project={project}
         voices={voices}
@@ -3231,7 +3229,7 @@ export default function App() {
                 <div className="about-panel">
                   <AlderLogo />
                   <h1>Alder</h1>
-                  <p>Organic Language Engine · 0.1.0</p>
+                  <p>Organic Language Engine · 0.11.0</p>
                   <p>
                     Language as material. A workstation for writing,
                     experimenting, collating, and listening.

@@ -321,7 +321,7 @@ export default function Browser({
                   category === "Voices" ? "Voice Management" : category
                 }
               >
-                <h3>{category}</h3>
+                {category !== "Voices" && <h3>{category}</h3>}
                 {category === "Voices" ? voiceManager : libraryManager}
               </section>
             ) : (

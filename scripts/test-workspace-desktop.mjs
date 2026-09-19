@@ -271,10 +271,25 @@ try {
   ).toBeVisible();
   await expect(
     browser.getByRole("button", {
-      name: "Add Reference Voiceâ€¦",
+      name: "Add reference voice",
       exact: true,
     }),
   ).toBeVisible();
+  await expect(
+    browser.getByRole("heading", { name: "Voices", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    browser.getByRole("heading", { name: "Dictionaries", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    browser.getByRole("button", {
+      name: "Add or create dictionary",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await browser
+    .locator(".voice-dictionary-panel")
+    .screenshot({ path: path.resolve("work/voice-panel.png") });
   const voiceLibrary = browser.getByRole("region", { name: "Voice Library" });
   const voiceRows = await page.evaluate(
     async () =>
@@ -284,22 +299,42 @@ try {
   expect(systemVoice).toBeTruthy();
   await voiceLibrary
     .getByRole("button", {
-      name: `Select Voice ${systemVoice.name}`,
+      name: `Select voice ${systemVoice.name}`,
+      exact: true,
+    })
+    .dblclick();
+  await expect(
+    voiceLibrary.getByLabel("Voice name", { exact: true }),
+  ).toHaveValue(systemVoice.name);
+  await voiceLibrary
+    .getByLabel("Voice name", { exact: true })
+    .fill("Library Reading Voice");
+  await expect(
+    voiceLibrary.getByLabel("Voice name", { exact: true }),
+  ).toHaveValue("Library Reading Voice");
+  await voiceLibrary.getByLabel("Voice name", { exact: true }).press("Enter");
+  await expect(
+    voiceLibrary.getByRole("button", {
+      name: "Rename voice Library Reading Voice",
+      exact: true,
+    }),
+  ).toBeEnabled();
+  await voiceLibrary
+    .getByRole("button", {
+      name: "Rename voice Library Reading Voice",
       exact: true,
     })
     .click();
-  await expect(
-    voiceLibrary.getByLabel("Voice Name", { exact: true }),
-  ).toHaveValue(systemVoice.name);
   await voiceLibrary
-    .getByLabel("Voice Name", { exact: true })
-    .fill("Library Reading Voice");
+    .getByLabel("Voice name", { exact: true })
+    .fill("Cancelled name");
+  await voiceLibrary.getByLabel("Voice name", { exact: true }).press("Escape");
   await expect(
-    voiceLibrary.getByLabel("Voice Name", { exact: true }),
-  ).toHaveValue("Library Reading Voice");
-  await voiceLibrary
-    .getByRole("button", { name: "Rename", exact: true })
-    .click();
+    voiceLibrary.getByRole("button", {
+      name: "Select voice Library Reading Voice",
+      exact: true,
+    }),
+  ).toBeVisible();
   const readingVoiceOption = page
     .getByLabel("Reading voice", { exact: true })
     .locator(`option[value="${systemVoice.id}"]`);
@@ -308,7 +343,10 @@ try {
     voiceLibrary.getByRole("button", { name: "Audition", exact: true }),
   ).toHaveCount(0);
   await voiceLibrary
-    .getByRole("button", { name: "Test Voice", exact: true })
+    .getByRole("button", {
+      name: "Test voice Library Reading Voice",
+      exact: true,
+    })
     .click();
   await expect
     .poll(() => voiceLibrary.locator("audio").evaluate((a) => a.currentTime), {
@@ -322,14 +360,20 @@ try {
   );
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await voiceLibrary
-    .getByRole("button", { name: "Stop Voice Test", exact: true })
+    .getByRole("button", {
+      name: "Stop testing Library Reading Voice",
+      exact: true,
+    })
     .click();
   await expect(page.locator(".persistent-caret .write-caret")).toHaveCSS(
     "visibility",
     "visible",
   );
   await voiceLibrary
-    .getByRole("button", { name: "Remove", exact: true })
+    .getByRole("button", {
+      name: "Remove voice Library Reading Voice",
+      exact: true,
+    })
     .click();
   await expect(readingVoiceOption).toHaveCount(0);
   await expect(
@@ -340,13 +384,14 @@ try {
   ).toHaveCount(0);
   await expect(
     voiceLibrary.getByRole("button", {
-      name: "Select Voice Library Reading Voice",
+      name: "Select voice Library Reading Voice",
       exact: true,
     }),
   ).toHaveCount(0);
-  await browser
-    .getByRole("button", { name: "Edit Dictionaryâ€¦", exact: true })
-    .click();
+  await browser.getByRole("button", { name: "Add or create dictionary", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Create", exact: true }).click();
+  await browser.getByRole("textbox", { name: "Dictionary name", exact: true }).press("Enter");
+  await browser.getByRole("button", { name: "Edit dictionary New Dictionary", exact: true }).click();
   const pronunciationDialog = page.getByRole("dialog", {
     name: /Pronunciation/,
   });

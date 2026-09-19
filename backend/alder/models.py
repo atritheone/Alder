@@ -275,10 +275,10 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         value = p["settings"][prop]
         if not isinstance(value, (int, float)) or not low <= value <= high:
             raise ValidationError(f"Invalid document setting: {prop}.")
-    for field in ("rules", "customRules", "ignoredRules", "ignoredRuleIds"):
+    for field in ("rules", "customRules", "ignoredRules", "ignoredRuleIds", "disabledPronunciationDictionaries"):
         if not isinstance(p["settings"].get(field, []), list):
             raise ValidationError(f"{field} must be an array.")
-    for field in ("ignoredRules", "ignoredRuleIds"):
+    for field in ("ignoredRules", "ignoredRuleIds", "disabledPronunciationDictionaries"):
         if not all(isinstance(value, str) for value in p["settings"].get(field, [])):
             raise ValidationError(f"{field} must contain rule names or identifiers.")
     custom_rules = p["settings"].get("customRules", [])

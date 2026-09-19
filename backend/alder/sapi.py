@@ -23,15 +23,23 @@ using System.Speech.Synthesis;
 using System.Speech.AudioFormat;
 public class AlderWord { public string text; public int start; public int length; public double seconds; }
 public class AlderSapi {
+  private static SpeechSynthesizer synthesizer;
+  public static void Prepare(string voice) {
+    if (synthesizer == null) synthesizer = new SpeechSynthesizer();
+    if (!String.IsNullOrEmpty(voice) && synthesizer.Voice.Name != voice) synthesizer.SelectVoice(voice);
+  }
   public static List<AlderWord> Render(string text, string voice, string path, int rate, int volume, int pitch) {
     var words = new List<AlderWord>();
-    using (var s = new SpeechSynthesizer()) {
-      s.SelectVoice(voice); s.Rate = rate; s.Volume = volume;
+    Prepare(voice);
+    var s = synthesizer;
+    EventHandler<SpeakProgressEventArgs> progress = (o,e) => words.Add(new AlderWord {text=e.Text, start=e.CharacterPosition, length=e.CharacterCount, seconds=e.AudioPosition.TotalSeconds});
+    try {
+      s.Rate = rate; s.Volume = volume;
       s.SetOutputToWaveFile(path, new SpeechAudioFormatInfo(24000, AudioBitsPerSample.Sixteen, AudioChannel.Mono));
-      s.SpeakProgress += (o,e) => words.Add(new AlderWord {text=e.Text, start=e.CharacterPosition, length=e.CharacterCount, seconds=e.AudioPosition.TotalSeconds});
+      s.SpeakProgress += progress;
       if (pitch == 0) s.Speak(text);
       else s.SpeakSsml("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='" + s.Voice.Culture.Name + "'><prosody pitch='" + (pitch >= 0 ? "+" : "") + pitch + "st'>" + System.Security.SecurityElement.Escape(text) + "</prosody></speak>");
-    }
+    } finally { s.SpeakProgress -= progress; s.SetOutputToNull(); }
     return words;
   }
 }
@@ -47,8 +55,8 @@ def _call(payload):
     return request(SCRIPT, payload)
 
 
-def prepare():
-    return _call({"operation": "prepare"})
+def prepare(voice=None):
+    return _call({"operation": "prepare", "voice": voice})
 
 
 def shutdown():

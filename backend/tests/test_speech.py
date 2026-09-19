@@ -490,3 +490,15 @@ def test_numbered_heading_does_not_merge_with_following_prose():
 def test_recognisable_spelling_does_not_trigger_new_speech():
     assert compare_transcript('a recognisable economy', 'a recognizable economy')['matched']
     assert not compare_transcript('a recognisable economy', 'an unrecognizable economy')['matched']
+
+
+@pytest.mark.parametrize("disabled,expected", [([], "hamster"), (["First"], "rat"), (["Second"], "mouse"), (["First", "Second"], "rat")])
+def test_dictionary_activation_filters_narration_and_preserves_rule_order(service, disabled, expected):
+    from alder.pronunciation import import_rex
+    source = project()
+    source["clips"][0]["text"] = "rat"
+    source["pronunciation"] = import_rex(b"rat=mouse", "First")["rules"] + import_rex(b"mouse=hamster", "Second")["rules"]
+    source["settings"] = {"disabledPronunciationDictionaries": disabled}
+    job = service.submit(source, {"scope": "clip", "clipId": "clip"})
+    assert job["chunks"][0]["spokenText"] == expected
+    assert len(source["pronunciation"]) == 2

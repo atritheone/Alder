@@ -75,11 +75,14 @@ def _replace(source, destination):
             time.sleep(.02 * (attempt + 1))
 
 
-def _atomic_json(path: Path, value):
+def _atomic_json(path: Path, value, *, compact=False):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     with temporary.open("w", encoding="utf-8") as handle:
-        json.dump(value, handle, ensure_ascii=False, indent=2)
+        if compact:
+            handle.write(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+        else:
+            json.dump(value, handle, ensure_ascii=False, indent=2)
         handle.flush()
         os.fsync(handle.fileno())
     _replace(temporary, path)
@@ -483,11 +486,15 @@ class SpeechService:
             raise ValueError("verificationRetries must be an integer from 0 to 2.")
         if verify and not self.capabilities()["verification"]["available"]:
             raise ValueError(self.capabilities()["verification"]["reason"])
+        disabled_dictionaries = set(project.get("settings", {}).get("disabledPronunciationDictionaries", []))
+        pronunciation = [rule for rule in project.get("pronunciation", [])
+                         if (rule.get("dictionary") or "My Rules") not in disabled_dictionaries]
         chunks, source_offset, occurrences = [], 0, {}
         for source in sources:
             voice = self._voice(source["voiceId"])
             from .speech_quality import projected_sections
-            for chunk in projected_sections(source["text"], project.get("pronunciation", []), voice["id"]):
+            lead_chars = 80 if request.get("interactive") and not chunks and not voice["id"].startswith("sapi-") else None
+            for chunk in projected_sections(source["text"], pronunciation, voice["id"], lead_chars=lead_chars):
                 spoken, mappings = chunk["spokenText"], chunk["pronunciationMap"]
                 content = _hash({"text": spoken, "voice": voice.get("hash", "default"), "segmentVersion": SEGMENT_VERSION})
                 chunk_seed = (seed + int(content[:8], 16)) % 2**32
@@ -497,14 +504,18 @@ class SpeechService:
             source_offset += len(source["text"]) + 2
         job = {"id": uuid.uuid4().hex, "projectId": project["id"], "sourceRevision": project.get("revision", 0), "status": "queued", "progress": 0, "message": "Queued for narration.", "text": source_text, "chunks": chunks, "createdAt": _now(), "updatedAt": _now(), "request": copy.deepcopy(request), "settings": settings, "format": output_format, "engine": "sapi" if all(c["voiceId"].startswith("sapi-") for c in chunks) else "chatterbox-turbo", "modelRevision": self.runtime["modelRevision"], "sourceFingerprint": self.runtime["sourceRevision"], "sourceOffsetUnit": "unicodeCodePoint", "seed": seed, "follow": bool(request.get("follow", False)), "verify": verify, "verificationRetries": verification_retries, "verificationModelRevision": self.runtime.get("qaModelRevision") if verify else None}
         with self._lock:
+            self._initialize_job(job, project, request)
             self._jobs[job["id"]] = job
             self._persist(job)
             self._enqueue(job)
             return self._public(job)
 
+    def _initialize_job(self, job, project, request):
+        """Apply service policy before a job's first durable publication."""
+
     def _persist(self, job):
         job["updatedAt"] = _now()
-        _atomic_json(self.root / "jobs" / job["id"] / "manifest.json", job)
+        _atomic_json(self.root / "jobs" / job["id"] / "manifest.json", job, compact=True)
 
     def _public(self, job):
         result = copy.deepcopy(job)

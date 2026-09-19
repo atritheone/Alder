@@ -219,13 +219,8 @@
 .voice-dictionary-panel .pronunciation-library {
   padding: 0;
 }
-.voice-dictionary-panel > h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.voice-dictionary-panel > .dictionary-section-heading {
+.voice-dictionary-panel .dictionary-section-heading {
   border-top: 1px solid var(--border, #aaa);
+  margin-top: 8px;
   padding-top: 12px;
 }

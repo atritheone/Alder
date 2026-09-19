@@ -9,6 +9,20 @@ export type PageLayout = {
   zoom: number;
 };
 export type FlowPage = { from: number; to: number; text: string };
+export function pageAtPosition(
+  pages: FlowPage[],
+  position: number,
+): number | null {
+  if (!pages.length) return null;
+  let low = 0,
+    high = pages.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (pages[middle].from <= position) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
 export const PAGE_GAP = 28;
 
 /** Paginate one continuous editable document using layout-only spacers.
