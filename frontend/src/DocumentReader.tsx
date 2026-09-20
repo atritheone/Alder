@@ -865,46 +865,6 @@ export default function DocumentReader(p: Props) {
         >
           <Square size={12} />
         </button>
-        {voices.find((v) => v.id === voice)?.system && (
-          <details className="system-voice-controls">
-            <summary>Voice controls</summary>
-            <small>
-              Changes apply when reading starts again. Rate and pitch depend on
-              the voice.
-            </small>
-            {(["rate", "pitch", "volume"] as const).map((control) => (
-              <label key={control}>
-                {control === "rate"
-                  ? "Voice rate"
-                  : control === "pitch"
-                    ? "Voice pitch"
-                    : "Voice volume"}
-                <input
-                  type="range"
-                  min={control === "volume" ? 0 : -10}
-                  max={control === "volume" ? 100 : 10}
-                  step={1}
-                  value={
-                    p.project.settings.speechOptions?.[control] ??
-                    p.project.settings.speechOptions?.[
-                      `sapi${control[0].toUpperCase()}${control.slice(1)}`
-                    ] ??
-                    (control === "volume" ? 100 : 0)
-                  }
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    p.change((project) => {
-                      project.settings.speechOptions = {
-                        ...project.settings.speechOptions,
-                        [control]: value,
-                      };
-                    });
-                  }}
-                />
-              </label>
-            ))}
-          </details>
-        )}
         <span className="speed-control">
           Speed{" "}
           <PlaybackSpeed
