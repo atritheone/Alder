@@ -29,6 +29,8 @@ def source_files(source):
     for directory in SOURCE_DIRS + ('chatterbox/src',):
         for p in sorted((source/directory).rglob('*')):
             if any(part in ('node_modules','__pycache__','.git','.pytest_cache','test-results') for part in p.parts):continue
+            relative=p.relative_to(source).parts
+            if relative[:2]==('electron','native') and len(relative)>3 and relative[3]=='build':continue
             if p.is_file() and p.suffix not in ('.pyc','.pyo'):
                 if not p.resolve().is_relative_to(source.resolve()):raise SetupError('ALDER_SOURCE','Source links outside the repository are not accepted.')
                 yield p
@@ -53,13 +55,14 @@ def state_default():
 
 def environment(state):
     env=dict(os.environ)
-    for key in ('PYTHONHOME','PYTHONPATH','PYTHONUSERBASE','VIRTUAL_ENV','CONDA_PREFIX','ELECTRON_RUN_AS_NODE','ALDER_RESOURCES_DIR','ALDER_DATA_DIR','ALDER_PROOFREADING_RESOURCES','ALDER_PROOFREADING_PYTHON'):
+    for key in ('PYTHONHOME','PYTHONPATH','PYTHONUSERBASE','VIRTUAL_ENV','CONDA_PREFIX','ELECTRON_RUN_AS_NODE','ALDER_RESOURCES_DIR','ALDER_DATA_DIR','ALDER_PROOFREADING_RESOURCES','ALDER_PROOFREADING_PYTHON','PYTHON','NODE_GYP_FORCE_PYTHON','npm_config_python','ALDER_NODE_GYP_CACHE'):
         env.pop(key,None)
     scratch=state/'scratch';scratch.mkdir(parents=True,exist_ok=True)
     env.update(PYTHONNOUSERSITE='1',PYTHONDONTWRITEBYTECODE='1',PYTHONUTF8='1',
                TMPDIR=str(scratch),TMP=str(scratch),TEMP=str(scratch),APP_BUILDER_TMP_DIR=str(scratch),
                ALDER_PACKAGE_TMP_DIR=str(scratch),PIP_CACHE_DIR=str(state/'cache/pip'),
                ELECTRON_CACHE=str(state/'cache/electron'),ELECTRON_BUILDER_CACHE=str(state/'cache/electron-builder'))
+    env['ALDER_NODE_GYP_CACHE']=str(state/'cache/node-gyp')
     return env
 
 
@@ -114,6 +117,8 @@ def build(source,state,target,env,node,npm,resources,fingerprint,offline):
     if offline:raise SetupError('ALDER_OFFLINE','No verified assembled application is cached for this revision. Build online once before offline reinstall.')
     marker.unlink(missing_ok=True)
     env={**env,'ALDER_RESOURCES_DIR':str(resources),'PATH':str(node.parent)+os.pathsep+env.get('PATH','')}
+    if target=='win32-x64':
+        env={**env,'PYTHON':str(resources/'python/python.exe'),'NODE_GYP_FORCE_PYTHON':str(resources/'python/python.exe')}
     logs=state/'logs';check_space(state,20*2**30)
     run([node,npm,'ci','--cache',state/'cache/npm'],workspace,env,logs,'npm-ci')
     run([node,npm,'test'],workspace,env,logs,'source-tests',timeout=600)
@@ -137,11 +142,13 @@ def execute(args):
     if args.command=='validate':return validate_metadata(SOURCE)
     # No writes or downloads are needed for Python-level doctor.
     info=inspect_host(SOURCE,state,install,target,allow_experimental=args.allow_experimental,
-                      need_space=args.command=='doctor')
+                      need_space=args.command=='doctor',need_build=args.command in ('doctor','install','update','repair'))
     if args.command=='doctor':return {'status':'ready',**info}
     if args.command=='update':
         plan=update_plan(SOURCE,install,target,source_fingerprint(SOURCE),args.expect_version)
-        if args.check:return {**plan,'stateDirectory':str(state),'warnings':info['warnings'],'checks':'preflight only; application verification has not run'}
+        if args.check:return {**plan,'stateDirectory':str(state),'warnings':info['warnings'],
+                              'features':info.get('features',{}),'windowsBuildTools':info.get('windowsBuildTools'),
+                              'checks':'preflight only; application verification has not run'}
     own_state(state)
     with operation_lock(state), installation_lock(install):
         if args.command=='uninstall':return uninstall(install)
@@ -171,7 +178,7 @@ def execute(args):
             result=desktop(workspace,install/active['directory'],target,node,env,state/'logs')
             capabilities(workspace,resource_dir(install/active['directory'],target),target,env,state/'logs/installed')
             active['verification']=result['status'];write_json(install/'active.json',active)
-            return {'status':result['status'],'version':active['version'],'installation':str(install),'launcher':active.get('launcher'),'checks':result}
+            return {'status':result['status'],'version':active['version'],'installation':str(install),'launcher':active.get('launcher'),'checks':result,'features':info.get('features',{})}
         if active and active['fingerprint']==fingerprint and args.command!='repair' and verify_inventory(install/active['directory'],read_json(install/active['inventory'])):
             if not (workspace/'node_modules').exists():
                 raise SetupError('ALDER_VERIFY','Verification workspace is missing. Run repair to restore it.')
@@ -179,7 +186,7 @@ def execute(args):
             capabilities(workspace,resource_dir(install/active['directory'],target),target,env,state/'logs/installed')
             active['verification']=result['status'];write_json(install/'active.json',active)
             if source_fingerprint(SOURCE)!=fingerprint:raise SetupError('ALDER_SOURCE','Repository changed during verification. Retry against a stable revision.')
-            return {'status':result['status'],'version':active['version'],'previousVersion':active['version'],'reused':True,'launcher':active.get('launcher'),'installation':str(install),'sourceUnchanged':True}
+            return {'status':result['status'],'version':active['version'],'previousVersion':active['version'],'reused':True,'launcher':active.get('launcher'),'installation':str(install),'sourceUnchanged':True,'features':info.get('features',{})}
         require_closed(install)
         check_space(state,(80 if target=='darwin-x64' else 45)*2**30)
         if args.command=='repair':
@@ -217,7 +224,7 @@ def execute(args):
         if result['status']=='passed':prune_versions(install)
         return {'status':result['status'],'version':version,'previousVersion':active['version'] if active else None,'target':target,'installation':str(install),
                 'launcher':new['launcher'],'sourceUnchanged':True,'offlineRuntime':True,
-                'speechDevice':'cpu baseline','humanListeningApproval':False,'warnings':info['warnings']}
+                'speechDevice':'cpu baseline','humanListeningApproval':False,'warnings':info['warnings'],'features':info.get('features',{})}
 
 
 def report_failure(args, result):
@@ -238,7 +245,7 @@ def main(argv=None):
     parser.add_argument('--state-dir',type=Path,default=state_default())
     parser.add_argument('--install-dir',type=Path,help='Existing managed root for update; application destination for install.')
     parser.add_argument('--check',action='store_true',help='Update only: report installed/repository versions without building or activating.')
-    parser.add_argument('--expect-version',help='Update only: require this release, for example 0.11 (equivalent to package version 0.11.0).')
+    parser.add_argument('--expect-version',help='Update only: require this release, for example 0.12 (equivalent to package version 0.12.0).')
     parser.add_argument('--offline',action='store_true')
     parser.add_argument('--json',action='store_true')
     parser.add_argument('--noninteractive',action='store_true',help='Setup never prompts for credentials or runs elevated prerequisites.')

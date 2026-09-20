@@ -31,7 +31,7 @@ try {
   const interactive = process.env.ALDER_MENU_INTERACTIVE === "1";
   await page.getByRole("button", { name: "New", exact: true }).waitFor();
 
-  probe("capture", path.resolve("work/windows-menu-before.png"), "e6e6e6");
+  probe("capture", path.resolve("work/windows-menu-before.png"), "e1e1e1");
   const file = inspect().menu[0];
   expect(file.label).toBe("&File");
   expect(inspect().background).toBeTruthy();

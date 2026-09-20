@@ -17,14 +17,20 @@ try {
     app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].getContentSize(),
     );
-  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized())).toBe(false);
-  expect(Math.abs((await size())[0] - 590)).toBeLessThanOrEqual(3);
-  expect(Math.abs((await size())[1] - 460)).toBeLessThanOrEqual(3);
+  expect(
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].isMaximized(),
+    ),
+  ).toBe(false);
+  await expect.poll(async () => (await size())[0]).toBe(480);
+  const startSize = await size();
+  expect(startSize[1]).toBeGreaterThanOrEqual(300);
+  expect(startSize[1]).toBeLessThanOrEqual(350);
   await page.getByRole("button", { name: "New", exact: true }).click();
   const form = page.getByRole("dialog", { name: "New document" });
+  await expect.poll(async () => (await size())[0] - (await form.boundingBox()).width).toBeGreaterThanOrEqual(150);
+  await expect.poll(async () => (await size())[1] - (await form.boundingBox()).height).toBeGreaterThanOrEqual(150);
   let rect = await form.boundingBox();
-  expect((await size())[0] - rect.width).toBeGreaterThanOrEqual(150);
-  expect((await size())[1] - rect.height).toBeGreaterThanOrEqual(150);
   await page.getByRole("button", { name: "Book Chapters & pages" }).click();
   await expect.poll(async () => (await size())[1]).toBeGreaterThan(700);
   rect = await form.boundingBox();
@@ -38,11 +44,17 @@ try {
   await page
     .getByRole("textbox", { name: "Chapter text editor", exact: true })
     .waitFor();
-  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized())).toBe(true);
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0].isMaximized(),
+      ),
+    )
+    .toBe(true);
   console.log(
     JSON.stringify({
       ok: true,
-      start: [590, 460],
+      start: startSize,
       padding: 80,
       bookExpands: true,
       workspaceMaximises: true,

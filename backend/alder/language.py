@@ -238,8 +238,8 @@ def _u16(text: str, offset: int) -> int:
 
 
 def analyze(text: str, project: dict | None = None, rules: list | None = None, rule_ids: list | None = None) -> dict:
-    if not isinstance(text, str) or len(text) > 1_000_000:
-        raise ValidationError("Analysis text must contain at most one million characters.")
+    if not isinstance(text, str):
+        raise ValidationError("Analysis text must be a string.")
     if rules is not None and (not isinstance(rules, list) or not all(isinstance(rule, str) for rule in rules)):
         raise ValidationError("Analysis rules must be a list of rule names.")
     if rule_ids is not None and (not isinstance(rule_ids, list) or not all(isinstance(rule_id, str) for rule_id in rule_ids)):
@@ -250,14 +250,16 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
     ignored = set((project or {}).get("settings", {}).get("ignoredRules", []))
     ignored |= {aliases[r] for r in ignored if r in aliases}
     enabled -= ignored
+    # UTF-16 offsets without repeatedly encoding the entire prefix of long documents.
+    from bisect import bisect_left
+    astral = [i for i, char in enumerate(text) if ord(char) > 0xffff]
+    def offset(index):
+        return index + bisect_left(astral, index)
     annotations = []
     tokens = list(WORDS.finditer(text))
 
     def add(rule, start, end, message, suggestion=None, kind="style", rule_id=None, rule_name=None):
-        # Keep one overflow marker so callers can report incomplete coverage.
-        if len(annotations) > 2000:
-            return
-        annotation = {"id": f"{rule}:{start}:{end}", "type": kind, "rule": rule, "start": _u16(text, start), "end": _u16(text, end), "message": message}
+        annotation = {"id": f"{rule}:{start}:{end}", "type": kind, "rule": rule, "start": offset(start), "end": offset(end), "message": message}
         if rule_id is not None:
             annotation.update({"id": f"{rule}:{rule_id}:{start}:{end}", "ruleId": rule_id, "ruleName": rule_name or "Custom rule"})
         if suggestion is not None:
@@ -344,8 +346,6 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
         ignored_ids = ignored | set(settings.get("ignoredRuleIds", []))
         selected_ids = set(rule_ids) if rule_ids is not None else None
         for rule in custom_rules[:300]:
-            if len(annotations) > 2000:
-                break
             if not isinstance(rule, dict) or not rule.get("enabled", True):
                 continue
             identifier = rule.get("id")
@@ -359,11 +359,9 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
                 pattern = r"(?<!\w)" + pattern + r"(?!\w)"
             for match in re.finditer(pattern, text, 0 if rule.get("caseSensitive") else re.I):
                 add("custom", match.start(), match.end(), str(rule.get("message", "A project rule matched this wording.")), rule.get("replacement"), rule_id=identifier, rule_name=rule.get("name"))
-                if len(annotations) > 2000:
-                    break
     annotations.sort(key=lambda a: (a["start"], a["end"], a["rule"]))
-    return {"annotations": annotations[:2000], "words": len(tokens), "sentences": len(sentences),
-            "readingSeconds": round(len(tokens) / 180 * 60, 1), "offsetEncoding": "utf-16", "truncated": len(annotations) > 2000}
+    return {"annotations": annotations, "words": len(tokens), "sentences": len(sentences),
+            "readingSeconds": round(len(tokens) / 180 * 60, 1), "offsetEncoding": "utf-16", "truncated": False}
 
 
 def transform(text: str, kind: str, settings: dict | None = None) -> dict:

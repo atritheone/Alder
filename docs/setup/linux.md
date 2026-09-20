@@ -4,6 +4,12 @@ The native adapter targets glibc 2.35+ x64 Linux (not musl/Alpine). Ubuntu 24.04
 validation distributions; other distributions need equivalent libraries and native
 acceptance. Run setup from a normal graphical desktop account, never root.
 
+For an existing installation, follow the [agent update runbook](updating.md) with
+`bash update.sh --check --expect-version 0.12 --json`. The update provisions local
+spelling/grammar rules and the experimental advanced-review CPU model using pinned
+Linux wheels. It reuses Alder's private Java/Python; no Windows C++ module or Visual
+Studio tools are used. Installed checks must exercise the rules and model.
+
 The bootstrap needs bash, curl, tar, a SHA-256 utility and a writable local state
 directory. Debian-family prerequisite examples (only this command uses sudo):
 
@@ -33,7 +39,9 @@ The installer diagnoses capacity but never changes partitions.
 
 Electron requires a working sandbox and desktop session. Setup will not add
 `--no-sandbox`, change system security settings or run Electron as root. Headless
-assembly can leave verification pending; run `bash setup.sh verify` after logging
-into the graphical desktop.
+assembly can leave verification pending. For an existing-app update, rerun
+`bash update.sh` with the same options from the graphical desktop; the old version
+stays active until verification passes. For a first installation, use
+`bash setup.sh verify` from that desktop.
 
 Optional system voices use the distribution-provided eSpeak NG library and data (Ubuntu: libespeak-ng1 and espeak-ng-data). Chatterbox does not require them. Restart Alder after installing voice packages. Doctor reports whether the optional library is found; installed checks report unavailable rather than passed when no voices exist. See [system voices](../system-voices.md).

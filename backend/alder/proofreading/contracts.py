@@ -10,9 +10,7 @@ import re
 from ..models import ValidationError
 
 DIALECTS = ("en-AU", "en-GB", "en-US")
-MAX_TEXT = 1_000_000
 MAX_BLOCK = 2400
-MAX_FINDINGS = 2000
 
 
 def fingerprint(value) -> str:
@@ -55,26 +53,28 @@ def configuration(project: dict, supplied: dict | None = None) -> dict:
 
 
 def blocks(text: str):
-    """Keep structural boundaries and split long paragraphs only at sentence endings."""
+    """Check every passage, using bounded engine requests without skipping long sentences."""
+    cursor = offset = 0
     for match in re.finditer(r"[^\n\t]+", text):
+        offset += u16(text[cursor:match.start()])
         paragraph = match.group()
         position = 0
         while position < len(paragraph):
-            end = len(paragraph)
-            if end - position > MAX_BLOCK:
-                boundaries = list(re.finditer(r'[.!?][\u201d\u2019"\']?\s+', paragraph[position:position + MAX_BLOCK]))
-                if boundaries:
-                    end = position + boundaries[-1].end()
-                else:
-                    # A single oversized sentence remains visible as unchecked coverage.
-                    boundary = re.search(r'[.!?][\u201d\u2019"\']?\s+', paragraph[position:])
-                    end = position + boundary.end() if boundary else len(paragraph)
+            end = min(len(paragraph), position + MAX_BLOCK)
+            if end < len(paragraph):
+                window = paragraph[position:end]
+                boundaries = list(re.finditer(r"[.!?][\u201d\u2019\"']?\s+", window))
+                spaces = list(re.finditer(r"\s+", window)) if not boundaries else []
+                if boundaries or spaces:
+                    end = position + (boundaries or spaces)[-1].end()
             passage = paragraph[position:end]
             if passage.strip():
-                yield {"text": passage, "start": u16(text, match.start() + position),
+                yield {"text": passage, "start": offset,
                        "id": str(match.start() + position), "hash": fingerprint(passage),
-                       "eligible": len(passage) <= MAX_BLOCK}
+                       "eligible": True}
+            offset += u16(passage)
             position = end
+        cursor = match.end()
 
 
 def diagnostic(text, start, end, category, rule, message, replacements, engine, edits=None):

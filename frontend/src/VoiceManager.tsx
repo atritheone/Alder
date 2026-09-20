@@ -25,7 +25,6 @@ type Props = {
 };
 export default function VoiceManager(p: Props) {
   const [all, setAll] = useState(p.voices);
-  const [selectedId, setSelectedId] = useState(p.voices[0]?.id || "default");
   const [name, setName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const editing = useRef<string | null>(null);
@@ -69,7 +68,6 @@ export default function VoiceManager(p: Props) {
   }, [editingId]);
   const rename = (voice: Voice) => {
     if (busy) return;
-    setSelectedId(voice.id);
     setName(voice.name);
     editing.current = voice.id;
     setEditingId(voice.id);
@@ -113,7 +111,6 @@ export default function VoiceManager(p: Props) {
       return;
     }
     if (testing) stopTest();
-    setSelectedId(voice.id);
     setTestingId(voice.id);
     const attempt = ++request.current;
     transport.prepare();
@@ -233,7 +230,7 @@ export default function VoiceManager(p: Props) {
             >
               {group.map((v) => (
                 <div
-                  className={`voice-card${selectedId === v.id ? " selected" : ""}`}
+                  className="voice-card"
                   key={v.id}
                   onContextMenu={(event) => {
                     if ((event.target as Element).closest("input, form"))
@@ -262,10 +259,6 @@ export default function VoiceManager(p: Props) {
                       ],
                       { label: `${v.name} voice actions` },
                     );
-                  }}
-                  onClick={(e) => {
-                    if (!(e.target as Element).closest("button, input, form"))
-                      setSelectedId(v.id);
                   }}
                 >
                   <div className="voice-card-name">
@@ -305,10 +298,8 @@ export default function VoiceManager(p: Props) {
                     ) : (
                       <button
                         className="voice-name-button"
-                        aria-label={`Select voice ${v.name}`}
-                        aria-pressed={selectedId === v.id}
+                        aria-label={`Voice ${v.name}`}
                         data-help="Double-click to rename this voice."
-                        onClick={() => setSelectedId(v.id)}
                         onDoubleClick={() => rename(v)}
                         onKeyDown={(event) => {
                           if (event.key === "F2") {

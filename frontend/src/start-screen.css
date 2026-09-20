@@ -1,11 +1,12 @@
 .start-screen {
-  min-height: 100dvh;
-  background: #e6e6e6;
+  zoom: var(--ui-scale);
+  min-height: calc(100dvh / var(--ui-scale));
+  background: #e1e1e1;
   color: #303030;
   display: flex;
   align-items: center;
   flex-direction: column;
-  padding: 18vh 24px 40px;
+  padding: 30px 32px;
 }
 .start-brand {
   text-align: center;
@@ -28,14 +29,14 @@
   width: 150px;
   height: 64px;
   gap: 14px;
-  background: #f4f4f4;
-  border: 1px solid #aaaaaa;
+  background: transparent;
+  border: 0;
   font-size: 16px;
 }
 .start-open {
   width: min(520px, 100%);
   margin-top: 32px;
-  max-height: 42vh;
+  max-height: 360px;
   overflow: auto;
 }
 .new-document {
@@ -51,6 +52,7 @@
   padding: 15px 8px;
 }
 .document-kinds small {
+  text-transform: none;
   font-size: 11px;
   color: #555555;
 }
@@ -62,4 +64,44 @@
 .new-book-fields .checkbox-label {
   flex-direction: row;
   align-items: center;
+}
+
+.start-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+}
+.start-screen--open .start-content {
+  width: min(520px, 100%);
+}
+.start-screen button,
+body:has(.start-screen) .new-document button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.start-screen button:hover {
+  color: var(--accent);
+  background: transparent;
+}
+.start-screen button:focus-visible {
+  outline: 2px solid var(--accent);
+}
+body:has(.start-screen) .document-kinds button.active {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+}
+body:has(.start-screen) .new-document button.accent {
+  background: transparent;
+  color: var(--accent);
+  border: 0;
+}
+body:has(.start-screen) .new-document input[name="name"] {
+  border: 0;
+  outline: none;
+  box-shadow: none;
 }

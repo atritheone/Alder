@@ -258,7 +258,7 @@ try {
     .locator(".detail-pane")
     .screenshot({ path: path.resolve("work/sandbox-toolbar.png") });
   await page
-    .getByRole("combobox", { name: "Draft voice", exact: true })
+    .getByRole("combobox", { name: "Sandbox voice", exact: true })
     .selectOption("default");
   await expect(
     controls.getByRole("combobox", { name: "Sandbox voice", exact: true }),

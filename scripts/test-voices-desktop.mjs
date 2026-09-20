@@ -85,7 +85,7 @@ try {
       .locator(".voice-card")
       .filter({
         has: page.getByRole("button", {
-          name: "Select voice Default",
+          name: "Voice Default",
           exact: true,
         }),
       })
@@ -101,7 +101,7 @@ try {
   ).toHaveCount(0);
   await voiceLibrary
     .getByRole("button", {
-      name: `Select voice ${systemVoice.name}`,
+      name: `Voice ${systemVoice.name}`,
       exact: true,
     })
     .dblclick();
@@ -139,7 +139,7 @@ try {
   await voiceLibrary.getByLabel("Voice name", { exact: true }).press("Escape");
   await expect(
     voiceLibrary.getByRole("button", {
-      name: "Select voice Library Reading Voice",
+      name: "Voice Library Reading Voice",
       exact: true,
     }),
   ).toBeVisible();
@@ -192,7 +192,7 @@ try {
   ).toHaveCount(0);
   await expect(
     voiceLibrary.getByRole("button", {
-      name: "Select voice Library Reading Voice",
+      name: "Voice Library Reading Voice",
       exact: true,
     }),
   ).toHaveCount(0);
@@ -203,7 +203,7 @@ try {
     .click();
   await expect(
     voiceLibrary.getByRole("button", {
-      name: "Select voice Library Reading Voice",
+      name: "Voice Library Reading Voice",
       exact: true,
     }),
   ).toBeVisible();
@@ -390,7 +390,7 @@ try {
   );
   const voiceCard = voiceLibrary.locator(".voice-card").first();
   await voiceCard.click({ position: { x: 3, y: 3 } });
-  await expect(voiceCard).toHaveClass(/selected/);
+  await expect(voiceCard).not.toHaveClass(/selected/);
   await expect(voiceCard).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await library.screenshot({ path: path.resolve("work/dictionary-cards.png") });
   await library

@@ -1,4 +1,4 @@
-# System voices in Alder 0.11
+# System voices in Alder 0.12
 
 Alder discovers optional system voices once at application startup. There is no
 Refresh voices button. Restart Alder after adding/removing an operating-system

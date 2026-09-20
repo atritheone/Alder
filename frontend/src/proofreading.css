@@ -80,3 +80,79 @@
   font-weight: bold;
   user-select: none;
 }
+
+.proofreading-window,
+.proofreading-hover {
+  zoom: var(--ui-scale);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: #dadada;
+  color: var(--ink);
+  box-shadow: 0 8px 24px #0003;
+  font-size: 13px;
+}
+.proofreading-window {
+  padding: 0;
+  width: min(760px, calc((100vw - 32px) / var(--ui-scale)));
+  max-height: calc((100dvh - 32px) / var(--ui-scale));
+  max-width: none;
+}
+.proofreading-window[open] {
+  display: flex;
+  flex-direction: column;
+}
+.proofreading-window::backdrop {
+  background: #0003;
+}
+.proofreading-window > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.proofreading-window h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.proofreading-window > header button {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+}
+.proofreading-report-body {
+  overflow: auto;
+  padding: 16px 20px;
+}
+.proofreading-hover {
+  position: fixed;
+  z-index: 90;
+  padding: 10px 14px;
+  width: min(360px, calc((100vw - 16px) / var(--ui-scale)));
+  max-height: calc((100dvh - 16px) / var(--ui-scale));
+  overflow: auto;
+}
+.proofreading-panel .check-item {
+  border-bottom: 1px solid var(--line);
+}
+.proofreading-panel .check-item button {
+  border-radius: 0;
+  white-space: normal;
+}
+.proofreading-panel .check-item > button:first-child {
+  background: transparent;
+  border: 0;
+  justify-content: flex-start;
+}
+.proofreading-report-body .check-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 130px;
+}
+.proofreading-hover .check-item {
+  padding: 0;
+  border: 0;
+}
+
+.proofreading-hover .proofreading-panel button {
+  font-size: 10px;
+}

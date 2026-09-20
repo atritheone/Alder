@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import type { Analysis, Project } from "./types";
 
@@ -168,12 +168,16 @@ export function useProofreading(
     result.localConfiguration === configuration + projectRules + selectedRange
       ? result
       : null;
-  const visible = current
-    ? {
-        ...current,
-        annotations: current.annotations.filter((a) => !ignored.has(a.id)),
-      }
-    : null;
+  const visible = useMemo(
+    () =>
+      current
+        ? {
+            ...current,
+            annotations: current.annotations.filter((a) => !ignored.has(a.id)),
+          }
+        : null,
+    [current, ignored],
+  );
   return {
     result: visible,
     error,
@@ -194,6 +198,7 @@ export function useProofreading(
       setAdvanced(true);
       setRefresh((value) => value + 1);
     },
+    wholeText: () => setSelection(null),
     fastOnly: () => {
       setSelection(null);
       setAdvanced(false);

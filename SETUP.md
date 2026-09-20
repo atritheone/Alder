@@ -1,14 +1,14 @@
-# Agent setup entry point for Alder 0.11
+# Agent setup entry point for Alder 0.12
 
 These instructions are for the coding agent doing the work. The user only needs
 to ask to install or update Alder; do not hand routine terminal work back to them.
-This repository contains **0.11**. If Alder is already installed, follow the
+This repository contains **0.12**. If Alder is already installed, follow the
 [agent update runbook](docs/setup/updating.md) first. Check the old and new versions
 before updating the existing managed installation:
 
 ```powershell
-.\update.ps1 --check --expect-version 0.11 --json
-.\update.ps1 --expect-version 0.11 --json
+.\update.ps1 --check --expect-version 0.12 --json
+.\update.ps1 --expect-version 0.12 --json
 ```
 
 On Linux or Mac, use `bash ./update.sh` with the same options. Close Alder normally
@@ -23,6 +23,14 @@ required. First setup downloads verified private runtimes, dependencies, languag
 data and speech models. Internet access and roughly 45 GiB of free workspace are
 required; setup checks the actual disk and install destination before large work.
 The repository can be read-only. Nothing is generated or patched in it.
+
+For 0.12, inspect the `features` report: all targets provision the local spelling
+and grammar rules; Windows x64, Linux x64 and Apple Silicon also provision the
+experimental advanced-review model/runtime. Intel Mac is rules-only. Windows
+requires Visual Studio C++ Build Tools and a Windows SDK to compile its native
+menu module; Linux and Mac exclude that module. See the
+[0.12 update prerequisites](docs/setup/updating.md#012-resources-and-prerequisites)
+and [Windows setup](docs/setup/windows.md). No global Java or Python is needed.
 
 Windows x64 (PowerShell):
 

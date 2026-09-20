@@ -63,9 +63,10 @@ protocol.registerSchemesAsPrivileged([
 ]);
 let windowsMenu: WindowsMenu | null = null;
 let applicationMenu: Menu | null = null;
+let applicationMenuBackground = "#e1e1e1";
 let workspaceWindow = false;
 let workspaceBounds: Electron.Rectangle | null = null;
-function sizeWindow(mode: "start" | "workspace", width = 590, height = 460) {
+function sizeWindow(mode: "start" | "workspace", width = 480, height = 342) {
   if (!window || window.isDestroyed()) return;
   const workspace = mode === "workspace";
   if (workspace && workspaceWindow) return;
@@ -75,7 +76,7 @@ function sizeWindow(mode: "start" | "workspace", width = 590, height = 460) {
     if (window.isMaximized()) window.unmaximize();
   }
   workspaceWindow = workspace;
-  window.setMinimumSize(workspace ? 900 : 480, workspace ? 680 : 400);
+  window.setMinimumSize(workspace ? 900 : 480, workspace ? 680 : 300);
   if (window.isMaximized() || window.isFullScreen()) return;
   const area = screen.getDisplayMatching(previous).workArea;
   const content = window.getContentBounds();
@@ -107,8 +108,9 @@ function sizeWindow(mode: "start" | "workspace", width = 590, height = 460) {
   });
   if (workspace) window.maximize();
 }
-function installMenu(menu: Menu, background = "#e6e6e6") {
+function installMenu(menu: Menu, background: string) {
   applicationMenu = menu;
+  applicationMenuBackground = background;
   if (process.platform === "win32") {
     if (windowsMenu) windowsMenu.set(menu, background);
     else Menu.setApplicationMenu(null);
@@ -302,7 +304,7 @@ async function registerProtocols() {
 function registerIPC() {
   ipcMain.handle(
     "alder:window-layout",
-    (event, mode: unknown, width = 590, height = 460) => {
+    (event, mode: unknown, width = 480, height = 342) => {
       trusted(event);
       if (
         (mode !== "start" && mode !== "workspace") ||
@@ -313,7 +315,7 @@ function registerIPC() {
       sizeWindow(
         mode,
         Math.max(480, Math.min(2000, Math.ceil(width))),
-        Math.max(400, Math.min(1600, Math.ceil(height))),
+        Math.max(300, Math.min(1600, Math.ceil(height))),
       );
     },
   );
@@ -461,7 +463,11 @@ function registerIPC() {
     trusted(e);
     if (!Array.isArray(bytes) || bytes.length > 100 * 1024 * 1024)
       throw new Error("File exceeds the 100 MB import limit");
-    if (!/\/(import|assets|voices)$/.test(apiPath(p)))
+    const destination = apiPath(p);
+    if (
+      destination !== "/api/projects/open-file" &&
+      !/\/(import|assets|voices)$/.test(destination)
+    )
       throw new Error("Unsupported upload destination");
     const form = new FormData();
     form.append(
@@ -600,6 +606,7 @@ function setMenu() {
         },
       ]),
     ),
+    "#e1e1e1",
   );
 }
 async function createWindow() {
@@ -615,12 +622,12 @@ async function createWindow() {
   workspaceWindow = false;
   window = new BrowserWindow({
     icon: appIcon,
-    width: 590,
-    height: 460,
+    width: 480,
+    height: 342,
     useContentSize: true,
     minWidth: 480,
-    minHeight: 400,
-    backgroundColor: "#e6e6e6",
+    minHeight: 300,
+    backgroundColor: "#e1e1e1",
     title: "Alder",
     show:
       !process.argv.includes("--smoke-test") &&
@@ -638,7 +645,7 @@ async function createWindow() {
   });
   if (process.platform === "win32") {
     windowsMenu = new WindowsMenu(window);
-    if (applicationMenu) windowsMenu.set(applicationMenu);
+    if (applicationMenu) windowsMenu.set(applicationMenu, applicationMenuBackground);
   }
   window.on("close", (event) => {
     if (!closeAllowed) {

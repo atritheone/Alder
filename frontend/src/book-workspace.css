@@ -205,6 +205,8 @@
 }
 .page-navigation {
   display: flex;
+  height: 41px;
+  white-space: nowrap;
   gap: 5px;
   padding: 7px 12px;
   overflow: auto;
@@ -334,8 +336,21 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #aeaeae;
+  background: transparent;
   outline: none;
+}
+.arrangement-focus-backdrop {
+  position: absolute;
+  inset: 0;
+  background: #aeaeae80;
+  backdrop-filter: blur(3px);
+}
+.focused-page-motion {
+  position: relative;
+  transform-origin: top left;
+}
+.page-card.is-focus-source {
+  visibility: hidden;
 }
 .focused-page-sheet {
   pointer-events: auto;

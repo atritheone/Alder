@@ -211,7 +211,7 @@ napi_value Set(napi_env env, napi_callback_info info) {
   auto labels = std::make_unique<std::vector<std::wstring>>();
   HMENU next = Build(env, args[1], false, 0, labels.get());
   if (!next) return Fail(env, "Unable to create the Windows menu.");
-  uint32_t color = 0xe6e6e6;
+  uint32_t color = 0x909090;
   if (argc > 2) napi_get_value_uint32(env, args[2], &color);
   HBRUSH brush = CreateSolidBrush(RGB((color >> 16) & 255, (color >> 8) & 255, color & 255));
   MENUINFO style = {}; style.cbSize = sizeof(style); style.fMask = MIM_BACKGROUND; style.hbrBack = brush;

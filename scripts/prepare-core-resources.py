@@ -136,7 +136,7 @@ def download_resource(item, cache, offline=False, existing=None):
         raise ValueError("Offline build is missing the pinned resource: " + item["name"])
     cache.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".partial")
-    request = urllib.request.Request(item["url"], headers={"User-Agent": "Alder-resource-builder/0.11"})
+    request = urllib.request.Request(item["url"], headers={"User-Agent": "Alder-resource-builder/0.12"})
     with urllib.request.urlopen(request, timeout=180) as response, partial.open("wb") as target:
         shutil.copyfileobj(response, target, length=1024 * 1024)
     if sha256(partial) != item["sha256"]:

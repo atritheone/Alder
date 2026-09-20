@@ -6,7 +6,12 @@ const require = createRequire(import.meta.url);
 
 // Build alongside the Electron bundle; source testing copies electron/ into its external workspace.
 export function buildWindowsMenu() {
-  if (process.platform !== "win32") return;
+  const output = path.resolve("dist-electron/alder_windows_menu.node");
+  if (process.platform !== "win32") {
+    // Do not carry a stale Windows binary into a Unix bundle after switching hosts.
+    fs.rmSync(output, { force: true });
+    return;
+  }
   const source = path.resolve("electron/native/windows-menu");
   const version = require("electron/package.json").version;
   const bundledPython = path.join(
@@ -24,6 +29,8 @@ export function buildWindowsMenu() {
       ...(python ? [`--python=${python}`] : []),
       `--target=${version}`,
       `--arch=${process.arch}`,
+      ...(process.env.ALDER_NODE_GYP_CACHE
+        ? [`--devdir=${process.env.ALDER_NODE_GYP_CACHE}`] : []),
       "--dist-url=https://electronjs.org/headers",
       `--directory=${source}`,
     ],

@@ -1,15 +1,15 @@
-# Agent runbook: update Alder to 0.11
+# Agent runbook: update Alder to 0.12
 
 **Audience: the coding agent performing the update.** The user's request is simply
 "Update Alder." Carry out the procedure; do not give the user a list of terminal
-commands or ask them to edit the repository. Refer to this release as **0.11**. The package metadata retains the required
+commands or ask them to edit the repository. Refer to this release as **0.12**. The package metadata retains the required
 three-part version internally. It contains all required metadata, icons, checksums and
 dependency locks. A missing or inconsistent item is a repository defect, not
 permission to invent it.
 
 ## 1. Establish the source and installation
 
-Read `AGENTS.md` and `SETUP.md`. Use the obtained 0.11 repository or archive as
+Read `AGENTS.md` and `SETUP.md`. Use the obtained 0.12 repository or archive as
 read-only source. Do not reset, patch, or change dependency pins in the checkout.
 If the available checkout is not the requested release, obtain the correct
 published repository revision in a separate folder; preserve any existing local
@@ -19,11 +19,11 @@ Use the user's normal desktop account on the native OS. Run the applicable entry
 point from this checkout, without Administrator/root elevation:
 
 ```powershell
-.\update.ps1 --check --expect-version 0.11 --json
+.\update.ps1 --check --expect-version 0.12 --json
 ```
 
 ```sh
-bash ./update.sh --check --expect-version 0.11 --json
+bash ./update.sh --check --expect-version 0.12 --json
 ```
 
 `update.ps1` and `update.sh` forward to `setup update`. The check reports
@@ -32,6 +32,42 @@ bash ./update.sh --check --expect-version 0.11 --json
 ownership, target architecture, version order and data compatibility. It does
 not build or activate anything or run feature checks. It may provision the pinned
 private Python bootstrap if absent; no global Node/Python is needed.
+
+### 0.12 resources and prerequisites
+
+Inspect `features` in the preflight report before provisioning. The release adds
+local spelling/grammar checks and a Windows C++ menu module:
+
+| Native target | Spelling and grammar | Advanced review | Windows C++ module |
+| --- | --- | --- | --- |
+| Windows x64 | LanguageTool 6.6; AU/GB/US English | Pinned CPU model/runtime, experimental | Required; built locally |
+| Linux x64 | Same local rules | Pinned CPU model/runtime, experimental | Excluded; no Visual Studio requirement |
+| Apple Silicon Mac | Same local rules | Pinned CPU model/runtime, experimental; native acceptance pending | Excluded |
+| Intel Mac | Same local rules | Unavailable; no pinned inference runtime | Excluded; overall installation remains experimental |
+
+The rules use Alder's private Java runtime. The advanced engine uses its own
+private Python and native wheel lock, independent of narration. Do not install a
+global Java/Python, compile an unpinned inference library, or accept missing packs
+as a successful update. Missing required target metadata is a repository defect.
+An Intel Mac receives the explicit rules-only configuration; do not promise
+advanced review there or describe it as verified platform support.
+
+On Windows, preflight checks Visual Studio Build Tools 2022 or newer, MSBuild,
+the x64 C++ compiler, and a complete Windows 10/11 SDK. `windowsBuildTools` records
+the detected compiler and SDK. If absent, follow [Windows prerequisites](windows.md)
+and retry the check as the normal desktop user. The module is built against the
+pinned Electron headers with Alder's private Python; headers and intermediate
+files stay in external setup state. The installed application carries the compiled
+module and does not need a compiler to run. Never install this Windows prerequisite
+on Linux or Mac; their existing native OS prerequisites still apply.
+
+Allow about 240 MiB for the rules archive and 2.55 GiB for the model download,
+plus runtime dependencies, extraction, cache and application copies. An existing
+0.11 cache may not contain these new resources. Budget Windows Build Tools/SDK
+space separately from Alder's working-space check. Do not use `--offline` for a
+first 0.12 build: it requires an already assembled app for this exact revision
+and the corresponding verified caches. Reuse the existing state directory online
+to retain compatible downloads.
 
 Interpret the check:
 
@@ -61,11 +97,11 @@ requirements. It must still target the same managed installation.
 Examples with placeholder locations (substitute discovered absolute paths):
 
 ```powershell
-.\update.ps1 --check --expect-version 0.11 --state-dir "D:\AlderSetup" --install-dir "D:\Apps\AlderLocal" --json
+.\update.ps1 --check --expect-version 0.12 --state-dir "D:\AlderSetup" --install-dir "D:\Apps\AlderLocal" --json
 ```
 
 ```sh
-bash ./update.sh --check --expect-version 0.11 --state-dir "/disk/AlderSetup" --install-dir "/disk/AlderInstall" --json
+bash ./update.sh --check --expect-version 0.12 --state-dir "/disk/AlderSetup" --install-dir "/disk/AlderInstall" --json
 ```
 
 ## 2. Preserve the user's work
@@ -104,11 +140,11 @@ than creating an empty one or guessing another path. Preserve any custom
 Run the same entry point and path/version options, removing only `--check`:
 
 ```powershell
-.\update.ps1 --expect-version 0.11 --json
+.\update.ps1 --expect-version 0.12 --json
 ```
 
 ```sh
-bash ./update.sh --expect-version 0.11 --json
+bash ./update.sh --expect-version 0.12 --json
 ```
 
 If Windows blocks the local script, a process-scoped invocation is available:
@@ -121,6 +157,14 @@ Progress includes resource reuse/provisioning, source build, staged verification
 activation, and installed verification. The tests cover saving, fonts, publishing,
 narration and recognition using isolated test data. Keep the checkout stable until
 the command ends. Do not run a second updater against the same installation.
+
+Staged and installed checks also execute local spelling/grammar probes for all
+three dialects and real CPU model inference on targets with advanced review.
+Intel Mac explicitly runs rules-only probes. Windows checks require the compiled
+native module outside ASAR and launch the actual desktop application; Unix
+payloads reject a misplaced Windows module. Check results are in the state's
+`logs/staged` and `logs/installed` directories, including `proofreading.json` and
+`capabilities.json`. Feature policy in preflight is not execution evidence.
 
 Setup checks for 45 GiB free working space (80 GiB for experimental Intel Mac
 builds) and checks the installation disk before copying the new version. Budget
@@ -147,11 +191,15 @@ them. Use **Alder (local)** on Windows, **Alder** in the Linux application menu,
 `~/Applications/Alder.app` on Mac. Report any user-visible confirmation that could
 not be performed separately from the automated checks.
 
-Use release labels such as **0.11** in user-facing messages. Preflight exposes
+Use release labels such as **0.12** in user-facing messages. Preflight exposes
 `installedRelease` and `repositoryRelease` for this purpose; `installedVersion`,
 `repositoryVersion` and completion `version` retain machine-readable package versions.
 Give the user a short outcome: old → new release, launcher, backup location, and
 remaining limitations. Do not hand off routine commands for the user to execute.
+
+Include advanced review's experimental quality status, Intel Mac's rules-only
+restriction where applicable, and any missing native acceptance evidence. Do not
+describe a model smoke test as comprehensive proofreading quality validation.
 
 ## Retry and rollback
 
@@ -185,7 +233,7 @@ updater at those folders. Complete this transition instead:
    original data location and confirm projects/reference voices remain available.
    Prefer Alder's `.alder` import for portable project recovery; never hand-edit
    SQLite contents to make a migration appear successful.
-5. Leave the old copy available and tell the user which launcher now runs 0.11.
+5. Leave the old copy available and tell the user which launcher now runs 0.12.
    Removing the old copy is optional follow-up work; do not uninstall it as part
    of this update unless separately requested. Subsequent updates use update.ps1
    or update.sh against the managed root.

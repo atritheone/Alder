@@ -1,0 +1,100 @@
+/* Shared control treatment, matching Start > New. These appearance rules
+   intentionally override component skins; components still own their layout,
+   sizing, typography and content surfaces. Portalled dialogs use the same rules. */
+body button {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit !important;
+}
+
+body
+  button:is(
+    .accent,
+    .primary,
+    .active,
+    .selected,
+    .chosen,
+    .playing,
+    .favourited,
+    .library-add-button,
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    [aria-current="page"],
+    [aria-expanded="true"],
+    [aria-checked="true"]
+  ),
+body .active > button,
+body button:not(:disabled):not([aria-disabled="true"]):hover {
+  color: var(--accent) !important;
+}
+
+body button:disabled,
+body button[aria-disabled="true"] {
+  opacity: 0.42;
+  cursor: default;
+}
+
+/* Keyboard focus is temporary, rather than a permanent box around controls. */
+body button:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: -2px !important;
+}
+
+body
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+    [type="color"]
+  ),
+body select,
+body textarea {
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  caret-color: var(--accent);
+}
+
+body select {
+  background-color: transparent !important;
+}
+
+body select:focus-visible {
+  color: var(--accent);
+}
+
+/* Keep actual toggles and their state visible; their squares are the control. */
+body input:is([type="checkbox"], [type="radio"], [type="range"]) {
+  accent-color: var(--accent);
+}
+
+/* List separators divide choices without drawing a box around each choice. */
+body .alder-context-menu button + button {
+  border-top: 1px solid #b7bec7 !important;
+}
+
+body .voice-card {
+  border: 0;
+  border-bottom: 1px solid #b7bec7;
+  border-radius: 0;
+}
+
+body .chapter-entry.selected {
+  background: transparent;
+  border-color: transparent;
+}
+
+.alder-app > .statusbar {
+  background: inherit;
+}
+
+.sandbox-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reading-estimate {
+  white-space: nowrap;
+  margin-left: 8px;
+}

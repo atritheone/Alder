@@ -10,6 +10,8 @@ import struct
 import subprocess
 import sys
 from common import SetupError, read_json, check_space
+from features import MODEL_TARGETS, feature_plan
+from windows_tools import windows_build_tools
 
 TARGETS = ('win32-x64', 'linux-x64', 'darwin-arm64', 'darwin-x64')
 
@@ -70,6 +72,15 @@ def validate_metadata(source):
     common=read_json(source/'resources/manifests/common.json')
     records=common['artifacts']+common['models']
     proofreading=read_json(source/'resources/manifests/proofreading.json')
+    if set(proofreading['pythonBindings']) != set(MODEL_TARGETS):
+        raise SetupError('ALDER_METADATA','Proofreading bindings must cover Windows x64, Linux x64 and Apple Silicon; Intel Mac is explicitly rules-only.')
+    if 'dist-electron/*.node' not in build.get('asarUnpack',[]):
+        raise SetupError('ALDER_METADATA','The Windows native menu module must be unpacked from ASAR.')
+    for file in ('scripts/build-windows-menu.mjs','electron/native/windows-menu/menu.cc','electron/native/windows-menu/binding.gyp'):
+        if not (source/file).is_file():raise SetupError('ALDER_METADATA','Missing Windows native menu source: '+file)
+    gyp=package.get('devDependencies',{}).get('node-gyp')
+    if not isinstance(gyp,str) or not re.fullmatch(r'\d+\.\d+\.\d+',gyp) or lock.get('packages',{}).get('node_modules/node-gyp',{}).get('version')!=gyp:
+        raise SetupError('ALDER_METADATA','Windows menu builds require a pinned node-gyp matching package-lock.json.')
     records += [proofreading['rules'],proofreading['model'],*proofreading['pythonBindings'].values(),*proofreading['notices']]
     for file in ('python','node','java','calibre','ffmpeg'):
         manifest=read_json(source/f'scripts/{file}-sources.json')
@@ -95,10 +106,14 @@ def validate_metadata(source):
             lines=[x for x in lock.read_text().splitlines() if x and not x.startswith('#')]
             if not lines or any('--hash=sha256:' not in line for line in lines):
                 raise SetupError('ALDER_METADATA',f'Unhashed dependency in {lock.name}')
+            if group=='proofreading':
+                binding=proofreading['pythonBindings'][target]
+                expected=f'llama-cpp-python @ {binding["url"]} --hash=sha256:{binding["sha256"]}'
+                if expected not in lines:raise SetupError('ALDER_METADATA','Proofreading lock and native binding disagree for '+target)
     return {'metadata':'passed','version':package['version'],'targets':list(TARGETS),'artifacts':len(records)}
 
 
-def inspect_host(source, state, install, target, *, allow_experimental=False, need_space=True):
+def inspect_host(source, state, install, target, *, allow_experimental=False, need_space=True, need_build=True):
     result=validate_metadata(source)
     if (hasattr(os,'geteuid') and os.geteuid()==0) or (sys.platform=='win32' and ctypes.windll.shell32.IsUserAnAdmin()):
         raise SetupError('ALDER_ROOT','Use a normal desktop account, without sudo/administrator elevation.')
@@ -128,17 +143,7 @@ def inspect_host(source, state, install, target, *, allow_experimental=False, ne
             raise SetupError('ALDER_PREREQUISITE', 'Missing Linux libraries: '+', '.join(missing)+'. See docs/setup/linux.md for distro-specific packages; do not run setup with sudo.')
         if not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
             warnings.append('No graphical session; installation verification will remain pending until verify runs from the desktop.')
-    if sys.platform=='win32':
-        vswhere=Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
-        compiler=None
-        if vswhere.is_file():
-            try:
-                compiler=subprocess.check_output([str(vswhere),'-latest','-products','*',
-                    '-version','[17.0,)','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
-                    '-property','installationPath'],text=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW).strip()
-            except (OSError,subprocess.SubprocessError):pass
-        if not compiler:
-            raise SetupError('ALDER_PREREQUISITE','Building the Windows native menus requires Visual Studio Build Tools 2022 or newer with Desktop development with C++ and a Windows SDK. Install those components, then rerun setup. Packaged Alder does not require build tools.')
+    build_tools=windows_build_tools() if target=='win32-x64' and need_build else None
     if sys.platform=='darwin' and not shutil.which('xcrun'):
         raise SetupError('ALDER_PREREQUISITE','Install Apple Command Line Tools with xcode-select --install, then retry.')
     if need_space:
@@ -151,6 +156,7 @@ def inspect_host(source, state, install, target, *, allow_experimental=False, ne
         if not optional_voices['libraryFound']:
             optional_voices['reason'] = 'Optional eSpeak NG library/voice data are absent; Chatterbox is independent.'
     return {**result,'target':target,'stateDirectory':str(state),'installation':str(install), 'systemVoices': optional_voices,
+            'features':feature_plan(source,target),'windowsBuildTools':build_tools,
             'memoryGiB':round(memory/2**30,1) if memory else None,
             'speechRuntime':'CPU wheels on Windows/Linux; native Torch on Mac; actual device is verified by inference',
             'warnings':warnings,'estimatedPeakGiB':80 if target=='darwin-x64' else 45,

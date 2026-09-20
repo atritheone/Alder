@@ -10,6 +10,7 @@ import re
 import sys
 from common import SetupError, digest, inventory, read_json, write_json, run, verify_inventory, remove_owned
 from downloads import fetch, extract, gunzip
+from features import feature_plan
 
 
 class Resources:
@@ -168,7 +169,7 @@ class Resources:
 
     def proofreading(self):
         manifest=read_json(self.source/'resources/manifests/proofreading.json')
-        advanced=self.target in manifest['pythonBindings']
+        advanced=feature_plan(self.source,self.target)['proofreading']['advanced']!='unavailable'
         if advanced:
             self.runtime('proofreading','proofreading/python')
         def make():
@@ -180,7 +181,8 @@ class Resources:
                       self.output/'proofreading/manifest.json',self.output/'proofreading/notices']
             if advanced:produced.append(self.output/'proofreading/models')
             return produced
-        self.component('proofreading-data',{'manifest':manifest,'advanced':advanced},make)
+        self.component('proofreading-data',{'manifest':manifest,'advanced':advanced,
+                       'preparer':digest(self.source/'scripts/prepare-proofreading-resources.py')},make)
 
     def prepare(self):
         core=self.runtime('core','python')

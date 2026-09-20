@@ -96,14 +96,53 @@ def test_missing_pack_retains_basic_spelling_and_personal_dictionary(service):
     assert not any(item['type'] == 'spelling' for item in result['annotations'])
 
 
-def test_rules_checked_but_oversized_paragraphs_visible(service, monkeypatch):
+def test_oversized_sentences_are_checked_in_full(service, monkeypatch):
     monkeypatch.setattr(service.resources, 'capabilities', lambda: {'rules': {'available': True}, 'model': {'available': False}})
     calls = []
     monkeypatch.setattr(service.rules, 'check', lambda text, config: calls.append(text) or [])
     job = finish(service, service.start({'text': 'Good.\n' + 'x' * 2500, 'targetId': 'chapter-a'})['id'])
-    assert calls == ['Good.']
-    assert job['status'] == 'partial'
-    assert job['coverage'] == {'totalBlocks': 2, 'checkedBlocks': 1, 'advancedBlocks': 0, 'skippedBlocks': 1}
+    assert calls == ['Good.', 'x' * 2400, 'x' * 100]
+    assert job['status'] == 'completed'
+    assert job['coverage'] == {'totalBlocks': 3, 'checkedBlocks': 3, 'advancedBlocks': 0, 'skippedBlocks': 0}
+
+
+def test_no_document_or_finding_cap(service, monkeypatch):
+    monkeypatch.setattr(service.resources, 'capabilities', lambda: {'rules': {'available': True}, 'model': {'available': False}})
+    calls = []
+    def check(text, config):
+        calls.append(text)
+        return [diagnostic(text, 0, 3, 'spelling', 'test', 'Fix', ['Good'], 'rules')] if text.startswith('Bad') else []
+    monkeypatch.setattr(service.rules, 'check', check)
+    # Over one million characters, over 2,000 findings, and non-BMP offsets.
+    text = ('Bad 😀 ' + 'word ' * 100 + '\n') * 2200
+    job = finish(service, service.start({'text': text, 'targetId': 'long'})['id'], timeout=15)
+    assert job['status'] == 'completed'
+    assert len(job['annotations']) == 2200
+    assert job['coverage']['checkedBlocks'] == 2200
+    assert not job['truncated']
+    last = job['annotations'][-1]
+    assert slice16(text, last['start'], last['end']) == 'Bad'
+    assert service.capabilities()['maximumTextLength'] is None
+    assert service.capabilities()['maximumFindings'] is None
+
+
+def test_basic_checker_has_no_finding_cap():
+    from alder.language import analyze
+    text = '😀 word  word\n' * 2200
+    result = analyze(text, rules=['punctuation'])
+    assert len(result['annotations']) == 2200
+    assert not result['truncated']
+    for issue in (result['annotations'][0], result['annotations'][-1]):
+        assert slice16(text, issue['start'], issue['end']) == '  '
+
+
+def test_long_sentence_chunks_preserve_unicode_and_whitespace():
+    text = ('word 😀 ' * 1800) + 'x' * 5000
+    passages = list(blocks(text))
+    assert ''.join(p['text'] for p in passages) == text
+    assert all(len(p['text']) <= 2400 and p['eligible'] for p in passages)
+    for passage in passages:
+        assert slice16(text, passage['start'], passage['start'] + u16(passage['text'])) == passage['text']
 
 
 def test_superseded_request_is_cancelled(service, monkeypatch):

@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://atritheone.com/alder">Website</a> ·
-  <a href="#update-to-alder-011">Update to 0.11</a> ·
+  <a href="#update-to-alder-012">Update to 0.12</a> ·
   <a href="#install-alder">Install</a> ·
   <a href="#start-writing">Start writing</a> ·
   <a href="#listen-to-your-writing">Listen</a> ·
@@ -25,9 +25,9 @@ Alder is an **Organic Language Engine (OLE)**, an application software used for 
 
 Alder is named after **Dr. Alder Wright**.
 
-## Update to Alder 0.11
+## Update to Alder 0.12
 
-This repository contains **Alder 0.11**. If you already have Alder, open this
+This repository contains **Alder 0.12**. If you already have Alder, open this
 repository in your coding agent and give it this request:
 
 > Update Alder for me. Follow AGENTS.md and docs/setup/updating.md, preserve my
@@ -37,6 +37,12 @@ Your agent checks the installed version, preserves your existing locations,
 backs up your data, runs the update, and verifies the result. You do not need to
 edit files or run terminal commands yourself. Existing verified resources are
 reused, and a compatible previous version is retained for rollback.
+
+The 0.12 update includes local spelling and grammar resources. Your agent also
+checks the C++ build tools needed for Windows' native menus; Linux and Mac do not
+use that Windows component. Advanced review is experimental, with the model
+available on Windows x64, Linux x64 and Apple Silicon. Intel Mac receives the
+spelling/grammar rules only and remains an experimental installation target.
 
 The [agent update runbook](docs/setup/updating.md) covers custom locations,
 recovery, and older installer or portable copies. You do not need to uninstall
@@ -204,7 +210,7 @@ GPU support; Mac acceleration has not yet been validated.
 
 ## Updates and help
 
-For version 0.11, follow the [update guide](docs/setup/updating.md) or give your
+For version 0.12, follow the [update guide](docs/setup/updating.md) or give your
 agent the request above. Obtain the new repository version before updating; setup
 does not fetch or alter your repository for you. Close Alder before maintenance
 and keep backups of your projects. The update scripts include verification, so a

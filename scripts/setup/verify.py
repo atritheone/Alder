@@ -51,6 +51,11 @@ def capabilities(workspace,resources,target,env,logs):
 
 
 def desktop(workspace,app,target,node,env,logs,full=True):
+    native_menu=resource_dir(app,target)/'app.asar.unpacked/dist-electron/alder_windows_menu.node'
+    if target=='win32-x64' and not native_menu.is_file():
+        raise SetupError('ALDER_CAPABILITY','Installed Windows native menu module is missing from the unpacked application.')
+    if target!='win32-x64' and native_menu.exists():
+        raise SetupError('ALDER_CAPABILITY','A Windows native menu module was incorrectly included in a Unix application.')
     if target.startswith('linux') and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
         return {'status':'pending','reason':'Run verify from a graphical desktop session.'}
     environment={**env,'ALDER_DESKTOP_EXECUTABLE':str(executable(app,target)),

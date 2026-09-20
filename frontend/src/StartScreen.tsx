@@ -249,6 +249,29 @@ export default function StartScreen({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (mode === "new" || !content.current) return;
+    const element = content.current;
+    const fit = () => {
+      const scale =
+        Number(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            "--ui-scale",
+          ),
+        ) || 1;
+      const rect = element.getBoundingClientRect();
+      void window.alder?.setWindowLayout(
+        "start",
+        Math.max(480, rect.width + 96 * scale),
+        Math.max(300, rect.height + 60 * scale),
+      );
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    fit();
+    return () => observer.disconnect();
+  }, [mode]);
   useEffect(() => {
     const open = () => setMode("open");
     window.addEventListener("alder-open-start", open);
@@ -274,83 +297,69 @@ export default function StartScreen({
       );
   }, [mode]);
   return (
-    <main className="start-screen">
-      <div className="start-brand">
-        <AlderLogo />
-        <h1>Alder</h1>
-        <p>Organic Language Engine</p>
-      </div>
-      <div className="start-actions">
-        <button onClick={() => setMode("new")}>
-          <FilePlus2 size={20} />
-          New
-        </button>
-        <button onClick={() => setMode(mode === "open" ? "home" : "open")}>
-          <FolderOpen size={20} />
-          Open
-        </button>
-      </div>
-      {mode === "open" && (
-        <section className="start-open" aria-label="Open document">
-          <div className="manager-actions">
-            <button disabled={busy} onClick={() => file.current?.click()}>
-              Open document file…
-            </button>
-            {window.alder && (
+    <main
+      className={`start-screen${mode === "open" ? " start-screen--open" : ""}`}
+    >
+      <div className="start-content" ref={content}>
+        <div className="start-brand">
+          <AlderLogo />
+          <h1>Alder</h1>
+          <p>Organic Language Engine</p>
+        </div>
+        <div className="start-actions">
+          <button onClick={() => setMode("new")}>
+            <FilePlus2 size={20} />
+            New
+          </button>
+          <button onClick={() => setMode(mode === "open" ? "home" : "open")}>
+            <FolderOpen size={20} />
+            Open
+          </button>
+        </div>
+        {mode === "open" && (
+          <section className="start-open" aria-label="Open document">
+            <div className="manager-actions">
+              <button disabled={busy} onClick={() => file.current?.click()}>
+                Open file…
+              </button>
+            </div>
+            {projects.length > 0 && <p className="quiet">Saved workspaces</p>}
+            {projects.map((p) => (
               <button
+                data-context-actions="self"
+                data-context-label="Open"
+                className="project-list-item"
+                key={p.id}
                 disabled={busy}
                 onClick={() =>
-                  void run(async () => {
-                    const path = await window.alder!.openPath();
-                    if (path)
-                      onOpen(
-                        await api<Project>("/api/projects/open", "POST", {
-                          path,
-                        }),
-                      );
-                  })
+                  void run(async () =>
+                    onOpen(await api<Project>(`/api/projects/${p.id}`)),
+                  )
                 }
               >
-                Open .alder archive…
+                <FolderOpen size={16} />
+                {p.name}
               </button>
-            )}
-          </div>
-          {projects.length > 0 && <p className="quiet">Saved workspaces</p>}
-          {projects.map((p) => (
-            <button
-              data-context-actions="self"
-              data-context-label="Open"
-              className="project-list-item"
-              key={p.id}
-              disabled={busy}
-              onClick={() =>
-                void run(async () =>
-                  onOpen(await api<Project>(`/api/projects/${p.id}`)),
-                )
-              }
-            >
-              <FolderOpen size={16} />
-              {p.name}
-            </button>
-          ))}
-        </section>
-      )}
-      {busy && <p role="status">Opening…</p>}
-      {error && <p role="alert">{error}</p>}
-      <input
-        ref={file}
-        type="file"
-        hidden
-        onChange={(e) => {
-          const selected = e.target.files?.[0];
-          e.target.value = "";
-          if (selected)
-            void run(async () => {
-              const opened = await openDocuments([selected]);
-              if (opened) onOpen(opened);
-            });
-        }}
-      />
+            ))}
+          </section>
+        )}
+        {busy && <p role="status">Opening…</p>}
+        {error && <p role="alert">{error}</p>}
+        <input
+          ref={file}
+          type="file"
+          hidden
+          onChange={(e) => {
+            const selected = e.target.files?.[0];
+            e.target.value = "";
+            if (selected)
+              void run(async () => {
+                const opened = await openDocuments([selected]);
+                if (opened) onOpen(opened);
+              });
+          }}
+        />
+      </div>
       {mode === "new" && (
         <NewDocument onCreate={onOpen} onClose={() => setMode("home")} />
       )}

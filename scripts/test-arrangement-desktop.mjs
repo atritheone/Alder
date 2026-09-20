@@ -243,7 +243,7 @@ try {
   const pageText = await cards.last().locator(".page-snapshot").textContent();
   await cards.last().dblclick();
   const focus = page.getByRole("dialog", {
-    name: `Page ${total} full view`,
+    name: `Page ${total} focused view`,
     exact: true,
   });
   await expect(focus).toBeVisible();

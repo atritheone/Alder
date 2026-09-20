@@ -27,24 +27,33 @@ an existing common-resource bundle. Dependencies are fetched and checked locally
 
 ## Validation status
 
-### Version 0.11 update workflow
+### Version 0.12 update workflow
 
 The update entry points are `update.ps1` and `update.sh`. They check existing
 installation ownership, target, release ordering and data compatibility before
-provisioning. Tests exercise upgrades from 0.1.0, an unchanged offline rerun,
+provisioning. Tests exercise preflight upgrades from 0.11 and transactions from
+0.1.0, an unchanged offline rerun,
 custom locations, version mismatches, legacy-install refusal, and failed/pending
 verification with restoration of both installation records. Native wrapper tests
 check argument forwarding and exit codes, including paths with spaces and Unicode.
-The setup suite passes on Windows and Ubuntu/WSL (platform-specific skips apply).
+On 20 September 2026, the 56-test setup suite passed on Windows and Ubuntu/WSL
+(three platform/tool-specific skips on each). Tests cover required proofreading
+bindings/locks, all four target provisioning policies, Windows SDK completeness,
+compiler-output retry handling and exclusion of Windows binaries on Unix.
 The actual Windows and Linux update wrappers also completed offline preflight
-against isolated 0.1.0 fixtures, reporting 0.11 as the target without changing
-those fixtures or activating an application.
-See [updating](setup/updating.md) for end-user and coding-agent instructions.
+against isolated 0.11 fixtures, reporting 0.12 and the correct feature policy
+without changing those fixtures or activating an application. The Windows C++
+module was compiled in external state with private Python, node-gyp 12.4.0,
+Electron 44.3.0 headers and Windows SDK 10.0.26100.0, then loaded in Electron.
+The actual electron-builder configuration validators passed for all three OS
+configurations, including metadata and icons.
+See [updating](setup/updating.md) for the coding-agent procedure and
+[proofreading](offline-proofreading.md) for separate rules/model execution evidence.
 
 These setup transaction tests use isolated fixture applications. They do not claim
-that the full 0.11 application has passed native installed acceptance. Mac native
+that the full 0.12 application has passed native installed acceptance. Mac native
 acceptance remains outstanding. The earlier full-application results below were
-recorded on 16 September for 0.1.0 and must not be read as 0.11 release validation.
+recorded on 16 September for 0.1.0 and must not be read as 0.12 release validation.
 
 ### Earlier 0.1.0 native installation evidence
 
@@ -99,4 +108,4 @@ modified as part of this cleanup.
 
 ## System voice provider work (20 September 2026)
 
-The shared speech pipeline now includes macOS AVSpeechSynthesizer and Linux eSpeak NG adapters alongside SAPI. Windows native synthesis/export and Ubuntu/WSL eSpeak synthesis, word timings, multilingual exports and cancellation were exercised. Mac dependencies were hash checked, but native Mac validation is pending because no Mac was available. These feature checks do not establish fresh installed acceptance for 0.11. See [system voices](system-voices.md) for details and limits.
+The shared speech pipeline now includes macOS AVSpeechSynthesizer and Linux eSpeak NG adapters alongside SAPI. Windows native synthesis/export and Ubuntu/WSL eSpeak synthesis, word timings, multilingual exports and cancellation were exercised. Mac dependencies were hash checked, but native Mac validation is pending because no Mac was available. These feature checks do not establish fresh installed acceptance for 0.12. See [system voices](system-voices.md) for details and limits.

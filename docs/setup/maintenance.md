@@ -3,9 +3,9 @@
 Agent reference: perform these operations for the user and report the outcome.
 Do not ask the user to run the commands or supply repository metadata.
 
-For the usual 0.11 upgrade, start with the [update guide](updating.md) and the
+For the usual 0.12 upgrade, start with the [update guide](updating.md) and the
 dedicated `update.ps1` / `update.sh` scripts. `--check` reports the existing and
-target versions before building; `--expect-version 0.11` prevents using the wrong
+target versions before building; `--expect-version 0.12` prevents using the wrong
 repository. Preserve your original custom paths and back up your data before updating.
 
 Use `setup.ps1` on Windows or `bash setup.sh` on Unix with the following commands:

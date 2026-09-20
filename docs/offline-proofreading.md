@@ -11,19 +11,21 @@ If the full pack is missing, Alder retains its basic spelling and punctuation ch
 - Select an alternative to apply it. Linked changes are applied together in one undo step. Empty replacements are supported.
 - Use **Check selected text** for the current selection, or **Check spelling and grammar** to return to the current chapter/draft.
 - Use **Advanced review** for contextual suggestions. Every proposed model change requires review and acceptance. It does not rewrite the manuscript automatically.
-- **Whole book review** scans chapter snapshots sequentially and reports the number of findings and completion status. Open a chapter to review its current suggestions. Changed chapters are marked for rechecking.
+- **Whole book review** scans chapter snapshots sequentially and lists the findings, their chapter context and completion status. Open a chapter to review its current suggestions. Changed chapters are marked for rechecking.
 - **Ignore once** hides an occurrence for the current review. **Ignore rule in project** persists an exception. Restore ignored rules under **Vocabulary and ignored rules**.
 - Accept names and specialised terms in the project dictionary or personal dictionary. Project vocabulary travels with the `.alder` archive; personal vocabulary stays in the configured Alder data directory and can be exported/imported explicitly.
 
 Changing the text invalidates suggestions immediately. A correction validates its complete source snapshot and each edit before applying. Corrections spanning document structure or mixed formatting are rejected with a manual-edit explanation. Other marks and links remain intact. Previous/next issue controls support keyboard navigation without requiring a click on an underline.
 
-“No issues found” appears only for a completed check with no visible findings. Missing packs, engine failures, skipped passages, cancellation and finding limits remain visible. A completed check is not a guarantee that the text has no errors.
+“No issues found” appears only for a completed check with no visible findings. Missing packs, engine failures, unavailable checks and cancellation remain visible. A completed check is not a guarantee that the text has no errors.
+
+The corner review panel shows only the issue at the text cursor. Hover over an underline for a small correction popup, or click **Spelling & grammar** in the status bar for the full report. Multi-chapter documents are scanned chapter by chapter in that report; selecting a finding opens its chapter and selects the affected text. Corrections remain bound to the checked text and can be undone.
 
 ## Runtime and resource packs
 
 The Windows source-testing launcher (`start.cmd`) provisions a missing proofreading pack through setup's pinned resource builder into its external `AlderTesting` workspace. It reuses and verifies that pack on subsequent launches; `--offline` requires cached artifacts and prevents provisioning downloads. Resource selection is recorded in `last-build.json`, which the desktop regression test also uses. Managed installations continue to provision the pack through setup/update.
 
-All Alder-owned proofreading service/worker code is Python. The editor integration is TypeScript. The inference dependency contains compiled native libraries, while LanguageTool runs in Alder's existing private Java runtime; end users do not install compilers or a separate Java/Python application.
+All Alder-owned proofreading service/worker code is Python. The editor integration is TypeScript. The inference dependency uses pinned native wheels, while LanguageTool runs in Alder's existing private Java runtime; proofreading needs no separate Java/Python application or inference compiler. Windows source builds separately require C++ Build Tools and a Windows SDK for the native menu module, as described in the [agent update runbook](setup/updating.md).
 
 The current candidate pack contains:
 
@@ -42,11 +44,11 @@ Windows x64, Linux x64 and Apple Silicon have pinned native inference wheel reco
 
 `ALDER_RESOURCES_DIR` selects the containing resource root. Developer overrides `ALDER_PROOFREADING_RESOURCES` and `ALDER_PROOFREADING_PYTHON` can select isolated test packs; managed setup clears these overrides. Personal vocabulary is `proofreading-dictionary.json` under the existing configured data directory, respecting `ALDER_DATA_DIR`.
 
-The rules service uses loopback; the model uses private pipes. Requests and manuscript text are not written to inference logs. Paragraph caches and findings are bounded and kept in memory. UTF-8 is explicitly configured for worker pipes on Windows, independently of the system code page.
+The rules service uses loopback; the model uses private pipes. Requests and manuscript text are not written to inference logs. Paragraph caches and retained job counts are bounded; findings are kept in memory without a fixed result cap. UTF-8 is explicitly configured for worker pipes on Windows, independently of the system code page.
 
 Fast checks have their own worker pool. Advanced review yields to active narration and unloads its model after idle time. A conservative launch check requires about 6 GiB of available memory; this is an admission estimate, not a reservation or proof of operation on every 16 GiB computer. If narration interrupts active inference, the panel reports that review is incomplete and must be restarted.
 
-Paragraphs and table-cell boundaries are preserved. Long paragraphs split at sentence endings; a single sentence exceeding the 2,400-character passage budget is visibly skipped. The model sees one passage at a time. Cross-paragraph contextual analysis and seamless retention of underlines during typing remain future work.
+Paragraphs and table-cell boundaries are preserved. Long paragraphs split at sentence endings, falling back to word boundaries (or character boundaries for oversized tokens). Every passage is checked; the 2,400-character engine request size is not a document limit. There is no fixed document-length or finding-count cap. The model sees one passage at a time. Cross-paragraph contextual analysis and seamless retention of underlines during typing remain future work.
 
 ## Verification and measured limits
 
@@ -72,7 +74,8 @@ The full plan is not complete. Release qualification still requires independent 
 - `scripts/setup/resources.py`: isolated Python runtime and data-pack provisioning in managed setup.
 - `scripts/verify-proofreading.py`: real AU/UK/US rule probes and real CPU model correction; called by managed installed capability verification.
 - `scripts/benchmark-proofreading.py`: reproducible authored-fixture smoke comparisons with explicit corpus/model identity.
-- `scripts/test-proofreading-desktop.mjs`: real editor replacements, undo, advanced review, whole-book scan and Sandbox isolation.
+- `scripts/test-proofreading-desktop.mjs`: real editor replacements, undo, advanced review and Sandbox isolation.
+- `scripts/test-proofreading-interactions-desktop.mjs`: caret-only review, hover corrections, whole-book findings and navigation, UI scaling, unified file opening and startup sizing.
 - `backend/tests/test_proofreading*.py` and `frontend/src/proofreadingEdits.test.ts`: cancellation, failure visibility, corrupt resources, Unicode/ranges, linked edits, formatting and undo protections.
 
 Missing or corrupt resources should be repaired through the documented managed setup workflow. Do not copy developer environments into an existing installation or change package versions to bypass update checks.

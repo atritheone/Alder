@@ -64,8 +64,17 @@ class UpdateTests(unittest.TestCase):
         self.active['fingerprint']=self.fingerprint;write_json(self.install/'active.json',self.active)
         self.assertEqual(self.plan()['status'],'current')
 
+    def test_011_to_012_preserves_previous_installation_during_preflight(self):
+        self.active['version']='0.11.0';write_json(self.install/'active.json',self.active)
+        before=inventory(self.install)
+        plan=self.plan(expected_version='0.12')
+        self.assertEqual(plan['installedRelease'],'0.11')
+        self.assertEqual(plan['repositoryRelease'],'0.12')
+        self.assertEqual(plan['status'],'update-available')
+        self.assertEqual(inventory(self.install),before)
+
     def test_semantic_version_order_and_no_downgrades(self):
-        self.assertLess(updates.version_tuple('0.9.0'),updates.version_tuple('0.11.0'))
+        self.assertLess(updates.version_tuple('0.9.0'),updates.version_tuple('0.12.0'))
         self.active['version']='999.0.0';write_json(self.install/'active.json',self.active)
         with self.assertRaisesRegex(SetupError,'newer'):self.plan()
 
@@ -75,13 +84,13 @@ class UpdateTests(unittest.TestCase):
 
     def test_short_release_name_accepts_zero_patch_without_accepting_other_patches(self):
         source=self.root/'release source'
-        package=read_json(ROOT/'package.json');package['version']='0.11.0'
+        package=read_json(ROOT/'package.json');package['version']='0.12.0'
         write_json(source/'package.json',package)
-        plan=updates.update_plan(source,self.install,'linux-x64',self.fingerprint,'0.11')
-        self.assertEqual(plan['repositoryRelease'],'0.11')
-        package['version']='0.11.1';write_json(source/'package.json',package)
+        plan=updates.update_plan(source,self.install,'linux-x64',self.fingerprint,'0.12')
+        self.assertEqual(plan['repositoryRelease'],'0.12')
+        package['version']='0.12.1';write_json(source/'package.json',package)
         with self.assertRaisesRegex(SetupError,'not requested version'):
-            updates.update_plan(source,self.install,'linux-x64',self.fingerprint,'0.11')
+            updates.update_plan(source,self.install,'linux-x64',self.fingerprint,'0.12')
 
     def test_missing_legacy_and_unowned_installations_are_not_adopted(self):
         for root in (self.root/'missing',self.root/'legacy'):

@@ -130,33 +130,133 @@ export default function PageArrangement({
     html: string;
     scrollTop: number;
     scrollLeft: number;
+    origin: { left: number; top: number; width: number };
+    initialProgress: number;
   } | null>(null);
   const focusRef = useRef<HTMLDivElement>(null);
-  const [focusScale, setFocusScale] = useState(1);
+  const focusMotionRef = useRef<HTMLDivElement>(null);
+  const focusBackdropRef = useRef<HTMLDivElement>(null);
+  const focusAnimation = useRef<Animation | null>(null);
+  const backdropAnimation = useRef<Animation | null>(null);
+  const closingFocus = useRef(false);
+  const focusProgress = useRef(-1);
+  // Keep momentum and repeated wheel ticks in the gesture that started them,
+  // including after the focused overlay has finished closing.
+  const zoomGesture = useRef<{
+    lastInput: number;
+    page: number | null;
+    accumulated: number;
+    ended: boolean;
+  } | null>(null);
+  const claimZoomGesture = (page: number | null) => {
+    const now = performance.now();
+    if (!zoomGesture.current || now - zoomGesture.current.lastInput > 400) {
+      zoomGesture.current = {
+        lastInput: now,
+        page,
+        accumulated: 0,
+        ended: false,
+      };
+    }
+    zoomGesture.current.lastInput = now;
+    return zoomGesture.current;
+  };
+  const focusGeometry = useRef({ x: 0, y: 0, scale: 1 });
+  const setFocusProgress = (requested: number) => {
+    const motion = focusMotionRef.current,
+      backdrop = focusBackdropRef.current;
+    if (!motion || !backdrop) return;
+    const progress = Math.max(0, Math.min(1, requested));
+    if (progress === focusProgress.current) return;
+    focusProgress.current = progress;
+    closingFocus.current = progress === 0;
+    if (progress === 0 && zoomGesture.current) zoomGesture.current.ended = true;
+    motion.inert = progress === 0;
+    motion.dataset.focusProgress = String(progress);
+    const { x, y, scale } = focusGeometry.current;
+    const transform = `translate(${x * (1 - progress)}px, ${y * (1 - progress)}px) scale(${scale + (1 - scale) * progress})`;
+    const from = getComputedStyle(motion).transform;
+    const opacity = getComputedStyle(backdrop).opacity;
+    if (focusAnimation.current) focusAnimation.current.onfinish = null;
+    focusAnimation.current?.cancel();
+    backdropAnimation.current?.cancel();
+    const options: KeyframeAnimationOptions = {
+      duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? 0
+        : 180,
+      easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+      fill: "both",
+    };
+    const movement = motion.animate(
+      [{ transform: from }, { transform }],
+      options,
+    );
+    focusAnimation.current = movement;
+    backdropAnimation.current = backdrop.animate(
+      [{ opacity }, { opacity: progress }],
+      options,
+    );
+    if (progress === 0) movement.onfinish = () => setFocusedPage(null);
+  };
+  const focusPage = (index: number, initialProgress = 1) => {
+    const area = areaRef.current;
+    const card = area?.querySelector<HTMLElement>(
+      `.page-card[data-page="${index}"] .page-miniature`,
+    );
+    if (!area || !card || rendered[index] === undefined) return;
+    const rect = card.getBoundingClientRect();
+    setFocusedPage({
+      origin: { left: rect.left, top: rect.top, width: rect.width },
+      initialProgress,
+      index,
+      html: rendered[index],
+      scrollTop: area.scrollTop,
+      scrollLeft: area.scrollLeft,
+    });
+  };
   const closeFocus = () => {
     if (focusedPage && areaRef.current) {
       areaRef.current.scrollTop = focusedPage.scrollTop;
       areaRef.current.scrollLeft = focusedPage.scrollLeft;
     }
-    setFocusedPage(null);
+    if (closingFocus.current) return;
+    setFocusProgress(0);
   };
   useLayoutEffect(() => {
     const overlay = focusRef.current;
     if (!overlay) return;
-    const fit = () =>
-      setFocusScale(
-        Math.max(
-          0.05,
-          Math.min(
-            (overlay.clientWidth - 64) / layout.width,
-            (overlay.clientHeight - 64) / layout.height,
-          ),
+    const fit = () => {
+      const scale = Math.max(
+        0.05,
+        Math.min(
+          (overlay.clientWidth - 64) / layout.width,
+          (overlay.clientHeight - 64) / layout.height,
         ),
       );
+      const sheet = overlay.querySelector<HTMLElement>(".focused-page-sheet")!;
+      sheet.style.width = `${layout.width * scale}px`;
+      sheet.style.height = `${layout.height * scale}px`;
+      (sheet.firstElementChild as HTMLElement).style.transform =
+        `scale(${scale})`;
+    };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(overlay);
-    const preventWheel = (event: WheelEvent) => event.preventDefault();
+    const preventWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (units.active || !event.deltaY) return;
+      const gesture = claimZoomGesture(focusedPage!.index);
+      if (gesture.ended || gesture.page !== focusedPage!.index) return;
+      const delta =
+        event.deltaY *
+        (event.deltaMode === 1
+          ? 16
+          : event.deltaMode === 2
+            ? overlay.clientHeight
+            : 1);
+      setFocusProgress(focusProgress.current - delta / 1500);
+    };
     overlay.addEventListener("wheel", preventWheel, { passive: false });
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !units.active) closeFocus();
@@ -169,6 +269,35 @@ export default function PageArrangement({
       document.removeEventListener("keydown", escape);
     };
   }, [focusedPage, layout.width, layout.height, units.active]);
+  useLayoutEffect(() => {
+    const motion = focusMotionRef.current;
+    const overlay = focusRef.current;
+    const backdrop = focusBackdropRef.current;
+    if (!focusedPage || !motion || !overlay || !backdrop) return;
+    closingFocus.current = false;
+    const target = motion.getBoundingClientRect();
+    const uiScale =
+      overlay.getBoundingClientRect().width / overlay.clientWidth || 1;
+    const origin = focusedPage.origin;
+    focusGeometry.current = {
+      x: (origin.left - target.left) / uiScale,
+      y: (origin.top - target.top) / uiScale,
+      scale: origin.width / target.width,
+    };
+    const { x, y, scale } = focusGeometry.current;
+    motion.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    backdrop.style.opacity = "0";
+    focusProgress.current = -1;
+    // Keep layout static; each wheel input smoothly retargets two animations.
+    setFocusProgress(focusedPage.initialProgress);
+    return () => {
+      if (focusAnimation.current) focusAnimation.current.onfinish = null;
+      focusAnimation.current?.cancel();
+      backdropAnimation.current?.cancel();
+      focusAnimation.current = null;
+      backdropAnimation.current = null;
+    };
+  }, [focusedPage]);
   const stop = () => {
     dragRef.current = null;
     setDrag(null);
@@ -199,25 +328,29 @@ export default function PageArrangement({
   useEffect(() => {
     const area = areaRef.current;
     if (!area) return;
-    let accumulated = 0;
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
-      if (
-        dragRef.current ||
-        units.active ||
-        (event.target as Element).closest(".page-card")
-      )
+      if (dragRef.current || units.active || focusedPage || !event.deltaY)
         return;
-      accumulated +=
+      const page = (event.target as Element).closest<HTMLElement>(".page-card");
+      const gesture = claimZoomGesture(
+        page && !selection ? Number(page.dataset.page) : null,
+      );
+      if (gesture.ended) return;
+      gesture.accumulated +=
         event.deltaY *
         (event.deltaMode === 1
           ? 16
           : event.deltaMode === 2
             ? area.clientHeight
             : 1);
-      const steps = Math.trunc(accumulated / 60);
+      const steps = Math.trunc(gesture.accumulated / 60);
       if (steps) {
-        accumulated -= steps * 60;
+        gesture.accumulated -= steps * 60;
+        if (gesture.page !== null) {
+          if (steps < 0) focusPage(gesture.page, Math.min(1, -steps * 0.04));
+          return;
+        }
         onZoom((value) =>
           Math.max(
             0.5,
@@ -228,7 +361,7 @@ export default function PageArrangement({
     };
     area.addEventListener("wheel", wheel, { passive: false });
     return () => area.removeEventListener("wheel", wheel);
-  }, [areaRef, onZoom, units.active]);
+  }, [areaRef, onZoom, units.active, focusedPage, selection, rendered]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") stop();
@@ -297,7 +430,7 @@ export default function PageArrangement({
         onClickCapture={(event) => {
           if (units.consumeClick()) event.stopPropagation();
         }}
-        data-help="Double-click a page to view it in full; click outside it to return. Drag to move a page. Scroll over the background to zoom."
+        data-help="Scroll over a page to gradually focus it; double-click for full focus. Scroll down or click outside to return. Drag to move pages or text. Scroll over the background to zoom."
         onPointerMove={(event) => {
           units.onPointerMove(event);
           if (units.active) return;
@@ -367,7 +500,7 @@ export default function PageArrangement({
                 : undefined;
             return (
               <article
-                className={`page-card${held ? " is-held" : ""}${selection?.pages.includes(i) ? " is-selected" : ""}`}
+                className={`page-card${focusedPage?.index === i ? " is-focus-source" : ""}${held ? " is-held" : ""}${selection?.pages.includes(i) ? " is-selected" : ""}`}
                 key={i}
                 data-page={i}
                 aria-label={`Page ${i + 1}`}
@@ -375,13 +508,7 @@ export default function PageArrangement({
                 onDoubleClick={() => {
                   if (selection) return;
                   stop();
-                  const area = areaRef.current!;
-                  setFocusedPage({
-                    index: i,
-                    html: snapshot,
-                    scrollTop: area.scrollTop,
-                    scrollLeft: area.scrollLeft,
-                  });
+                  focusPage(i);
                 }}
                 onDragStart={(event) => event.preventDefault()}
                 onContextMenu={(event) => {
@@ -400,15 +527,7 @@ export default function PageArrangement({
                       },
                       {
                         label: "Focus page",
-                        run: () => {
-                          const area = areaRef.current!;
-                          setFocusedPage({
-                            index: i,
-                            html: snapshot,
-                            scrollTop: area.scrollTop,
-                            scrollLeft: area.scrollLeft,
-                          });
-                        },
+                        run: () => focusPage(i),
                       },
                       ...(group
                         ? [{ label: "Back to Arrangement", run: closeGroup }]
@@ -538,8 +657,15 @@ export default function PageArrangement({
           ref={focusRef}
           className="arrangement-page-focus"
           role="dialog"
-          aria-label={`Page ${focusedPage.index + 1} full view`}
+          aria-label={`Page ${focusedPage.index + 1} focused view`}
           tabIndex={-1}
+          onDoubleClick={(event) => {
+            if (
+              !units.active &&
+              (event.target as Element).closest(".focused-page-sheet")
+            )
+              setFocusProgress(1);
+          }}
           onPointerDown={(event) => {
             const unit = (event.target as Element).closest<HTMLElement>(
               ".arrangement-unit",
@@ -556,19 +682,20 @@ export default function PageArrangement({
               closeFocus();
           }}
         >
-          <div>
+          <div ref={focusBackdropRef} className="arrangement-focus-backdrop" />
+          <div ref={focusMotionRef} className="focused-page-motion">
             <div
               className="focused-page-sheet page-miniature"
               data-page={focusedPage.index}
               style={{
-                width: layout.width * focusScale,
-                height: layout.height * focusScale,
+                width: layout.width,
+                height: layout.height,
               }}
             >
               <div
                 aria-hidden="true"
                 style={{
-                  transform: `scale(${focusScale})`,
+                  transform: "scale(1)",
                   transformOrigin: "top left",
                 }}
                 dangerouslySetInnerHTML={{

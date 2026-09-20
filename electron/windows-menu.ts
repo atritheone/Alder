@@ -86,7 +86,7 @@ export class WindowsMenu {
       this.pending = null;
     });
   }
-  set(menu: Menu, background = "#e6e6e6") {
+  set(menu: Menu, background: string) {
     if (this.closed) return;
     if (this.open || this.timer) {
       this.pending = { menu, background };

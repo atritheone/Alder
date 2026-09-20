@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { Project } from "./types";
+import type { Annotation, Project } from "./types";
 import type { ProofreadingResult } from "./useProofreading";
 
 /** Scan chapter snapshots sequentially; open a chapter for source-validated edits. */
@@ -9,11 +9,13 @@ export default function BookProofreading({
   flush,
   onChapter,
   advanced,
+  currentTarget,
 }: {
   project: Project;
   flush: () => Promise<void>;
-  onChapter: (id: string) => void;
+  onChapter: (id: string, start?: number, end?: number) => void;
   advanced: boolean;
+  currentTarget?: string;
 }) {
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState("");
@@ -22,7 +24,8 @@ export default function BookProofreading({
       id: string;
       title: string;
       text: string;
-      count: number;
+      annotations: Annotation[];
+      warnings: string[];
       status: string;
       configuration: string;
     }[]
@@ -99,7 +102,8 @@ export default function BookProofreading({
             id: chapter.id,
             title: chapter.title || `Chapter ${index + 1}`,
             text: chapter.text,
-            count: job.annotations.length,
+            annotations: job.annotations,
+            warnings: job.warnings,
             status: job.status,
             configuration: identity,
           },
@@ -121,8 +125,13 @@ export default function BookProofreading({
       }
     }
   };
+  useEffect(() => {
+    if ((current.current.book?.chapters.length || 0) > 1) void check();
+    return stop;
+  }, []);
+  if ((project.book?.chapters.length || 0) < 2) return null;
   return (
-    <details>
+    <details open>
       <summary>Whole book review</summary>
       <p>
         Scan every chapter with{" "}
@@ -151,7 +160,39 @@ export default function BookProofreading({
               </button>
               {stale
                 ? " — changed; recheck required"
-                : ` — ${result.count} issues (${result.status})`}
+                : ` — ${result.annotations.length} issues (${result.status})`}
+              {!stale &&
+                result.warnings.map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+              {!stale &&
+                currentTarget === `${project.id}:chapter:${result.id}` && (
+                  <p>Issues for this chapter are shown above.</p>
+                )}
+              {!stale &&
+                currentTarget !== `${project.id}:chapter:${result.id}` &&
+                result.annotations.map((issue) => (
+                  <div className="check-item" key={issue.id}>
+                    <button
+                      onClick={() =>
+                        onChapter(result.id, issue.start, issue.end)
+                      }
+                    >
+                      <span className="check-type">{issue.type}</span>
+                      {issue.message}
+                    </button>
+                    <p>
+                      {result.text.slice(
+                        Math.max(0, issue.start - 35),
+                        issue.start,
+                      )}
+                      <strong>
+                        {result.text.slice(issue.start, issue.end)}
+                      </strong>
+                      {result.text.slice(issue.end, issue.end + 35)}
+                    </p>
+                  </div>
+                ))}
             </li>
           );
         })}

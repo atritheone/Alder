@@ -213,12 +213,12 @@ class SetupTests(unittest.TestCase):
         install=self.root/'application';data=self.root/'desktop-data';home=self.root/'home'
         home.mkdir();data.mkdir();projects=data/'Alder';projects.mkdir();(projects/'book.db').write_text('authored')
         with patch('install.require_closed'),patch('install.sys.platform','linux'),patch('install.Path.home',return_value=home),patch.dict(os.environ,{'XDG_DATA_HOME':str(data)}),patch('install.shutil.which',return_value=None):
-            first=activate(install,built,'linux-x64','0.11.0','first',ROOT)
+            first=activate(install,built,'linux-x64','0.12.0','first',ROOT)
             desktop=data/'applications/org.alder.language.local.desktop'
             self.assertIn('Comment=Alder Organic Language Engine for Linux',desktop.read_text())
             self.assertTrue((data/'icons/hicolor/256x256/apps/alder-local.png').is_file())
             (built/'alder').write_text('version two')
-            second=activate(install,built,'linux-x64','0.11.0','second',ROOT)
+            second=activate(install,built,'linux-x64','0.12.0','second',ROOT)
             self.assertIn(str(install/second['directory']),(home/'.local/bin/alder').read_text())
             restored=rollback(install)
             self.assertEqual(restored['directory'],first['directory'])

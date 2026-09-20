@@ -11,7 +11,7 @@ import uuid
 
 from .. import language
 from ..models import ValidationError
-from .contracts import (DIALECTS, MAX_FINDINGS, MAX_TEXT, blocks, configuration, diagnostic,
+from .contracts import (DIALECTS, blocks, configuration, diagnostic,
                         fingerprint, model_correction, shift, slice16, u16)
 from .engines import ModelEngine, Resources, RuleEngine
 
@@ -36,7 +36,7 @@ class ProofreadingService:
     def capabilities(self):
         return {"offline": True, "dialects": list(DIALECTS), "offsetEncoding": "utf-16",
                 "engines": self.resources.capabilities(), "advancedQuality": "experimental",
-                "maximumTextLength": MAX_TEXT, "maximumFindings": MAX_FINDINGS}
+                "maximumTextLength": None, "maximumFindings": None}
 
     def personal_words(self):
         try:
@@ -57,8 +57,8 @@ class ProofreadingService:
 
     def start(self, data, project=None):
         text = data.get("text")
-        if not isinstance(text, str) or len(text) > MAX_TEXT:
-            raise ValidationError("Proofreading accepts up to one million characters.")
+        if not isinstance(text, str):
+            raise ValidationError("Proofreading text must be a string.")
         try:
             text.encode("utf-16-le")
         except UnicodeError as exc:
@@ -112,7 +112,9 @@ class ProofreadingService:
             return self._public(job)
 
     def _public(self, job):
-        return copy.deepcopy({key: value for key, value in job.items() if not key.startswith("_")})
+        result = copy.deepcopy({key: value for key, value in job.items() if not key.startswith("_")})
+        result["annotations"].sort(key=lambda a: (a["start"], a["end"], a["rule"]))
+        return result
 
     def _update(self, job, **fields):
         with self.lock:
@@ -124,17 +126,13 @@ class ProofreadingService:
 
     def _append(self, job, results):
         with self.lock:
-            existing = {(a["start"], a["end"], a.get("suggestion")) for a in job["annotations"]}
+            existing = job.setdefault("_seen", set())
             for item in results:
                 key = (item["start"], item["end"], item.get("suggestion"))
                 if key in existing:
                     continue
-                if len(job["annotations"]) >= MAX_FINDINGS:
-                    job["truncated"] = True
-                    break
                 job["annotations"].append(item)
                 existing.add(key)
-            job["annotations"].sort(key=lambda a: (a["start"], a["end"], a["rule"]))
             job["sequence"] += 1
 
     def _run(self, job, text, project, config, advanced):
@@ -163,35 +161,33 @@ class ProofreadingService:
             base = language.analyze(text, project, enabled)
             self._update(job, sentences=base["sentences"], truncated=base.get("truncated", False))
             project_findings = []
+            encoded = text.encode("utf-16-le")
             for item in base["annotations"]:
                 rule = item.get("ruleId") or "alder:" + item["rule"]
                 if rule in config["ignoredRuleIds"]:
                     continue
-                project_findings.append(shift(diagnostic(text, item["start"], item["end"],
+                original = encoded[item["start"] * 2:item["end"] * 2].decode("utf-16-le")
+                project_findings.append(shift(diagnostic(original, 0, u16(original),
                                               "terminology" if item["rule"] in ("custom", "preferred-terms") else "spelling" if item["rule"] == "spelling" else "punctuation" if item["rule"] in ("brackets", "punctuation") else "style",
                                               rule, item["message"],
-                                              [item["suggestion"]] if "suggestion" in item else [], "alder"), job["range"]["start"]))
+                                              [item["suggestion"]] if "suggestion" in item else [], "alder"), item["start"] + job["range"]["start"]))
             self._append(job, project_findings)
             for block in paragraphs:
                 if self._cancelled(job):
                     return
-                if not block["eligible"] or not rules_available:
+                if not rules_available:
                     coverage["skippedBlocks"] += 1
                     continue
                 findings = self.rules.check(block["text"], config)
                 self._append(job, [shift(item, block["start"]) for item in findings])
                 coverage["checkedBlocks"] += 1
                 self._update(job, coverage=coverage.copy())
-            if coverage["skippedBlocks"] and rules_available:
-                warnings.append("Some paragraphs exceed the local check's passage limit; they were not checked.")
             if advanced and not self.resources.capabilities()["model"]["available"]:
                 warnings.append("Advanced grammar is unavailable: install the local model pack.")
             elif advanced:
                 self._update(job, stage="model", message="Waiting for advanced grammar...")
                 self.advanced_pool.submit(self._advanced, job, paragraphs, config, coverage, warnings)
                 return
-            if job["truncated"]:
-                warnings.append("The finding limit was reached. Review a smaller section for the remaining issues.")
             self._update(job, status="partial" if warnings else "completed", stage="done", warnings=warnings,
                          coverage=coverage, message="Check incomplete." if warnings else "Check complete.")
         except Exception as exc:
@@ -208,8 +204,6 @@ class ProofreadingService:
             for block in paragraphs:
                 if self._cancelled(job):
                     return
-                if not block["eligible"]:
-                    continue
                 if self.speech_busy():
                     self.model.close()
                     self._update(job, message="Advanced grammar is waiting for narration…")
@@ -230,8 +224,6 @@ class ProofreadingService:
                     self._append(job, [shift(item, block["start"])])
                 coverage["advancedBlocks"] += 1
                 self._update(job, coverage=coverage.copy())
-            if job["truncated"]:
-                warnings.append("The finding limit was reached. Review a smaller section for remaining issues.")
             self._update(job, status="partial" if warnings else "completed", stage="done", warnings=warnings,
                          coverage=coverage, message="Check incomplete." if warnings else "Check complete.")
         except Exception as exc:

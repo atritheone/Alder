@@ -13,8 +13,15 @@ import PageArrangement from "./PageArrangement";
 import PublicationPreview from "./PublicationPreview";
 import { newChapter } from "./book";
 import { words } from "./api";
+import {
+  indexWords,
+  countWords,
+  estimatedReadingTime,
+} from "./readingEstimate";
+import { usePlaybackSettings } from "./usePlaybackSettings";
+import { countSentences } from "./textCounts";
 import type { Annotation, Chapter, Project } from "./types";
-import type { FlowPage } from "./pageFlow";
+import { pageAtPosition, type FlowPage } from "./pageFlow";
 import "./book-workspace.css";
 import DocumentReader from "./DocumentReader";
 import { sourceForChapter, parseRawSource, rawTextDocument } from "./rawSource";
@@ -50,8 +57,14 @@ type Props = {
 export default function BookWorkspace(p: Props) {
   const isBook = !["txt", "docx"].includes(p.project.settings.documentKind);
   const chapters = p.project.book?.chapters || [];
-  const wordCounts = useMemo(
-    () => chapters.map((chapter) => words(chapter.text)),
+  const wordIndexes = useMemo(
+    () => chapters.map((chapter) => indexWords(chapter.text)),
+    [chapters],
+  );
+  const wordCounts = wordIndexes.map((index) => index.length);
+  const totalWords = wordCounts.reduce((total, count) => total + count, 0);
+  const totalSentences = useMemo(
+    () => chapters.reduce((sum, item) => sum + countSentences(item.text), 0),
     [chapters],
   );
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
@@ -62,6 +75,19 @@ export default function BookWorkspace(p: Props) {
     setRawOpenError("");
   }, [chapter?.id]);
   const showRaw = rawActive && p.view === "Write" && !p.previewActive;
+  const [selected, setSelected] = useState<{
+    chapterId: string;
+    text: string;
+    from: number;
+    to: number;
+    start: number;
+    end: number;
+    words: number;
+    sentences: number;
+  } | null>(null);
+  useEffect(() => setSelected(null), [chapter?.id, showRaw]);
+  const selection =
+    p.view === "Write" && selected?.chapterId === chapter?.id ? selected : null;
   const rawDocument = useMemo(
     () => rawTextDocument(chapter?.rawSource?.text || ""),
     [chapter?.rawSource?.text],
@@ -80,6 +106,37 @@ export default function BookWorkspace(p: Props) {
   useEffect(() => () => p.onPlaybackChange?.(false), [p.onPlaybackChange]);
   const [readingPosition, setReadingPosition] =
     useState<ReadingPosition | null>(null);
+  const { speed } = usePlaybackSettings("reading");
+  const selectedPages = selection
+    ? Math.max(
+        1,
+        (pageAtPosition(pages, selection.to - 1) ?? 0) -
+          (pageAtPosition(pages, selection.from) ?? 0) +
+          1,
+      )
+    : 0;
+  let estimateWords = selection?.words ?? totalWords;
+  const readingIndex = chapters.findIndex(
+    (item) => item.id === readingPosition?.chapterId,
+  );
+  const showingRemaining =
+    speechPlaying && readingPosition !== null && readingIndex >= 0 && !showRaw;
+  if (showingRemaining) {
+    if (selection) {
+      if (selection.chapterId === readingPosition.chapterId)
+        estimateWords = countWords(
+          wordIndexes[readingIndex],
+          Math.max(selection.start, readingPosition.offset),
+          selection.end,
+        );
+    } else {
+      estimateWords =
+        countWords(wordIndexes[readingIndex], readingPosition.offset) +
+        wordCounts
+          .slice(readingIndex + 1)
+          .reduce((sum, count) => sum + count, 0);
+    }
+  }
   const [readerKeyboardOpen, setReaderKeyboardOpen] = useState(false);
   const [readingRange, setReadingRange] = useState<{
     start: number;
@@ -383,7 +440,29 @@ export default function BookWorkspace(p: Props) {
                       delete c.rawSource;
                     })
               }
-              onSelection={p.onSelection}
+              onSelection={(word, text, range) => {
+                p.onSelection(word, text);
+                if (!range || range.from === range.to) {
+                  if (selected) setSelected(null);
+                } else if (
+                  !selected ||
+                  selected.chapterId !== chapter.id ||
+                  selected.from !== range.from ||
+                  selected.to !== range.to ||
+                  selected.text !== text
+                ) {
+                  const offsets = p.editorRef.current?.getSelectionOffsets();
+                  if (offsets)
+                    setSelected({
+                      chapterId: chapter.id,
+                      text,
+                      ...range,
+                      ...offsets,
+                      words: words(text),
+                      sentences: countSentences(text),
+                    });
+                }
+              }}
               onFocus={p.onFocus}
               annotations={annotations}
               annotationText={p.annotationText}
@@ -445,24 +524,56 @@ export default function BookWorkspace(p: Props) {
                 }
               }}
             >
-              <label>
-                Page{" "}
-                <input
-                  aria-label="Go To Page"
-                  type="number"
-                  min="1"
-                  max={Math.max(1, pages.length)}
-                  step="1"
-                  value={pageNumber}
-                  style={{ width: `${Math.max(1, pageNumber.length)}ch` }}
-                  onChange={(e) => setPageNumber(e.target.value)}
-                  data-help="Type a page number and press Enter to go to that page."
-                />
-              </label>
-              <span>of {Math.max(1, pages.length)}</span>
+              {selection ? (
+                <span
+                  className="selection-page-count"
+                  title="Pages covered by the selection"
+                >
+                  {selectedPages} {selectedPages === 1 ? "Page" : "Pages"}
+                </span>
+              ) : (
+                <>
+                  <label>
+                    Page{" "}
+                    <input
+                      aria-label="Go To Page"
+                      type="number"
+                      min="1"
+                      max={Math.max(1, pages.length)}
+                      step="1"
+                      value={pageNumber}
+                      style={{ width: `${Math.max(1, pageNumber.length)}ch` }}
+                      onChange={(e) => setPageNumber(e.target.value)}
+                      data-help="Type a page number and press Enter to go to that page."
+                    />
+                  </label>
+                  <span>of {Math.max(1, pages.length)}</span>
+                </>
+              )}
               <span className="writing-counts">
-                {wordCounts.reduce((total, count) => total + count, 0)} Words
-                {isBook && ` · ${chapters.length} Chapters`}
+                <span
+                  className="writing-word-count"
+                  title={selection ? "Words in selection" : "Words in document"}
+                >
+                  {selection?.words ?? totalWords} Words
+                </span>
+                <span
+                  className="writing-sentence-count"
+                  title={
+                    selection
+                      ? "Sentences in selection"
+                      : "Sentences in document"
+                  }
+                >
+                  {` \u00a0${selection?.sentences ?? totalSentences} Sentences`}
+                </span>
+                <span
+                  className="reading-estimate"
+                  title={`Estimated ${showingRemaining ? "time remaining" : "reading time"}${selection ? " for selection" : " for document"} (hours:minutes)`}
+                >
+                  {estimatedReadingTime(estimateWords, speed)}
+                </span>
+                {isBook && !selection && ` · ${chapters.length} Chapters`}
               </span>
               {p.view === "Write" &&
                 !showRaw &&

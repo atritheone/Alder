@@ -41,14 +41,18 @@ try {
   });
   await expect(status).toBeVisible();
   await status.click();
-  const panel = page.getByRole("region", {
-    name: "Spelling and grammar review",
+  const panel = page.getByRole("dialog", {
+    name: "Spelling and Grammar",
+    exact: true,
   });
+  const closeReport = () =>
+    panel.getByRole("button", { name: "Close spelling and grammar" }).click();
   await expect(panel).toBeVisible();
   const writing = page.getByRole("textbox", {
     name: "Chapter text editor",
     exact: true,
   });
+  await closeReport();
   await writing.fill("This is a mispelled word.");
   await expect(writing.locator(".annotation-spelling")).toContainText(
     "mispelled",
@@ -61,7 +65,7 @@ try {
     path: path.join(output, "spelling-underlines.png"),
     fullPage: true,
   });
-  await writing.locator(".annotation-spelling").click();
+  await status.click();
   await expect(panel).toBeVisible();
   if (fallback) {
     await expect(status).toContainText("basic only");
@@ -100,6 +104,7 @@ try {
       .getByRole("button", { name: "Use “misspelled”", exact: true })
       .click();
     await expect(writing).toHaveText("This is a misspelled word.");
+    await closeReport();
     await writing.press("ControlOrMeta+z");
     await expect(writing).toHaveText("This is a mispelled word.");
     await writing.fill("I saw the the bird.");
@@ -108,13 +113,16 @@ try {
       path: path.join(output, "grammar-underlines.png"),
       fullPage: true,
     });
+    await status.click();
     await expect(
       panel.getByRole("button", { name: "Use “the”", exact: true }),
     ).toBeVisible();
     await panel.getByRole("button", { name: "Use “the”", exact: true }).click();
     await expect(writing).toHaveText("I saw the bird.");
+    await closeReport();
     await writing.fill("This is mispelled.");
     await writing.press("ControlOrMeta+a");
+    await status.click();
     await panel
       .getByRole("button", { name: "Check selected text", exact: true })
       .click();
@@ -123,7 +131,9 @@ try {
       .getByRole("button", { name: "Use “misspelled”", exact: true })
       .click();
     await expect(writing).toHaveText("This is misspelled.");
+    await closeReport();
     await writing.fill("She go to the shops yesterday.");
+    await status.click();
     await panel
       .getByRole("button", { name: "Advanced review", exact: true })
       .click();
@@ -138,19 +148,21 @@ try {
     await panel
       .getByRole("button", { name: "Check spelling and grammar", exact: true })
       .click();
-    await panel.getByText("Whole book review", { exact: true }).click();
-    await panel
-      .getByRole("button", { name: "Check whole book", exact: true })
-      .click();
-    await expect(panel).toContainText("Book review finished.");
+    await closeReport();
     const sandbox = page.getByRole("textbox", {
       name: "Sandbox text editor",
       exact: true,
     });
+    await page
+      .getByRole("button", { name: "Toggle sandbox", exact: true })
+      .evaluate((button) => {
+        if (button.getAttribute("aria-expanded") !== "true") button.click();
+      });
     await sandbox.fill("This is mispelled.");
     await expect(sandbox.locator(".annotation-spelling")).toContainText(
       "mispelled",
     );
+    await status.click();
     await panel
       .getByRole("button", { name: "Use “misspelled”", exact: true })
       .click();
@@ -175,7 +187,6 @@ try {
             "repeated word",
             "selection",
             "real model",
-            "book review",
             "sandbox isolation",
           ],
         },

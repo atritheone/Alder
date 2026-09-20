@@ -13,7 +13,9 @@ import SettingsWindow, { type SettingsCategory } from "./SettingsWindow";
 import { useStoredPreference } from "./useStoredPreference";
 import { useProofreading } from "./useProofreading";
 import ProofreadingPanel from "./ProofreadingPanel";
-import { useCallback, useEffect, useRef, useState } from "react";
+import ProofreadingPopups from "./ProofreadingPopups";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { countSentences } from "./textCounts";
 import {
   Play,
   Pause,
@@ -73,7 +75,6 @@ import {
   chosenClip,
   words,
   collatedText,
-  duration,
 } from "./api";
 import { useProject } from "./useProject";
 import Browser, { deviceCatalog } from "./Browser";
@@ -404,6 +405,22 @@ export default function App() {
   const clip = project?.clips.find((c) => c.id === selected) || null,
     track = project?.tracks.find((t) => t.id === clip?.trackId) || null,
     content = clip ? chosenClip(clip) : null;
+  const [sandboxSelection, setSandboxSelection] = useState<{
+    identity: string;
+    text: string;
+  } | null>(null);
+  const sandboxIdentity = `${project?.id}:${clip?.id}:${clip?.activeVariantId || "original"}`;
+  const countedDraftText =
+    !writingFocus && sandboxSelection?.identity === sandboxIdentity
+      ? sandboxSelection.text
+      : content?.text || "";
+  const draftCounts = useMemo(
+    () => ({
+      words: words(countedDraftText),
+      sentences: countSentences(countedDraftText),
+    }),
+    [countedDraftText],
+  );
   const chapter =
     project?.book?.chapters.find((c) => c.id === chapterId) ||
     project?.book?.chapters[0];
@@ -417,19 +434,12 @@ export default function App() {
     flush,
   );
   const analysis = proofreading.result;
+  const [proofreadingOpen, setProofreadingOpen] = useState(false);
   useEffect(() => {
     const select = (event: Event) => {
       setDetail("Clip");
       setDetailOpen(true);
       setLexTab("Checks");
-      const id = (event as CustomEvent<string>).detail;
-      requestAnimationFrame(() => {
-        const item = document.querySelector<HTMLElement>(
-          `[data-review-id="${CSS.escape(id)}"]`,
-        );
-        item?.scrollIntoView({ block: "nearest" });
-        item?.querySelector<HTMLButtonElement>("button")?.focus();
-      });
     };
     window.addEventListener("alder-proofreading-select", select);
     return () =>
@@ -641,6 +651,21 @@ export default function App() {
     setDetailOpen(true);
     setWritingFocus(false);
     setTimeout(() => editor.current?.focus(), 50);
+  };
+  const deleteDraft = () => {
+    if (!clip) return;
+    setForm({
+      title: "Delete draft",
+      description:
+        "This removes the sandbox draft. Text already copied into the book is retained. You can undo the change.",
+      fields: [],
+      submit: "Delete",
+      action: () =>
+        change((p) => {
+          p.clips = p.clips.filter((c) => c.id !== clip.id);
+          p.placements = p.placements.filter((x) => x.clipId !== clip.id);
+        }),
+    });
   };
   const newProject = () => {
     void run(async () => {
@@ -1041,6 +1066,38 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   });
+  useEffect(() => {
+    const switchWorkspace = (event: KeyboardEvent) => {
+      if (
+        !project ||
+        event.key !== "Tab" ||
+        event.repeat ||
+        event.shiftKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.isComposing
+      )
+        return;
+      const target = event.target as HTMLElement;
+      if (
+        form ||
+        panel ||
+        newOpen ||
+        document.querySelector(
+          'dialog[open], [role="dialog"]:not(.arrangement-page-focus), [role="menu"]',
+        ) ||
+        target.closest("input, textarea, select, [contenteditable=true]")
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      setWritePreview(false);
+      setView((current) => (current === "Pages" ? "Write" : "Pages"));
+    };
+    window.addEventListener("keydown", switchWorkspace, true);
+    return () => window.removeEventListener("keydown", switchWorkspace, true);
+  }, [project, form, panel, newOpen]);
   useEffect(
     () =>
       window.alder?.onCommand((command) => {
@@ -1783,6 +1840,35 @@ export default function App() {
                 ))}
               </div>
               <span className="detail-spacer" />
+              <div className="sandbox-draft-actions">
+                <button
+                  aria-label="New sandbox draft"
+                  onClick={() =>
+                    createClip(clip?.trackId || project.tracks[0]?.id || "", 0)
+                  }
+                >
+                  <Plus size={13} /> New
+                </button>
+                <button
+                  aria-label="Save sandbox draft"
+                  disabled={!clip}
+                  onClick={() =>
+                    void run(async () => {
+                      await flush();
+                      setHint("Draft saved");
+                    })
+                  }
+                >
+                  <Save size={13} /> Save
+                </button>
+                <button
+                  aria-label="Delete sandbox draft"
+                  disabled={!clip}
+                  onClick={deleteDraft}
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+              </div>
               {clip && (
                 <>
                   <select
@@ -1846,10 +1932,10 @@ export default function App() {
                     <div className="property-caption">DRAFT</div>
                     <div className="property-grid">
                       <label>
-                        Words<output>{words(content.text)}</output>
+                        Words<output>{draftCounts.words}</output>
                       </label>
                       <label>
-                        Sentences<output>{analysis?.sentences || 0}</output>
+                        Sentences<output>{draftCounts.sentences}</output>
                       </label>
                     </div>
                     <label>
@@ -1880,26 +1966,6 @@ export default function App() {
                       </select>
                     </label>
                     <label>
-                      Voice
-                      <select
-                        aria-label="Draft voice"
-                        value={clip.voiceId || ""}
-                        onChange={(e) =>
-                          change((p) => {
-                            p.clips.find((c) => c.id === clip.id)!.voiceId =
-                              e.target.value || null;
-                          })
-                        }
-                      >
-                        <option value="">Default voice</option>
-                        {voices.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
                       Variation seed
                       <input
                         type="number"
@@ -1907,35 +1973,6 @@ export default function App() {
                         onChange={(e) => setSeed(Number(e.target.value))}
                       />
                     </label>
-                    <div className="clip-read-estimate">
-                      ≈{" "}
-                      {duration(
-                        analysis?.readingSeconds || words(content.text) / 3,
-                      )}
-                      <small>estimated reading</small>
-                    </div>
-                    <button
-                      className="wide subtle"
-                      onClick={() =>
-                        setForm({
-                          title: "Delete draft",
-                          description:
-                            "This removes the sandbox draft. Text already copied into the book is retained. You can undo the change.",
-                          fields: [],
-                          submit: "Delete draft",
-                          action: () =>
-                            change((p) => {
-                              p.clips = p.clips.filter((c) => c.id !== clip.id);
-                              p.placements = p.placements.filter(
-                                (x) => x.clipId !== clip.id,
-                              );
-                            }),
-                        })
-                      }
-                    >
-                      <Trash2 size={11} />
-                      Delete draft
-                    </button>
                   </aside>
                   <Editor
                     ref={editor}
@@ -1984,7 +2021,16 @@ export default function App() {
                     document={content.document}
                     identity={`${clip.id}:${clip.activeVariantId || "original"}`}
                     onChange={updateContent}
-                    onSelection={(w, s) => {
+                    onSelection={(w, s, range) => {
+                      setSandboxSelection((previous) => {
+                        if (!range || range.from === range.to) return null;
+                        if (
+                          previous?.identity === sandboxIdentity &&
+                          previous.text === s
+                        )
+                          return previous;
+                        return { identity: sandboxIdentity, text: s };
+                      });
                       setWord(w);
                       setSelection(s);
                       setCandidate("");
@@ -2697,12 +2743,11 @@ export default function App() {
             ...(proofreading.result?.warnings || []),
           ].join(" ")}
           onClick={() => {
-            setDetail("Clip");
-            setDetailOpen(true);
-            setLexTab("Checks");
+            proofreading.wholeText();
+            setProofreadingOpen(true);
           }}
         >
-          Spelling &amp; grammar:{" "}
+          Spelling &amp; grammar{" \u00a0"}
           {proofreading.error
             ? "error"
             : proofreading.capabilities?.engines.rules.available === false
@@ -2716,8 +2761,11 @@ export default function App() {
                     ? `${proofreading.result.annotations.length} suggestions`
                     : "checking…"}
         </button>
-        <span className="status-project-count">
-          {words(bookText(project))} words
+        <span
+          className="status-project-count"
+          title={selection ? "Words in selection" : "Words in document"}
+        >
+          {words(selection || bookText(project))} words
         </span>
         <button
           className={detailOpen ? "active" : ""}
@@ -2730,6 +2778,30 @@ export default function App() {
         </button>
         <span>{clip?.title || "Alder"}</span>
       </footer>
+      <ProofreadingPopups
+        open={proofreadingOpen}
+        onClose={() => setProofreadingOpen(false)}
+        controller={proofreading}
+        project={project}
+        change={change}
+        editor={targetEditor}
+        flush={flush}
+        onChapter={(id, start, end) => {
+          setProofreadingOpen(false);
+          setChapterId(id);
+          setWritingFocus(true);
+          setView("Write");
+          setDetail("Clip");
+          setDetailOpen(true);
+          setLexTab("Checks");
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              if (start !== undefined)
+                bookEditor.current?.selectRange(start, end ?? start);
+            }),
+          );
+        }}
+      />
       {newOpen && (
         <NewDocument
           onCreate={(p) => {
@@ -3067,7 +3139,7 @@ export default function App() {
                 <div className="about-panel">
                   <AlderLogo />
                   <h1>Alder</h1>
-                  <p>Organic Language Engine · 0.11.0</p>
+                  <p>Organic Language Engine · 0.12.0</p>
                   <p>
                     Language as material. A workstation for writing,
                     experimenting, collating, and listening.

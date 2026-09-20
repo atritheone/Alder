@@ -1,5 +1,8 @@
 import { useStoredPreference } from "./useStoredPreference";
-import { proofreadingTransaction, type ProofreadingEdit } from "./proofreadingEdits";
+import {
+  proofreadingTransaction,
+  type ProofreadingEdit,
+} from "./proofreadingEdits";
 import {
   changeCase,
   caseInputPlugin,
@@ -470,7 +473,11 @@ type Props = {
   document: DocNode;
   identity: string;
   onChange: (document: DocNode, text: string) => void;
-  onSelection: (word: string, selection: string) => void;
+  onSelection: (
+    word: string,
+    selection: string,
+    range?: { from: number; to: number },
+  ) => void;
   annotations?: Annotation[];
   annotationText?: string;
   suppressChecks?: boolean;
@@ -937,7 +944,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                   dispatch?.(state.tr.insertText("\t"));
                   return true;
                 }
-              : sinkListItem(schema.nodes.list_item),
+              : chainCommands(
+                  sinkListItem(schema.nodes.list_item),
+                  (state, dispatch) => {
+                    dispatch?.(state.tr.insertText("\t"));
+                    return true;
+                  },
+                ),
             "Shift-Tab": liftListItem(schema.nodes.list_item),
             "Shift-Enter": props.rawMode
               ? baseKeymap.Enter
@@ -961,11 +974,15 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           new Plugin({
             props: {
               handleClick(_view, _position, event) {
-                const target = (event.target as HTMLElement)?.closest("[data-proofreading-id]");
+                const target = (event.target as HTMLElement)?.closest(
+                  "[data-proofreading-id]",
+                );
                 if (!target) return false;
-                window.dispatchEvent(new CustomEvent("alder-proofreading-select", {
-                  detail: target.getAttribute("data-proofreading-id"),
-                }));
+                window.dispatchEvent(
+                  new CustomEvent("alder-proofreading-select", {
+                    detail: target.getAttribute("data-proofreading-id"),
+                  }),
+                );
                 return false;
               },
               decorations(state) {
@@ -998,16 +1015,31 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                         }),
                       );
                     else if (annotation.alternatives?.length) {
-                      spans.push(Decoration.widget(from, () => {
-                        const marker = document.createElement("span");
-                        marker.className = "annotation-insertion";
-                        marker.textContent = "⌃";
-                        marker.setAttribute("role", "note");
-                        marker.setAttribute("aria-label", annotation.message);
-                        marker.setAttribute("data-help", annotation.message);
-                        marker.setAttribute("data-proofreading-id", annotation.id);
-                        return marker;
-                      }, { key: annotation.id, side: -1 }));
+                      spans.push(
+                        Decoration.widget(
+                          from,
+                          () => {
+                            const marker = document.createElement("span");
+                            marker.className = "annotation-insertion";
+                            marker.textContent = "⌃";
+                            marker.setAttribute("role", "note");
+                            marker.setAttribute(
+                              "aria-label",
+                              annotation.message,
+                            );
+                            marker.setAttribute(
+                              "data-help",
+                              annotation.message,
+                            );
+                            marker.setAttribute(
+                              "data-proofreading-id",
+                              annotation.id,
+                            );
+                            return marker;
+                          },
+                          { key: annotation.id, side: -1 },
+                        ),
+                      );
                     }
                   } catch {
                     /* An outdated annotation must never address arbitrary editor positions. */
@@ -1076,7 +1108,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             };
         } else if (!s.empty)
           selection.current = { from: s.from, to: s.to, text: selected };
-        latest.current.onSelection(word, selected);
+        latest.current.onSelection(word, selected, { from: s.from, to: s.to });
+        if (tr.selectionSet || docChanged)
+          window.dispatchEvent(new Event("alder-proofreading-caret"));
         tick((n) => n + 1);
       },
       handlePaste(v, event) {
@@ -1262,7 +1296,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     if (v) {
       annotationSource.current =
         !blocked.current && props.annotations
-          ? props.annotationText ?? projectText(v.state.doc).text
+          ? (props.annotationText ?? projectText(v.state.doc).text)
           : null;
       refreshEditorDecorations(v);
     }

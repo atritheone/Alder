@@ -330,9 +330,16 @@ export default function DocumentReader(p: Props) {
     };
   }, []);
   const lastConfiguration = useRef("");
-  const currentConfiguration = (
-    cursor = p.sandbox ? 0 : p.editorRef.current?.getSelectionOffsets().start,
-  ) =>
+  const playbackSpan = () => {
+    const selection = p.editorRef.current?.getSelectionOffsets() || {
+      start: 0,
+      end: 0,
+    };
+    return p.sandbox && selection.start === selection.end
+      ? { start: 0, end: 0 }
+      : selection;
+  };
+  const currentConfiguration = () =>
     JSON.stringify([
       voice,
       format,
@@ -341,7 +348,7 @@ export default function DocumentReader(p: Props) {
       p.project.settings.disabledPronunciationDictionaries,
       p.chapter.id,
       p.chapter.text,
-      cursor,
+      playbackSpan(),
     ]);
   const pendingCaret = useRef<{
     id: string;
@@ -371,7 +378,7 @@ export default function DocumentReader(p: Props) {
     const current = sourceChapters?.find((c) => c.id === source?.id);
     if (!job || !source || !current || current.text !== source.text) return;
     let offset = source.base;
-    if (finished) offset = source.text.length;
+    if (finished) offset += source.offsets[source.offsets.length - 1] || 0;
     else {
       const elapsed = audio.current?.currentTime || 0;
       const index = fullAudio.current
@@ -405,7 +412,7 @@ export default function DocumentReader(p: Props) {
       if (finished) lastConfiguration.current = "";
       else if (lastConfiguration.current) {
         const saved = JSON.parse(lastConfiguration.current);
-        saved[saved.length - 1] = offset;
+        saved[saved.length - 1] = { start: offset, end: offset };
         lastConfiguration.current = JSON.stringify(saved);
       }
     } else {
@@ -428,19 +435,18 @@ export default function DocumentReader(p: Props) {
     prepareVoice(voice);
     shouldPlay.current = true;
     const requestedConfiguration = currentConfiguration();
+    const span = playbackSpan();
     setRequesting(true);
     try {
       setError("");
       setActive(false);
       audio.current?.pause();
       p.onHighlight(null);
-      const span = (!p.sandbox &&
-        p.editorRef.current?.getSelectionOffsets()) || {
-        start: 0,
-        end: 0,
-      };
       const sourceText = p.editorRef.current?.getText() ?? p.chapter.text;
-      const text = sourceText.slice(span.start);
+      const text = sourceText.slice(
+        span.start,
+        span.end > span.start ? span.end : undefined,
+      );
       if (!text.trim()) return;
       snapshot.current = {
         chapters: [
@@ -665,6 +671,15 @@ export default function DocumentReader(p: Props) {
     shouldPlay.current = false;
     audio.current?.pause();
     if (park && !requesting) parkCursor();
+    const source = snapshot.current?.chapters[0];
+    // Stopping clears Write's selection. A subsequent Play must read onward
+    // from the parked caret, rather than reuse audio bounded by that selection.
+    if (
+      !p.sandbox &&
+      source &&
+      source.base + (source.offsets.at(-1) || 0) < source.text.length
+    )
+      lastConfiguration.current = "";
     if (p.sandbox) {
       if (audio.current) audio.current.currentTime = 0;
       setTime(0);
@@ -822,8 +837,8 @@ export default function DocumentReader(p: Props) {
           }
           data-help={
             p.sandbox
-              ? "Listen to the whole sandbox draft. Edit the text, then press Play or Ctrl/Cmd+Enter to hear the updated wording. Pause resumes the same take; Stop starts again from the beginning."
-              : "Read from the text cursor. Pause or Stop moves the cursor to the spoken position; Play continues from there. Move the cursor yourself to choose a new starting point."
+              ? "Listen to the selected text, or the whole sandbox draft when nothing is selected. Edit the text, then press Play or Ctrl/Cmd+Enter to hear the updated wording. Pause resumes the same take; Stop starts again from the beginning."
+              : "Read the selected text, or read from the text cursor when nothing is selected. Pause or Stop moves the cursor to the spoken position; Play continues from there. Move the cursor yourself to choose a new starting point."
           }
           aria-busy={loading}
           disabled={p.sandbox && !p.chapter.text.trim() && !loading && !playing}

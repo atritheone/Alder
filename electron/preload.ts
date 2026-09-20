@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld("alder", {
     ipcRenderer.invoke("alder:download", path, name),
   mediaBase: "alder://local",
   platform: process.platform,
-  version: "0.11.0",
+  version: "0.12.0",
   onOpenFiles: (callback: (paths: string[]) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, paths: string[]) =>
       callback(paths);
