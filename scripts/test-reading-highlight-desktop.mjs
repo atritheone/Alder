@@ -209,6 +209,91 @@ try {
   expect(await page.evaluate(() => highlightTest.word(12, 19))).toBe("charlie");
   await page.emulateMedia({ reducedMotion: "no-preference" });
 
+  // Follow four real text lines, including the page gap and fractional zoom.
+  for (const zoom of [0.75, 1, 1.25]) {
+    await page.evaluate((zoom) => {
+      const h = highlightTest;
+      h.root.style.zoom = String(zoom);
+      h.host.style.zoom = "1.1";
+      h.load(
+        Array.from({ length: 40 }, (_, i) => `Line ${i} has spoken words.`),
+      );
+      const viewport = h.host.closest(".editor-scroll");
+      viewport.style.height = "400px";
+      viewport.style.overflow = "auto";
+      h.view.dom.querySelectorAll("p").forEach((p, i) => {
+        p.style.cssText = "margin:0;line-height:24px;font-size:16px";
+        if (i === 10) p.style.marginTop = "160px";
+      });
+      viewport.scrollTop = 0;
+    }, zoom);
+    await page.waitForTimeout(50);
+    const followed = await page.evaluate(async () => {
+      const h = highlightTest;
+      const paragraphs = [...h.view.dom.querySelectorAll("p")];
+      const start = paragraphs
+        .slice(0, 9)
+        .reduce((n, p) => n + p.textContent.length + 1, 0);
+      h.word(start, start + 4);
+      const initialScroll = h.host.closest(".editor-scroll").scrollTop;
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      const viewport = h.host.closest(".editor-scroll");
+      const bounds = viewport.getBoundingClientRect();
+      const textBox = (index) => {
+        const range = document.createRange();
+        range.selectNodeContents(paragraphs[index]);
+        return range.getBoundingClientRect();
+      };
+      return {
+        initialScroll,
+        scrolled: viewport.scrollTop,
+        currentVisible: textBox(9).top >= bounds.top - 1,
+        fourthVisible: textBox(13).bottom <= bounds.bottom + 1,
+        text: h.host.querySelector(".reading-word").textContent,
+      };
+    });
+    expect(followed.initialScroll).toBe(0);
+    expect(followed.scrolled).toBeGreaterThan(0);
+    expect(followed.currentVisible).toBe(true);
+    expect(followed.fourthVisible).toBe(true);
+    expect(followed.text).toBe("Line");
+  }
+  const smallViewport = await page.evaluate(async () => {
+    const h = highlightTest;
+    const viewport = h.host.closest(".editor-scroll");
+    viewport.style.height = "100px";
+    viewport.scrollTop = 0;
+    h.word(null);
+    const paragraphs = [...h.view.dom.querySelectorAll("p")];
+    const start = paragraphs
+      .slice(0, 9)
+      .reduce((n, p) => n + p.textContent.length + 1, 0);
+    h.word(start, start + 4);
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    const word = h.host.querySelector(".reading-word").getBoundingClientRect();
+    const bounds = viewport.getBoundingClientRect();
+    return word.top >= bounds.top - 1 && word.bottom <= bounds.bottom + 1;
+  });
+  expect(smallViewport).toBe(true);
+  const ending = await page.evaluate(async () => {
+    const h = highlightTest;
+    const paragraphs = [...h.view.dom.querySelectorAll("p")];
+    const start = paragraphs
+      .slice(0, -1)
+      .reduce((n, p) => n + p.textContent.length + 1, 0);
+    h.word(start, start + 4);
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    const viewport = h.host.closest(".editor-scroll");
+    const word = h.host.querySelector(".reading-word").getBoundingClientRect();
+    const bounds = viewport.getBoundingClientRect();
+    return word.top >= bounds.top - 1 && word.bottom <= bounds.bottom + 1;
+  });
+  expect(ending).toBe(true);
+  await page.evaluate(() => {
+    highlightTest.root.style.zoom = "1";
+    highlightTest.host.style.zoom = "1";
+  });
+
   await page.evaluate(() =>
     highlightTest.load(Array(1000).fill("Alpha bravo charlie delta echo.")),
   );
@@ -248,7 +333,21 @@ try {
   ).toBe(0);
   await page.evaluate(() => highlightTest.destroy());
   await expect(page.locator(".test-editor-host")).toHaveCount(0);
+  fs.writeFileSync(
+    "work/reading-highlight-report.json",
+    JSON.stringify({
+      status: "passed",
+      stress,
+      lookaheadZooms: [0.75, 1, 1.25],
+    }),
+  );
   console.log("Reading highlight desktop checks passed.", stress);
+} catch (error) {
+  fs.writeFileSync(
+    "work/reading-highlight-report.json",
+    JSON.stringify({ status: "failed", error: error.stack }),
+  );
+  throw error;
 } finally {
   await app.close();
 }

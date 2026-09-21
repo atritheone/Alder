@@ -6,6 +6,58 @@ import { projectedRange, projectText } from "./textProjection";
 type ReadingRange = { start: number; end: number };
 type WordBox = { left: number; right: number; top: number; height: number };
 
+/** Find actual upcoming text lines, skipping blank paragraphs and page spacers. */
+function lookaheadBottom(
+  root: HTMLElement,
+  end: { node: Node; offset: number },
+  current: DOMRect,
+) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  walker.currentNode = end.node;
+  const boundary = document.createRange();
+  boundary.setStart(end.node, end.offset);
+  boundary.collapse(true);
+  const range = document.createRange();
+  let node: Node | null =
+    end.node.nodeType === Node.TEXT_NODE ? end.node : walker.nextNode();
+  let top = current.top,
+    bottom = current.bottom,
+    height = current.height,
+    lines = 0;
+  while (node) {
+    const text = node.textContent || "";
+    if (
+      text.trim() &&
+      boundary.comparePoint(node, text.length) >= 0 &&
+      !node.parentElement?.closest('[aria-hidden="true"]')
+    ) {
+      const start = node === end.node ? end.offset : 0;
+      // Bounded ranges avoid measuring an entire long paragraph on every word.
+      for (let offset = start; offset < text.length; offset += 256) {
+        range.setStart(node, offset);
+        range.setEnd(node, Math.min(text.length, offset + 256));
+        for (const rect of Array.from(range.getClientRects())) {
+          if (
+            !rect.width ||
+            !rect.height ||
+            rect.top < current.top - current.height * 0.4
+          )
+            continue;
+          if (Math.abs(rect.top - top) > Math.min(height, rect.height) * 0.4) {
+            if (lines === 4) return bottom;
+            lines++;
+            top = rect.top;
+            height = rect.height;
+          }
+          bottom = Math.max(bottom, rect.bottom);
+        }
+      }
+    }
+    node = walker.nextNode();
+  }
+  return bottom;
+}
+
 /**
  * A timed ink handover: the spoken word is fully covered at every animation
  * frame. Only the outer edge and departing ink move, never the text or caret.
@@ -99,7 +151,29 @@ export function readingHighlight(
         previous = null;
       };
       const viewport = host.closest<HTMLElement>(".editor-scroll");
-      const resize = new ResizeObserver(reset);
+      let scrollTarget: { top: number; left: number } | null = null;
+      const scrollFinished = () => {
+        scrollTarget = null;
+      };
+      const cancelScroll = () => {
+        if (scrollTarget && viewport) {
+          viewport.scrollTo({
+            top: viewport.scrollTop,
+            left: viewport.scrollLeft,
+            behavior: "instant",
+          });
+        }
+        scrollTarget = null;
+      };
+      viewport?.addEventListener("scrollend", scrollFinished);
+      viewport?.addEventListener("wheel", cancelScroll, { passive: true });
+      viewport?.addEventListener("pointerdown", cancelScroll, {
+        passive: true,
+      });
+      const resize = new ResizeObserver(() => {
+        cancelScroll();
+        reset();
+      });
       resize.observe(host);
       viewport?.addEventListener("scroll", reset, { passive: true });
       document.fonts.addEventListener("loadingdone", reset);
@@ -111,7 +185,10 @@ export function readingHighlight(
         const edited = previous && next && previous.doc !== next.doc;
         last = next;
         wasVisible = isVisible;
-        if (!isVisible || edited || (next && next.to <= next.from)) reset();
+        if (!isVisible || edited || (next && next.to <= next.from)) {
+          cancelScroll();
+          reset();
+        }
         // Silence clears the marker immediately, but a short timing gap must
         // not break the next glide. Stop/replay/seek cannot continue backwards.
         if (!next) clear();
@@ -145,28 +222,58 @@ export function readingHighlight(
             final = lineBox(rects[rects.length - 1]);
           if (viewport) {
             const bounds = viewport.getBoundingClientRect();
-            if (
-              first.top < bounds.top ||
-              final.bottom > bounds.bottom ||
-              first.left < bounds.left ||
-              first.right > bounds.right
-            ) {
-              const element =
-                start.node.nodeType === Node.TEXT_NODE
-                  ? start.node.parentElement
-                  : (start.node as HTMLElement);
-              const word =
-                element?.closest<HTMLElement>(".reading-word") ||
-                element?.querySelector<HTMLElement>(".reading-word") ||
-                element;
-              word?.scrollIntoView({
-                block: "nearest",
-                inline: "nearest",
-                behavior: "instant",
-              });
-              // Scrolling is immediate; do not sweep across the viewport jump.
-              reset();
-              return;
+            const scale = bounds.height / viewport.offsetHeight || 1;
+            const top = bounds.top + viewport.clientTop * scale;
+            const bottom = top + viewport.clientHeight * scale;
+            const futureBottom = lookaheadBottom(view.dom, end, final);
+            // Keep the spoken line visible if four future lines plus a page
+            // gap cannot all fit in a small viewport.
+            // Start following a little early so the next four lines have
+            // breathing room while the viewport glides into position.
+            const down = Math.min(
+              futureBottom - bottom + final.height,
+              first.top - top,
+            );
+            const delta = first.top < top ? first.top - top : Math.max(0, down);
+            const horizontal =
+              first.left < bounds.left
+                ? first.left - bounds.left
+                : Math.max(0, first.right - bounds.right);
+            if (Math.abs(delta) > 0.5 || Math.abs(horizontal) > 0.5) {
+              const target = {
+                top: Math.max(
+                  0,
+                  Math.min(
+                    viewport.scrollHeight - viewport.clientHeight,
+                    viewport.scrollTop + delta / scale,
+                  ),
+                ),
+                left: Math.max(
+                  0,
+                  Math.min(
+                    viewport.scrollWidth - viewport.clientWidth,
+                    viewport.scrollLeft + horizontal / scale,
+                  ),
+                ),
+              };
+              // Do not restart Chromium's smooth scroll for every spoken word
+              // on the same line. Retarget only when the destination changes.
+              if (
+                !scrollTarget ||
+                Math.abs(target.top - scrollTarget.top) > 1 ||
+                Math.abs(target.left - scrollTarget.left) > 1
+              ) {
+                scrollTarget = target;
+                viewport.scrollTo({
+                  ...target,
+                  behavior: motion.matches ? "instant" : "smooth",
+                });
+                if (motion.matches) {
+                  scrollTarget = null;
+                  reset();
+                  return;
+                }
+              }
             }
           }
           if (motion.matches) {
@@ -318,6 +425,10 @@ export function readingHighlight(
       return {
         update,
         destroy() {
+          cancelScroll();
+          viewport?.removeEventListener("scrollend", scrollFinished);
+          viewport?.removeEventListener("wheel", cancelScroll);
+          viewport?.removeEventListener("pointerdown", cancelScroll);
           reset();
           resize.disconnect();
           viewport?.removeEventListener("scroll", reset);
