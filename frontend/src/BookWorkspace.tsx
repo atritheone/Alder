@@ -608,7 +608,7 @@ export default function BookWorkspace(p: Props) {
                   }
                 >
                   {Array.from(
-                    { length: p.view === "Pages" ? 51 : 21 },
+                    { length: 51 },
                     (_, i) => (50 + i * 5) / 100,
                   ).map((z) => (
                     <option key={z} value={z}>
