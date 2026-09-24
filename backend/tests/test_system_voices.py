@@ -8,7 +8,7 @@ import pytest
 from alder import system_voices as native
 from alder.store import Store
 from alder.speech import SpeechService
-from alder.speech_quality import inspect_pcm
+from alder.speech_quality import inspect_pcm, valid_timings
 from test_speech_pipeline import service, pcm, finish
 
 
@@ -120,17 +120,26 @@ def test_absent_voice_retains_alias_and_does_not_silently_substitute(service, mo
     assert row["id"] in {v["id"] for v in service.voices()}
 
 
-def test_non_english_missing_timings_never_calls_english_recognition(service, monkeypatch):
-    row = voice("macos", "fr-FR")
+@pytest.mark.parametrize("provider", ["sapi", "macos", "espeak"])
+def test_non_english_missing_timings_never_calls_english_recognition(service, monkeypatch, provider):
+    row = voice(provider, "fr-FR")
     monkeypatch.setattr(native, "voices", lambda refresh=False: [row])
     def render(voice_id, text, output, *args, **kwargs):
         pcm(output)
-        return {"words": [], "timingSource": "macos-markers"}
+        return {"words": [], "timingSource": provider + "-events"}
     monkeypatch.setattr(native, "render", render)
     result = finish(service, service.submit({"id": "p", "revision": 0}, {"text": "Bonjour le monde.", "voiceId": row["id"]}))
     assert result["status"] == "ready", result
     assert result["chunks"][0]["verificationStatus"] == "warning"
-    assert result["chunks"][0]["wordTimings"] == []
+    chunk = result["chunks"][0]
+    timings = chunk["wordTimings"]
+    # Missing native events use labelled duration estimates, not English ASR.
+    assert [word["text"] for word in timings] == ["Bonjour", "le", "monde"]
+    assert all(word["estimated"] for word in timings)
+    assert valid_timings(timings, chunk["text"], chunk["seconds"]) == timings
+    assert timings[0]["startSeconds"] == 0
+    assert timings[-1]["endSeconds"] == chunk["seconds"]
+    assert [(word["sourceStart"], word["sourceEnd"]) for word in timings] == [(0, 7), (8, 10), (11, 16)]
     assert not service.checked
     strict = finish(service, service.submit({"id": "p", "revision": 0}, {"text": "Bonjour le monde.", "voiceId": row["id"], "strictVerification": True}))
     assert strict["status"] != "ready"
