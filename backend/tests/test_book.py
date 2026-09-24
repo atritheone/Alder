@@ -51,13 +51,14 @@ def test_invalid_books_are_rejected(mutation):
     with pytest.raises(ValidationError): validate_project(p)
 
 
-def test_word_times_do_not_guess_mismatched_words_and_map_pronunciation():
+def test_word_times_retain_mismatches_as_estimates_and_map_pronunciation():
     from alder.speech import pronunciation_projection
     written = "😀 Dr. Alder writes."
     spoken, mapping = pronunciation_projection(written, [{"word":"Dr.", "spoken":"Doctor"}])
     timed = [{"text": w, "startSeconds":i, "endSeconds":i+1} for i,w in enumerate(["Doctor","Alder","reads"])]
     result = word_timings(written, spoken, timed, mapping)
-    assert [w["text"] for w in result] == ["Dr.", "Alder"]
+    assert [w["text"] for w in result] == ["Dr.", "Alder", "writes"]
+    assert [w["estimated"] for w in result] == [False, False, True]
     assert all(written[w["sourceStart"]:w["sourceEnd"]] == w["text"] for w in result)
 
 

@@ -1,3 +1,4 @@
+import { speechText, type SpeechText } from "./speechText";
 import { useStoredPreference } from "./useStoredPreference";
 import {
   proofreadingTransaction,
@@ -435,6 +436,14 @@ export function namedStyleTransaction(
   return tr;
 }
 export type EditorHandle = {
+  getDocumentPosition: () => { top: number; left: number; offset: number };
+  restoreDocumentPosition: (position: {
+    top: number;
+    left: number;
+    offset: number;
+  }) => void;
+  getSpeechText: (start: number, end: number, readLinks: boolean) => SpeechText;
+  setReadingRange: (range: { start: number; end: number } | null) => void;
   pageAtTextOffset: (offset: number) => number | null;
   moveUnit: (unit: ArrangementUnit, destination: number) => void;
   getText: () => string;
@@ -522,6 +531,9 @@ function refreshEditorDecorations(v: EditorView) {
 
 export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const editorScope = useId();
+  const directReadingRange = useRef<
+    { start: number; end: number } | null | undefined
+  >(undefined);
   const [caseMode, setCaseMode] = useState<CaseMode>("free");
   const inputCase = useRef<CaseMode>("free");
   inputCase.current = caseMode;
@@ -649,6 +661,54 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   useImperativeHandle(
     ref,
     () => ({
+      getDocumentPosition() {
+        const v = view.current;
+        const viewport = v?.dom.closest<HTMLElement>(".editor-scroll");
+        const map = v ? projectText(v.state.doc).map : [];
+        const live = v?.dom.ownerDocument.getSelection();
+        const caret =
+          v && live?.focusNode && v.dom.contains(live.focusNode)
+            ? v.posAtDOM(live.focusNode, live.focusOffset)
+            : v?.state.selection.from || 0;
+        let low = 0,
+          high = map.length;
+        while (low < high) {
+          const mid = (low + high) >>> 1;
+          if (map[mid] < caret) low = mid + 1;
+          else high = mid;
+        }
+        return {
+          top: viewport?.scrollTop || 0,
+          left: viewport?.scrollLeft || 0,
+          offset: Math.min(low, Math.max(0, map.length - 1)),
+        };
+      },
+      restoreDocumentPosition(position) {
+        const v = view.current;
+        if (!v) return;
+        const projection = projectText(v.state.doc);
+        const offset = Math.min(projection.text.length, position.offset);
+        v.dispatch(
+          v.state.tr.setSelection(
+            TextSelection.near(v.state.doc.resolve(projection.map[offset])),
+          ),
+        );
+        const viewport = v.dom.closest<HTMLElement>(".editor-scroll");
+        viewport?.scrollTo({
+          top: position.top,
+          left: position.left,
+          behavior: "instant",
+        });
+      },
+      getSpeechText(start, end, readLinks) {
+        return view.current
+          ? speechText(view.current.state.doc, start, end, readLinks)
+          : { text: "", offsets: [0] };
+      },
+      setReadingRange(range) {
+        directReadingRange.current = range;
+        if (view.current) view.current.updateState(view.current.state);
+      },
       replaceAll(find, replacement) {
         const v = editableView();
         if (!v || !find) return;
@@ -968,7 +1028,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           tableEditing(),
           dropCursor(),
           readingHighlight(
-            () => (blocked.current ? null : latest.current.readingRange),
+            () =>
+              blocked.current
+                ? null
+                : directReadingRange.current === undefined
+                  ? latest.current.readingRange
+                  : directReadingRange.current,
             () => latest.current.layoutVisible !== false,
           ),
           new Plugin({

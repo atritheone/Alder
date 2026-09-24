@@ -6,7 +6,6 @@ import { DOCUMENT_FONT } from "./fontCatalogue";
 import { newChapter } from "./book";
 import type { Project } from "./types";
 import "./start-screen.css";
-import { openDocuments } from "./openDocuments";
 
 export function NewDocument({
   onCreate,
@@ -241,8 +240,10 @@ export function NewDocument({
 
 export default function StartScreen({
   onOpen,
+  onOpenFiles,
 }: {
   onOpen: (p: Project) => void;
+  onOpenFiles: (files: File[]) => Promise<void>;
 }) {
   const [mode, setMode] = useState<"home" | "new" | "open">("home");
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
@@ -348,15 +349,12 @@ export default function StartScreen({
         <input
           ref={file}
           type="file"
+          multiple
           hidden
           onChange={(e) => {
-            const selected = e.target.files?.[0];
+            const selected = Array.from(e.target.files || []);
             e.target.value = "";
-            if (selected)
-              void run(async () => {
-                const opened = await openDocuments([selected]);
-                if (opened) onOpen(opened);
-              });
+            if (selected.length) void onOpenFiles(selected);
           }}
         />
       </div>

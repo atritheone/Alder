@@ -755,7 +755,7 @@ class SpeechService:
                     if not alignment.get("ok"):
                         raise RuntimeError(alignment.get("error", "Timing alignment failed."))
                     timing_words = alignment.get("words", [])
-                chunk["wordTimings"] = word_timings(chunk["text"], chunk["spokenText"], timing_words, chunk.get("pronunciationMap", []))
+                chunk["wordTimings"] = word_timings(chunk["text"], chunk["spokenText"], timing_words, chunk.get("pronunciationMap", []), seconds=info["seconds"])
                 chunk["timingSource"] = (system_voices.provider_id(chunk["voiceId"]) + "-events") if is_sapi else "local-recognition"
             except Exception as exc:
                 chunk["wordTimings"] = []

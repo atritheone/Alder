@@ -1,0 +1,29 @@
+.document-tabs {
+  display: flex;
+  flex: none;
+  gap: 12px;
+  padding: 2px 9px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.document-tab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+.document-tab > button[role="tab"] {
+  min-width: 40px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 3px;
+  font-size: 12px;
+}
+.document-tab > button[aria-selected="true"] {
+  font-weight: 700;
+}
+.document-tab > .document-tab-close {
+  padding: 4px;
+}

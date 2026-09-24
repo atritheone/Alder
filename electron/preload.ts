@@ -1,5 +1,6 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 contextBridge.exposeInMainWorld("alder", {
+  filePath: (file: File) => webUtils.getPathForFile(file),
   setWindowLayout: (
     mode: "start" | "workspace",
     width?: number,

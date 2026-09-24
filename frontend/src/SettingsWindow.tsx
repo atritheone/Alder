@@ -128,6 +128,14 @@ export default function SettingsWindow(p: Props) {
   const content = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const fonts = useInstalledFonts(p.project?.settings.fontFamily);
+  const [rememberPosition, setRememberPosition] = useStoredPreference(
+    "alder.rememberDocumentPosition",
+    "true",
+  );
+  const [readLinks, setReadLinks] = useStoredPreference(
+    "alder.readHyperlinks",
+    "false",
+  );
   const [writeChecks, setWriteChecks] = useStoredPreference(
     "alder.writeSpellcheck",
     "true",
@@ -318,6 +326,18 @@ export default function SettingsWindow(p: Props) {
           )}
           {p.category === "Writing" && (
             <>
+              <Section title="Documents">
+                <label className="settings-row">
+                  Remember document position
+                  <input
+                    type="checkbox"
+                    checked={rememberPosition !== "false"}
+                    onChange={(e) =>
+                      setRememberPosition(String(e.target.checked))
+                    }
+                  />
+                </label>
+              </Section>
               <Section title="Spelling & grammar">
                 <label className="settings-row">
                   Check writing
@@ -427,6 +447,20 @@ export default function SettingsWindow(p: Props) {
           )}
           {p.category === "Speech" && (
             <>
+              <Section title="Reading content">
+                <label className="settings-row">
+                  <input
+                    type="checkbox"
+                    checked={readLinks === "true"}
+                    onChange={(e) => setReadLinks(String(e.target.checked))}
+                  />
+                  Read hyperlinks
+                </label>
+                <p>
+                  Read linked text and URLs aloud. Off skips links and brackets
+                  containing only links.
+                </p>
+              </Section>
               <Playback scope="reading" title="Write" />
               <Playback scope="sandbox" title="Sandbox" />
               <Playback scope="narration" title="Narration" />

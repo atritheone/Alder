@@ -55,9 +55,9 @@ describe("reading buffer", () => {
     expect(readingBufferReady(job("sapi-voice"), 0)).toBe(true);
     expect(readingBufferReady(null, 0)).toBe(false);
   });
-  it("compensates the visual clock in wall time only during playback", () => {
-    expect(highlightClock(1, 1, true)).toBeCloseTo(1.04);
-    expect(highlightClock(1, 2, true)).toBeCloseTo(1.08);
+  it("uses the audio clock directly at every playback speed", () => {
+    expect(highlightClock(1, 1, true)).toBe(1);
+    expect(highlightClock(1, 2, true)).toBe(1);
     expect(highlightClock(1, 2, false)).toBe(1);
   });
 });

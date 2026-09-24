@@ -806,7 +806,8 @@ def test_normal_reading_continues_when_recognizer_fails(service, monkeypatch):
     assert done['status'] == 'ready'
     assert done['chunks'][0]['verificationStatus'] == 'warning'
     assert done['chunks'][0]['qa']['error'] == 'Recognizer unavailable'
-    assert done['chunks'][0]['wordTimings'] == []
+    assert done['chunks'][0]['wordTimings']
+    assert all(w['estimated'] for w in done['chunks'][0]['wordTimings'])
     assert len(service.generated) == 1
 
 
@@ -839,3 +840,17 @@ def test_project_strict_setting_applies_when_not_overridden(service, monkeypatch
     project = {'id': 'strict-project', 'revision': 0, 'pronunciation': [], 'settings': {'speechOptions': {'strictVerification': True}}}
     done = finish(service, service.submit(project, {'scope': 'selection', 'text': 'Alder reads clearly.', 'voiceId': 'default'}))
     assert done['strictVerification'] is True and done['status'] == 'needs_review'
+
+
+def test_cached_timing_map_is_upgraded_without_regenerating_audio(service):
+    from alder.reading import TIMING_VERSION
+    done = finish(service, submit(service))
+    stored = service._jobs[done['id']]
+    chunk = stored['chunks'][0]
+    chunk['timingVersion'] = 3
+    chunk['wordTimings'] = []
+    audio = service._chunk_path(stored, chunk).read_bytes()
+    refreshed = service.get_job(done['id'])
+    assert refreshed['chunks'][0]['timingVersion'] == TIMING_VERSION
+    assert refreshed['chunks'][0]['wordTimings']
+    assert service._chunk_path(stored, chunk).read_bytes() == audio

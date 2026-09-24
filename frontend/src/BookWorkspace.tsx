@@ -1,3 +1,10 @@
+import {
+  documentPositionKey,
+  readDocumentPosition,
+  saveDocumentPosition,
+  type DocumentPosition,
+} from "./documentPosition";
+import { useStoredPreference } from "./useStoredPreference";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ArrowDown,
@@ -99,6 +106,77 @@ export default function BookWorkspace(p: Props) {
   useEffect(() => setPageNumber("1"), [chapter?.id]);
   const [zoom, setZoom] = useState(0.8);
   const [arrangementZoom, setArrangementZoom] = useState(0.8);
+  const [rememberPosition] = useStoredPreference(
+    "alder.rememberDocumentPosition",
+    "true",
+  );
+  const positionKey = documentPositionKey(p.project.id);
+  const pendingPosition = useRef<DocumentPosition | null>(null);
+  const positionReady = useRef(false);
+  const positionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savePosition = useRef(() => {});
+  savePosition.current = () => {
+    if (!positionReady.current || showRaw || p.view !== "Write") return;
+    const position = p.editorRef.current?.getDocumentPosition();
+    if (position)
+      saveDocumentPosition(
+        positionKey,
+        {
+          ...position,
+          offset:
+            speechPlaying && readingPosition?.chapterId === chapter?.id
+              ? readingPosition.offset
+              : position.offset,
+          chapter: Math.max(
+            0,
+            chapters.findIndex((c) => c.id === chapter?.id),
+          ),
+          zoom,
+        },
+        rememberPosition === "true",
+      );
+  };
+  const queuePosition = () => {
+    if (positionTimer.current) clearTimeout(positionTimer.current);
+    positionTimer.current = setTimeout(() => savePosition.current(), 250);
+  };
+  useEffect(() => {
+    const saved = readDocumentPosition(positionKey);
+    pendingPosition.current = saved;
+    positionReady.current = !saved;
+    if (saved) {
+      setZoom(saved.zoom);
+      p.onChapter(
+        chapters[Math.min(saved.chapter, chapters.length - 1)]?.id ||
+          chapters[0]?.id,
+      );
+    }
+    const save = () => savePosition.current();
+    window.addEventListener("beforeunload", save);
+    window.addEventListener("alder-save-document-position", save);
+    return () => {
+      if (positionTimer.current) clearTimeout(positionTimer.current);
+      window.removeEventListener("beforeunload", save);
+      window.removeEventListener("alder-save-document-position", save);
+    };
+  }, [p.project.id]);
+  useEffect(() => {
+    const saved = pendingPosition.current;
+    if (
+      !saved ||
+      !pages.length ||
+      zoom !== saved.zoom ||
+      chapter?.id !== chapters[Math.min(saved.chapter, chapters.length - 1)]?.id
+    )
+      return;
+    const frame = requestAnimationFrame(() => {
+      p.editorRef.current?.restoreDocumentPosition(saved);
+      pendingPosition.current = null;
+      positionReady.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pages, chapter?.id, zoom]);
+  useEffect(queuePosition, [zoom]);
   const [speechPlaying, setSpeechPlaying] = useState(false);
   useEffect(() => {
     p.onPlaybackChange?.(speechPlaying);
@@ -246,6 +324,7 @@ export default function BookWorkspace(p: Props) {
     });
   return (
     <section
+      onScrollCapture={queuePosition}
       className={`workspace pane book-workspace${speechPlaying || p.externalPlayback ? " speech-playing" : ""}`}
       aria-label="Book workspace"
     >
@@ -441,6 +520,7 @@ export default function BookWorkspace(p: Props) {
                     })
               }
               onSelection={(word, text, range) => {
+                queuePosition();
                 p.onSelection(word, text);
                 if (!range || range.from === range.to) {
                   if (selected) setSelected(null);
@@ -607,14 +687,13 @@ export default function BookWorkspace(p: Props) {
                     )
                   }
                 >
-                  {Array.from(
-                    { length: 51 },
-                    (_, i) => (50 + i * 5) / 100,
-                  ).map((z) => (
-                    <option key={z} value={z}>
-                      {Math.round(z * 100)}%
-                    </option>
-                  ))}
+                  {Array.from({ length: 51 }, (_, i) => (50 + i * 5) / 100).map(
+                    (z) => (
+                      <option key={z} value={z}>
+                        {Math.round(z * 100)}%
+                      </option>
+                    ),
+                  )}
                 </select>
               </label>
               {p.view === "Write" && (

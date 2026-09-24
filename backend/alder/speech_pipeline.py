@@ -115,6 +115,14 @@ class SpeechPipeline(SpeechService):
             return False
 
     def _public(self, job):
+        # Upgrade cached timing maps from saved recognition evidence; keep audio.
+        for chunk in job.get("chunks", []):
+            if chunk.get("seconds") and chunk.get("timingVersion") != TIMING_VERSION:
+                chunk["wordTimings"] = valid_timings(word_timings(
+                    chunk["text"], chunk.get("spokenText", chunk["text"]),
+                    chunk.get("qa", {}).get("words", []), chunk.get("pronunciationMap", []),
+                    seconds=chunk["seconds"]), chunk["text"], chunk["seconds"])
+                chunk["timingVersion"] = TIMING_VERSION
         result = super()._public(job)
         for key in list(result):
             if key.startswith("_"):
@@ -535,7 +543,7 @@ class SpeechPipeline(SpeechService):
             self._copy_audio(destination.parent / selected["file"], destination)
             info = _wav_info(destination)
             check = selected["qa"]
-            timings = word_timings(chunk["text"], chunk["spokenText"], check.get("words", []), chunk.get("pronunciationMap", []))
+            timings = word_timings(chunk["text"], chunk["spokenText"], check.get("words", []), chunk.get("pronunciationMap", []), seconds=info["seconds"])
             with self._lock:
                 chunk.update(status="ready", qa=check, qaComplete=True, selectedAttempt=selected["index"], selectedSeed=selected["seed"],
                              timingSource=check.get("model", "unavailable"), timingEvidence=check.get("evidence", "recognition" if check.get("model", "").startswith("faster-whisper") else "unavailable"),

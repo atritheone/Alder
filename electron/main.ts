@@ -380,13 +380,15 @@ function registerIPC() {
                 ? "CmdOrCtrl+N"
                 : item.label.startsWith("Open Document")
                   ? "CmdOrCtrl+O"
-                  : item.label.startsWith("Save ")
-                    ? "CmdOrCtrl+S"
-                    : item.label.startsWith("Find And Replace")
-                      ? "CmdOrCtrl+F"
-                      : item.label === "Settings…"
-                        ? "CmdOrCtrl+,"
-                        : undefined;
+                  : item.label === "Close Document"
+                    ? "CmdOrCtrl+W"
+                    : item.label.startsWith("Save ")
+                      ? "CmdOrCtrl+S"
+                      : item.label.startsWith("Find And Replace")
+                        ? "CmdOrCtrl+F"
+                        : item.label === "Settings…"
+                          ? "CmdOrCtrl+,"
+                          : undefined;
               return {
                 label: item.label,
                 type: item.checked === undefined ? "normal" : "radio",

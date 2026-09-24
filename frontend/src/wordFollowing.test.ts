@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { spokenWord } from "./wordFollowing";
+import { nextWordDelay, spokenWord } from "./wordFollowing";
 
 const timings = [
   {
@@ -38,5 +38,27 @@ describe("spoken word following", () => {
   it("supports seeking backwards and exact boundaries", () => {
     expect(spokenWord(timings, 1.1)?.sourceStart).toBe(8);
     expect(spokenWord(timings, 0.1)?.sourceStart).toBe(0);
+  });
+});
+
+describe("word boundary scheduling", () => {
+  it("wakes for short words at high speed instead of waiting a full frame", () => {
+    const short = Array.from({ length: 10 }, (_, i) => ({
+      text: `w${i}`,
+      sourceStart: i * 3,
+      sourceEnd: i * 3 + 2,
+      startSeconds: i * 0.02,
+      endSeconds: (i + 1) * 0.02,
+    }));
+    for (let i = 0; i < short.length; i++) {
+      expect(spokenWord(short, i * 0.02 + 0.001)?.text).toBe(`w${i}`);
+      expect(nextWordDelay(short, i * 0.02 + 0.001, 4)).toBeCloseTo(4.75);
+    }
+  });
+  it("handles silence, missing timings and backwards seeks", () => {
+    expect(nextWordDelay(undefined, 0, 4)).toBe(16);
+    expect(nextWordDelay(timings, 0.448, 2)).toBeCloseTo(1);
+    expect(nextWordDelay(timings, 2, 4)).toBe(16);
+    expect(nextWordDelay(timings, 0.099, 1)).toBeCloseTo(1);
   });
 });

@@ -28,11 +28,11 @@ export function readingBufferReady(
   return true;
 }
 
-/** Advance only the visual cursor by one small display/scheduling allowance. */
+/** Direct editor updates use the audio clock without a React-latency offset. */
 export function highlightClock(
   seconds: number,
-  speed: number,
-  playing: boolean,
+  _speed: number,
+  _playing: boolean,
 ): number {
-  return seconds + (playing ? 0.04 * speed : 0);
+  return seconds;
 }

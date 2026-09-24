@@ -267,7 +267,9 @@ try {
   if (process.env.ALDER_READING_PERFORMANCE) {
     await readingPerformance(app, page, editor);
   } else {
-    await reader.getByLabel("Follow text", { exact: true }).uncheck();
+    await expect(reader.getByLabel("Follow text", { exact: true })).toHaveCount(
+      0,
+    );
     await reader
       .getByRole("button", { name: "Play Reading", exact: true })
       .click();

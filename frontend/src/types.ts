@@ -184,7 +184,10 @@ export type Annotation = {
   ruleId?: string;
   ruleName?: string;
   originalText?: string;
-  alternatives?: { label: string; edits: import("./proofreadingEdits").ProofreadingEdit[] }[];
+  alternatives?: {
+    label: string;
+    edits: import("./proofreadingEdits").ProofreadingEdit[];
+  }[];
   engine?: string;
 };
 export type Analysis = {
@@ -267,6 +270,8 @@ export type SpeechChunk = {
   processingSeconds?: number;
   verificationStatus?: string;
   wordTimings?: {
+    /** Inferred from recognition neighbours rather than an exact match. */
+    estimated?: boolean;
     text: string;
     sourceStart: number;
     sourceEnd: number;
@@ -351,7 +356,11 @@ export type NativeMenuEntry = {
 declare global {
   interface Window {
     alder?: {
-      setWindowLayout: (mode: "start" | "workspace", width?: number, height?: number) => Promise<void>;
+      setWindowLayout: (
+        mode: "start" | "workspace",
+        width?: number,
+        height?: number,
+      ) => Promise<void>;
       setNativeMenu: (
         menus: { label: string; items: NativeMenuEntry[] }[] | null,
         background?: string,
@@ -360,6 +369,7 @@ declare global {
         command: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll",
       ) => Promise<void>;
       readClipboard?: () => Promise<string>;
+      filePath?: (file: File) => string;
       request: (method: string, path: string, body?: unknown) => Promise<any>;
       upload: (
         path: string,

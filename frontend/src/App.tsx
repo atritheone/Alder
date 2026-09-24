@@ -86,6 +86,7 @@ import NarrationReview from "./NarrationReview";
 import StylesManager from "./StylesManager";
 import { DEFAULT_SPEECH_OPTIONS } from "./SpeechOptions";
 
+import DocumentTabs from "./DocumentTabs";
 import StartScreen, { NewDocument } from "./StartScreen";
 import { openDocuments } from "./openDocuments";
 import { helpFor } from "./contextHelp";
@@ -228,8 +229,20 @@ function savedNumber(key: string, fallback: number, min: number, max: number) {
 }
 export default function App() {
   useTypingPointer();
-  const { project, change, load, flush, saveState, error, setError, history } =
-    useProject();
+  const {
+    project,
+    documents,
+    activate,
+    close,
+    findSource,
+    change,
+    load,
+    flush,
+    saveState,
+    error,
+    setError,
+    history,
+  } = useProject();
   const workspaceOpen = Boolean(project);
   useEffect(() => {
     void window.alder?.setWindowLayout(workspaceOpen ? "workspace" : "start");
@@ -341,6 +354,7 @@ export default function App() {
   const editor = useRef<EditorHandle>(null),
     audio = useRef<HTMLAudioElement>(null),
     importFile = useRef<HTMLInputElement>(null),
+    openFile = useRef<HTMLInputElement>(null),
     imageFile = useRef<HTMLInputElement>(null),
     voiceFile = useRef<HTMLInputElement>(null),
     lastPlayed = useRef(""),
@@ -358,6 +372,23 @@ export default function App() {
   useEffect(() => {
     document.title = project ? `${project.name} — Alder` : "Alder";
   }, [project?.name]);
+  const openFiles = useCallback(
+    async (files: File[]) => {
+      setBusy("Opening files…");
+      try {
+        await flush();
+        await openDocuments(files, load, findSource);
+        setView("Write");
+        setPanel(null);
+        setNewOpen(false);
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setBusy("");
+      }
+    },
+    [flush, load, findSource, setError],
+  );
   useEffect(() => {
     const over = (e: DragEvent) => {
       if (e.dataTransfer?.types.includes("Files")) {
@@ -375,23 +406,7 @@ export default function App() {
       e.stopPropagation();
       setDropping(false);
       const files = Array.from(e.dataTransfer.files);
-      void (async () => {
-        setBusy("Opening files…");
-        try {
-          await flush();
-          const opened = await openDocuments(files);
-          if (opened) {
-            load(opened);
-            setView("Write");
-            setPanel(null);
-            setNewOpen(false);
-          }
-        } catch (e) {
-          setError((e as Error).message);
-        } finally {
-          setBusy("");
-        }
-      })();
+      void openFiles(files);
     };
     window.addEventListener("dragover", over);
     window.addEventListener("dragleave", leave);
@@ -401,7 +416,7 @@ export default function App() {
       window.removeEventListener("dragleave", leave);
       window.removeEventListener("drop", drop, true);
     };
-  }, [flush, load, setError]);
+  }, [openFiles]);
   const clip = project?.clips.find((c) => c.id === selected) || null,
     track = project?.tracks.find((t) => t.id === clip?.trackId) || null,
     content = clip ? chosenClip(clip) : null;
@@ -570,7 +585,14 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [word, project?.id, project?.dictionary]);
-  useEffect(() => window.alder?.onCloseRequest(flush), [flush]);
+  useEffect(
+    () =>
+      window.alder?.onCloseRequest(async () => {
+        window.dispatchEvent(new Event("alder-save-document-position"));
+        await flush();
+      }),
+    [flush],
+  );
   useEffect(() => {
     let pending = Promise.resolve();
     return window.alder?.onOpenFiles?.((paths) => {
@@ -578,7 +600,7 @@ export default function App() {
         pending = pending
           .then(async () => {
             await flush();
-            load(await api("/api/projects/open", "POST", { path }));
+            await load(await api("/api/projects/open", "POST", { path }));
             setPanel(null);
           })
           .catch((error) => setError(String(error.message || error)));
@@ -1031,7 +1053,23 @@ export default function App() {
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
         e.preventDefault();
-        openPanel("projects");
+        if (project) openFile.current?.click();
+        else window.dispatchEvent(new Event("alder-open-start"));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w" && project) {
+        e.preventDefault();
+        void close(project.id);
+        return;
+      }
+      if (e.ctrlKey && e.key === "Tab" && documents.length > 1) {
+        e.preventDefault();
+        const at = documents.findIndex((item) => item.id === project?.id);
+        void activate(
+          documents[
+            (at + (e.shiftKey ? -1 : 1) + documents.length) % documents.length
+          ].id,
+        );
         return;
       }
       const editable = (e.target as HTMLElement).closest(
@@ -1103,7 +1141,10 @@ export default function App() {
       window.alder?.onCommand((command) => {
         if (command === "save") void run(saveProject);
         if (command === "new") newProject();
-        if (command === "open") openPanel("projects");
+        if (command === "open") {
+          if (project) openFile.current?.click();
+          else openPanel("projects");
+        }
         if (command === "export") openPanel("export");
         if (command === "settings") openSettings();
       }),
@@ -1203,7 +1244,7 @@ export default function App() {
   if (!project)
     return (
       <>
-        <StartScreen onOpen={load} />
+        <StartScreen onOpen={load} onOpenFiles={openFiles} />
         {settingsWindow}
         {!window.alder && (
           <div className="start-settings-menu">
@@ -1416,7 +1457,7 @@ export default function App() {
   const menuItems: Record<string, MenuEntry[]> = {
     File: [
       { label: "New project…", action: newProject },
-      { label: "Open Document…", action: () => importFile.current?.click() },
+      { label: "Open Document…", action: () => openFile.current?.click() },
       { label: "Open project…", action: () => openPanel("projects") },
       {
         label: ["txt", "docx"].includes(project.settings.documentKind)
@@ -1424,6 +1465,7 @@ export default function App() {
           : "Save project…",
         action: () => void run(saveProject),
       },
+      { label: "Close document", action: () => void close(project.id) },
       { label: "Import document…", action: () => openPanel("import") },
       { label: "Export…", action: () => openPanel("export") },
     ],
@@ -1568,6 +1610,12 @@ export default function App() {
           ))}
         </div>
       )}
+      <DocumentTabs
+        documents={documents}
+        activeId={project.id}
+        onSelect={activate}
+        onClose={close}
+      />
       <div className="workspaces">
         <div className="workspace-topline">
           <div className="project-label">
@@ -1975,6 +2023,7 @@ export default function App() {
                     </label>
                   </aside>
                   <Editor
+                    key={project.id}
                     ref={editor}
                     caseScope="document"
                     readingRange={sandboxRange}
@@ -2856,6 +2905,18 @@ export default function App() {
       />
       <input
         hidden
+        ref={openFile}
+        type="file"
+        multiple
+        aria-label="Open documents"
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          e.target.value = "";
+          if (files.length) void openFiles(files);
+        }}
+      />
+      <input
+        hidden
         ref={importFile}
         type="file"
         multiple
@@ -2871,7 +2932,7 @@ export default function App() {
                     `/api/projects/${project.id}/import`,
                     file,
                   );
-                  load(imported);
+                  await load(imported);
                   setChapterId(imported.book?.chapters.at(-1)?.id || null);
                 }
                 setView("Write");

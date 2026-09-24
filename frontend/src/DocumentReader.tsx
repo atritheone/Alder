@@ -1,3 +1,4 @@
+import { useStoredPreference } from "./useStoredPreference";
 import { readingBufferReady, highlightClock } from "./readingBuffer";
 import { voiceLanguageLabel } from "./voiceLabels";
 import {
@@ -27,7 +28,7 @@ import type { Chapter, Job, Project, Voice } from "./types";
 import type { EditorHandle } from "./Editor";
 
 import { useNarrationGain } from "./audioPlayback";
-import { spokenWord } from "./wordFollowing";
+import { nextWordDelay, spokenWord } from "./wordFollowing";
 import {
   readingCursorOffset,
   readingPosition,
@@ -60,6 +61,7 @@ type Snapshot = {
   }[];
 };
 export default function DocumentReader(p: Props) {
+  const [readLinks] = useStoredPreference("alder.readHyperlinks", "false");
   const sourceChapters = p.sandbox ? [p.chapter] : p.project.book?.chapters;
   const [voices, setVoices] = useState<Voice[]>([
       { id: "default", name: "Default", kind: "builtin" },
@@ -93,7 +95,6 @@ export default function DocumentReader(p: Props) {
   const volumeSlider = useWheelSlider(volume, setVolume, 0, 4, 0.05);
   const [time, setTime] = useState(0),
     [playing, setPlaying] = useState(false);
-  const [follow, setFollow] = useState(true);
   const format = "wav";
   const [buffering, setBuffering] = useState(false);
   const [resumeAfterCancel, setResumeAfterCancel] = useState(false);
@@ -151,12 +152,22 @@ export default function DocumentReader(p: Props) {
     job?.chunks[chunkIndex + 1]?.playbackEligible,
     chunkIndex,
   ]);
-  const [range, setRange] = useState<{ start: number; end: number } | null>(
-    null,
-  );
+  const range = useRef<{ start: number; end: number } | null>(null);
+  const setRange = (next: { start: number; end: number } | null) => {
+    range.current = next;
+    const editor = p.editorRef.current;
+    if (editor) editor.setReadingRange(next);
+    else p.onHighlight(next);
+  };
   const position = useRef<ReadingPosition | null>(null);
   useEffect(() => () => p.onPosition?.(null), [p.onPosition]);
-  useEffect(() => () => p.onHighlight(null), [p.onHighlight]);
+  useEffect(
+    () => () => {
+      p.editorRef.current?.setReadingRange(null);
+      p.onHighlight(null);
+    },
+    [p.onHighlight],
+  );
   useEffect(() => {
     const next = p.chapter.voiceId || "default";
     if (p.sandbox && voice !== next) stopRef.current();
@@ -214,34 +225,9 @@ export default function DocumentReader(p: Props) {
       audio.current.playbackRate = speed;
     }
   }, [speed, volume]);
-  useEffect(() => {
-    if (!playing) return;
-    // Audio can keep playing while Chromium suspends animation frames for an
-    // obscured window. Sample its clock independently of paint scheduling.
-    const chunk = job?.chunks[chunkIndex];
-    const base = job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0;
-    let lastWord: ReturnType<typeof spokenWord> | undefined;
-    let lastCursor = -1;
-    const tick = () => {
-      if (!audio.current) return;
-      const seconds = audio.current.currentTime;
-      const word = spokenWord(
-        chunk?.wordTimings,
-        highlightClock(seconds, speed, true),
-      );
-      const cursor = chunk ? readingCursorOffset(chunk, seconds) : 0;
-      // Sample the audio clock often, but update React only at a word boundary.
-      if (fullAudio.current || word !== lastWord || cursor !== lastCursor) {
-        lastWord = word;
-        lastCursor = cursor;
-        setTime(seconds + base);
-      }
-    };
-    tick();
-    const timer = setInterval(tick, 16);
-    return () => clearInterval(timer);
-  }, [playing, job, chunkIndex, speed]);
-  useLayoutEffect(() => {
+  const updateReading = (clock: number, publishPosition = true) => {
+    if (playing && fullAudio.current && audio.current)
+      clock = audio.current.currentTime;
     let next: { start: number; end: number } | null = null;
     let nextPosition: ReadingPosition | null = null;
     if (active && job && snapshot.current) {
@@ -250,8 +236,8 @@ export default function DocumentReader(p: Props) {
             .map((c, i) => ({ ...c, startSeconds: chunkStart(job, i) }))
             .find(
               (c) =>
-                time >= c.startSeconds &&
-                time < c.startSeconds + (c.seconds || 0),
+                clock >= c.startSeconds &&
+                clock < c.startSeconds + (c.seconds || 0),
             )
         : job.chunks[chunkIndex];
       if (chunk) {
@@ -267,14 +253,14 @@ export default function DocumentReader(p: Props) {
         ) {
           const relative = highlightClock(
             fullAudio.current
-              ? time - (chunk.startSeconds || 0)
+              ? clock - (chunk.startSeconds || 0)
               : audio.current?.currentTime || 0,
             speed,
             playing,
           );
           const word = spokenWord(chunk.wordTimings, relative);
           nextPosition = readingPosition(chunk, relative, source);
-          if (follow && word) {
+          if (word && current.id === p.chapter.id) {
             const base = (chunk.sourceStart || 0) - source.offset;
             next = {
               start:
@@ -282,33 +268,80 @@ export default function DocumentReader(p: Props) {
               end: source.base + (source.offsets[base + word.sourceEnd] ?? 0),
             };
           }
-          if (follow && current.id !== p.chapter.id) p.onChapter(current.id);
+          if (current.id !== p.chapter.id) p.onChapter(current.id);
         }
       }
     }
     if (
-      position.current?.chapterId !== nextPosition?.chapterId ||
-      position.current?.offset !== nextPosition?.offset ||
-      position.current?.length !== nextPosition?.length
+      publishPosition &&
+      (position.current?.chapterId !== nextPosition?.chapterId ||
+        position.current?.offset !== nextPosition?.offset ||
+        position.current?.length !== nextPosition?.length)
     ) {
       position.current = nextPosition;
       p.onPosition?.(nextPosition);
     }
-    if (range?.start !== next?.start || range?.end !== next?.end) {
+    if (
+      range.current?.start !== next?.start ||
+      range.current?.end !== next?.end
+    ) {
       setRange(next);
-      p.onHighlight(next);
     }
+  };
+  const readingTick = useRef(updateReading);
+  readingTick.current = updateReading;
+  useLayoutEffect(() => {
+    updateReading(time);
   }, [
     time,
     speed,
     job,
-    follow,
     active,
     playing,
     p.chapter.id,
     p.chapter.text,
     chunkIndex,
   ]);
+  useEffect(() => {
+    if (!playing) return;
+    let timer: ReturnType<typeof setTimeout>;
+    let lastStatus = -Infinity;
+    const tick = () => {
+      const element = audio.current;
+      if (!element) return;
+      const seconds = element.currentTime;
+      const base = job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0;
+      const clock = seconds + base;
+      const chunk = fullAudio.current
+        ? job?.chunks.find(
+            (c, i) =>
+              clock >= chunkStart(job, i) &&
+              clock < chunkStart(job, i) + (c.seconds || 0),
+          )
+        : job?.chunks[chunkIndex];
+      const relative =
+        fullAudio.current && job && chunk
+          ? seconds - chunkStart(job, job.chunks.indexOf(chunk))
+          : seconds;
+      const publish = performance.now() - lastStatus >= 100;
+      // Word decorations update synchronously, independently of React status UI.
+      readingTick.current(clock, publish);
+      if (publish) {
+        lastStatus = performance.now();
+        setTime(clock);
+      }
+      timer = setTimeout(
+        tick,
+        nextWordDelay(
+          chunk?.wordTimings,
+          highlightClock(relative, speed, true),
+          speed,
+        ),
+      );
+    };
+    tick();
+    return () => clearTimeout(timer);
+  }, [playing, job, chunkIndex, speed]);
   const requestInFlight = useRef(false);
   const playbackRequest = useRef(0);
   const [requesting, setRequesting] = useState(false);
@@ -342,6 +375,8 @@ export default function DocumentReader(p: Props) {
   const currentConfiguration = () =>
     JSON.stringify([
       voice,
+      readLinks,
+      p.editorRef.current?.getSpeechText(0, 0, readLinks === "true").text,
       format,
       p.project.settings.speechOptions,
       p.project.pronunciation,
@@ -443,10 +478,17 @@ export default function DocumentReader(p: Props) {
       audio.current?.pause();
       p.onHighlight(null);
       const sourceText = p.editorRef.current?.getText() ?? p.chapter.text;
-      const text = sourceText.slice(
+      const input = p.editorRef.current?.getSpeechText(
         span.start,
-        span.end > span.start ? span.end : undefined,
+        span.end,
+        readLinks === "true",
       );
+      const text =
+        input?.text ??
+        sourceText.slice(
+          span.start,
+          span.end > span.start ? span.end : undefined,
+        );
       if (!text.trim()) return;
       snapshot.current = {
         chapters: [
@@ -455,7 +497,7 @@ export default function DocumentReader(p: Props) {
             text: sourceText,
             offset: 0,
             base: span.start,
-            offsets: codePointOffsets(text),
+            offsets: input?.offsets ?? codePointOffsets(text),
           },
         ],
       };
@@ -889,19 +931,11 @@ export default function DocumentReader(p: Props) {
         </label>
         {!p.sandbox && (
           <>
-            <label>
-              <input
-                type="checkbox"
-                checked={follow}
-                onChange={(e) => setFollow(e.target.checked)}
-              />
-              Follow text
-            </label>
             <button
               aria-label="Bookmark reading position"
               onClick={() => {
                 const offset =
-                  range?.start ||
+                  range.current?.start ||
                   p.editorRef.current?.getSelectionOffsets().start ||
                   0;
                 p.change((project) => {
