@@ -1,16 +1,25 @@
 import type { Node as PMNode } from "prosemirror-model";
 import { projectText } from "./textProjection";
+import {
+  referenceSpans,
+  type TextSpan,
+  type TextHeading,
+} from "./referenceSpans";
 
-export type SpeechText = { text: string; offsets: number[] };
+export type SpeechText = {
+  text: string;
+  offsets: number[];
+  endOffsets: number[];
+};
 const inputs = new WeakMap<PMNode, Map<string, SpeechText>>();
-const omitted = new WeakMap<PMNode, { start: number; end: number }[]>();
+const omitted = new WeakMap<PMNode, TextSpan[]>();
 
-/** Spoken input plus source UTF-16 boundaries, one per spoken code point. */
+/** Spoken code points map back to their original UTF-16 start and end boundaries. */
 export function speechText(
   doc: PMNode,
   start = 0,
   end?: number,
-  readLinks = false,
+  readReferences = false,
 ): SpeechText {
   const projection = projectText(doc);
   const text = projection.text;
@@ -18,12 +27,15 @@ export function speechText(
     end === undefined || end <= start
       ? text.length
       : Math.min(end, text.length);
-  const key = `${start}:${end}:${readLinks}`;
+  const key = `${start}:${end}:${readReferences}`;
   const cached = inputs.get(doc)?.get(key);
   if (cached) return cached;
   let spans = omitted.get(doc);
-  if (!spans) {
-    spans = [];
+  if (!spans && !readReferences) {
+    const marked: TextSpan[] = [],
+      protectedSpans: TextSpan[] = [],
+      superscripts: TextSpan[] = [],
+      headings: TextHeading[] = [];
     const offset = (position: number) => {
       let low = 0,
         high = projection.map.length;
@@ -35,59 +47,93 @@ export function speechText(
       return low;
     };
     doc.descendants((node, pos) => {
-      if (node.isText && node.marks.some((mark) => mark.type.name === "link"))
-        spans!.push({ start: offset(pos), end: offset(pos + node.nodeSize) });
-    });
-    // Imported formats may expose a URL as ordinary text rather than a mark.
-    for (const match of text.matchAll(
-      /(?:https?:\/\/|www\.)[^\s<>\[\]{}]+/gi,
-    )) {
-      const value = match[0].replace(/[.,;:!?)}]+$/, "");
-      spans.push({ start: match.index!, end: match.index! + value.length });
-    }
-    spans.sort((a, b) => a.start - b.start);
-    const merged: typeof spans = [];
-    for (const span of spans) {
-      const previous = merged.at(-1);
-      if (previous && !text.slice(previous.end, span.start).trim())
-        previous.end = Math.max(previous.end, span.end);
-      else merged.push({ ...span });
-    }
-    for (const span of merged) {
-      // Remove enclosing brackets only when they contain no other wording.
-      while (true) {
-        let a = span.start,
-          b = span.end;
-        while (a > 0 && /[ \t]/.test(text[a - 1])) a--;
-        while (b < text.length && /[ \t]/.test(text[b])) b++;
-        const close = (
-          { "(": ")", "[": "]", "{": "}" } as Record<string, string>
-        )[text[a - 1]];
-        if (!close || text[b] !== close) break;
-        span.start = a - 1;
-        span.end = b + 1;
+      const span = { start: offset(pos), end: offset(pos + node.nodeSize) };
+      if (
+        node.type.name === "code_block" ||
+        node.marks.some((mark) => mark.type.name === "code")
+      ) {
+        protectedSpans.push(span);
+        return false;
       }
-    }
-    spans = merged;
+      if (node.type.name === "heading")
+        headings.push({
+          ...span,
+          text: node.textContent,
+          level: node.attrs.level || 1,
+        });
+      if (node.isText && node.marks.some((mark) => mark.type.name === "link"))
+        marked.push(span);
+      if (
+        node.isText &&
+        node.marks.some((mark) => mark.type.name === "superscript") &&
+        /^\d+(?:[,–-]\d+)*$/.test(node.text || "")
+      )
+        superscripts.push(span);
+    });
+    spans = referenceSpans(
+      text,
+      marked,
+      protectedSpans,
+      headings,
+      superscripts,
+    );
     omitted.set(doc, spans);
   }
-  const result: SpeechText = { text: "", offsets: [0] };
+  const filter =
+    !readReferences &&
+    spans?.some((span) => span.start < end! && span.end > start);
+  const result: SpeechText = { text: "", offsets: [], endOffsets: [0] };
+  const append = (char: string, from: number, to: number) => {
+    result.text += char;
+    result.offsets.push(from - start);
+    result.endOffsets.push(to - start);
+  };
+  let pendingStart = -1,
+    pendingEnd = 0,
+    newlines = 0,
+    skippedReference = false;
+  const space = (from: number, to: number, char: string) => {
+    if (pendingStart < 0) pendingStart = from;
+    pendingEnd = to;
+    if (char === "\n") newlines++;
+  };
   let i = start,
     spanIndex = 0;
   while (i < end) {
-    while (spanIndex < spans.length && spans[spanIndex].end <= i) spanIndex++;
-    const span = !readLinks && spans[spanIndex];
+    while (spans && spanIndex < spans.length && spans[spanIndex].end <= i)
+      spanIndex++;
+    const span = filter && spans?.[spanIndex];
     if (span && span.start <= i) {
-      i = Math.min(end, span.end);
-      result.text += " ";
-      result.offsets.push(i - start);
-    } else {
-      const char = String.fromCodePoint(text.codePointAt(i)!);
-      result.text += char;
-      i += char.length;
-      result.offsets.push(i - start);
+      const to = Math.min(end, span.end);
+      space(i, to, " ");
+      skippedReference = true;
+      i = to;
+      continue;
     }
+    const char = String.fromCodePoint(text.codePointAt(i)!);
+    if (filter && /\s/u.test(char)) space(i, i + char.length, char);
+    else {
+      // A full stop after a citation need not repeat the sentence's own stop.
+      if (skippedReference && char === "." && /[.!?]$/.test(result.text)) {
+        i += char.length;
+        continue;
+      }
+      if (pendingStart >= 0 && result.text) {
+        if (newlines) {
+          append("\n", pendingStart, pendingEnd);
+          if (newlines > 1) append("\n", pendingEnd, pendingEnd);
+        } else if (!/^[.,;:!?)}\]]$/.test(char) && !/[([{]$/.test(result.text))
+          append(" ", pendingStart, pendingEnd);
+      }
+      pendingStart = -1;
+      newlines = 0;
+      skippedReference = false;
+      append(char, i, i + char.length);
+    }
+    i += char.length;
   }
+  // The terminal caret advances past any trailing bibliography as playback ends.
+  result.offsets.push(end - start);
   let cache = inputs.get(doc);
   if (!cache) {
     cache = new Map();

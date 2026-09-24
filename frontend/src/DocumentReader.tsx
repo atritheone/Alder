@@ -1,3 +1,4 @@
+import { useReadReferences } from "./useReadReferences";
 import { useStoredPreference } from "./useStoredPreference";
 import { readingBufferReady, highlightClock } from "./readingBuffer";
 import { voiceLanguageLabel } from "./voiceLabels";
@@ -58,10 +59,11 @@ type Snapshot = {
     offset: number;
     base: number;
     offsets: number[];
+    endOffsets?: number[];
   }[];
 };
 export default function DocumentReader(p: Props) {
-  const [readLinks] = useStoredPreference("alder.readHyperlinks", "false");
+  const [readReferences] = useReadReferences();
   const sourceChapters = p.sandbox ? [p.chapter] : p.project.book?.chapters;
   const [voices, setVoices] = useState<Voice[]>([
       { id: "default", name: "Default", kind: "builtin" },
@@ -265,7 +267,10 @@ export default function DocumentReader(p: Props) {
             next = {
               start:
                 source.base + (source.offsets[base + word.sourceStart] ?? 0),
-              end: source.base + (source.offsets[base + word.sourceEnd] ?? 0),
+              end:
+                source.base +
+                ((source.endOffsets ?? source.offsets)[base + word.sourceEnd] ??
+                  0),
             };
           }
           if (current.id !== p.chapter.id) p.onChapter(current.id);
@@ -375,8 +380,8 @@ export default function DocumentReader(p: Props) {
   const currentConfiguration = () =>
     JSON.stringify([
       voice,
-      readLinks,
-      p.editorRef.current?.getSpeechText(0, 0, readLinks === "true").text,
+      readReferences,
+      p.editorRef.current?.getSpeechText(0, 0, readReferences === "true").text,
       format,
       p.project.settings.speechOptions,
       p.project.pronunciation,
@@ -481,7 +486,7 @@ export default function DocumentReader(p: Props) {
       const input = p.editorRef.current?.getSpeechText(
         span.start,
         span.end,
-        readLinks === "true",
+        readReferences === "true",
       );
       const text =
         input?.text ??
@@ -498,6 +503,7 @@ export default function DocumentReader(p: Props) {
             offset: 0,
             base: span.start,
             offsets: input?.offsets ?? codePointOffsets(text),
+            endOffsets: input?.endOffsets,
           },
         ],
       };

@@ -231,6 +231,7 @@ export default function App() {
   useTypingPointer();
   const {
     project,
+    retain,
     documents,
     activate,
     close,
@@ -782,7 +783,11 @@ export default function App() {
       const result = await api(`/api/projects/${project.id}/export`, "POST", {
         format,
       });
-      await download(result.downloadUrl, `${project.name}.${format}`);
+      const saved = await download(
+        result.downloadUrl,
+        `${project.name}.${format}`,
+      );
+      if (saved) retain(project.id);
       setHint(`Saved ${project.name}.${format}`);
       return;
     }
@@ -791,6 +796,7 @@ export default function App() {
     const result = await api(`/api/projects/${project.id}/save`, "POST", {
       path,
     });
+    retain(project.id);
     setHint(`Project saved to ${result.path}`);
   };
   const openSettings = (category?: SettingsCategory) => {
@@ -1244,7 +1250,11 @@ export default function App() {
   if (!project)
     return (
       <>
-        <StartScreen onOpen={load} onOpenFiles={openFiles} />
+        <StartScreen
+          onOpen={load}
+          onCreate={(p) => load(p, true)}
+          onOpenFiles={openFiles}
+        />
         {settingsWindow}
         {!window.alder && (
           <div className="start-settings-menu">
@@ -1267,7 +1277,7 @@ export default function App() {
         {newOpen && (
           <NewDocument
             onCreate={(p) => {
-              load(p);
+              void load(p, true);
               setNewOpen(false);
             }}
             onClose={() => setNewOpen(false)}
@@ -2854,7 +2864,7 @@ export default function App() {
       {newOpen && (
         <NewDocument
           onCreate={(p) => {
-            load(p);
+            void load(p, true);
             setNewOpen(false);
             setView("Write");
             setDetailOpen(false);

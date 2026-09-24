@@ -214,10 +214,10 @@ try {
     .poll(() =>
       app.evaluate(() => globalThis.sandboxTest.requests.at(-1)?.text),
     )
-    .toBe("Before   after");
+    .toBe("Before after");
   await page.getByRole("button", { name: "Stop reading", exact: true }).click();
   await page.evaluate(() => {
-    localStorage.setItem("alder.readHyperlinks", "true");
+    localStorage.setItem("alder.readReferences", "true");
     window.dispatchEvent(new Event("alder-preference-changed"));
   });
   await write.press("ControlOrMeta+A");
@@ -227,6 +227,33 @@ try {
       app.evaluate(() => globalThis.sandboxTest.requests.at(-1)?.text),
     )
     .toBe("Before (Wikipedia) after");
+  await page.getByRole("button", { name: "Stop reading", exact: true }).click();
+  const referenceText =
+    "Before ([PubMed Central (PMC)][2]), after [7]. Finally (see [Reuters][8]).";
+  await write.fill(referenceText);
+  await page.evaluate(() => {
+    localStorage.setItem("alder.readReferences", "false");
+    window.dispatchEvent(new Event("alder-preference-changed"));
+  });
+  await write.press("ControlOrMeta+A");
+  await page.getByRole("button", { name: "Play Reading", exact: true }).click();
+  await expect
+    .poll(() =>
+      app.evaluate(() => globalThis.sandboxTest.requests.at(-1)?.text),
+    )
+    .toBe("Before, after. Finally.");
+  await page.getByRole("button", { name: "Stop reading", exact: true }).click();
+  await page.evaluate(() => {
+    localStorage.setItem("alder.readReferences", "true");
+    window.dispatchEvent(new Event("alder-preference-changed"));
+  });
+  await write.press("ControlOrMeta+A");
+  await page.getByRole("button", { name: "Play Reading", exact: true }).click();
+  await expect
+    .poll(() =>
+      app.evaluate(() => globalThis.sandboxTest.requests.at(-1)?.text),
+    )
+    .toBe(referenceText);
   await page.getByRole("button", { name: "Stop reading", exact: true }).click();
   expect(errors).toEqual([]);
   fs.writeFileSync(report, JSON.stringify({ status: "passed", outcomes }));

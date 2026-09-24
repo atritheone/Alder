@@ -11,6 +11,11 @@ export function useProject() {
     [],
   );
   const opened = useRef(new Map<string, Project>());
+  // Only untouched documents created in this session can be replaced automatically.
+  const pristine = useRef(new Set<string>());
+  const retain = useCallback((id: string) => {
+    pristine.current.delete(id);
+  }, []);
   const transitions = useRef(Promise.resolve());
   const remember = useCallback((p: Project) => {
     opened.current.set(p.id, p);
@@ -98,11 +103,30 @@ export function useProject() {
     return next;
   }, []);
   const load = useCallback(
-    (p: Project) =>
+    (p: Project, newlyCreated = false) =>
       transition(async () => {
         const cached = opened.current.get(p.id) === p;
         await flush();
+        const previous = current.current;
+        const replace =
+          !newlyCreated &&
+          previous &&
+          previous.id !== p.id &&
+          pristine.current.has(previous.id)
+            ? previous.id
+            : null;
         install(cached ? opened.current.get(p.id)! : p);
+        if (newlyCreated && p.name === "Untitled" && !p.settings.author?.trim())
+          pristine.current.add(p.id);
+        else if (!cached) pristine.current.delete(p.id);
+        if (replace) {
+          opened.current.delete(replace);
+          pristine.current.delete(replace);
+          forgetSessionPosition(documentPositionKey(replace));
+          setDocuments((previous) =>
+            previous.filter((item) => item.id !== replace),
+          );
+        }
       }),
     [transition, flush, install],
   );
@@ -134,6 +158,7 @@ export function useProject() {
           }
         }
         opened.current.delete(id);
+        pristine.current.delete(id);
         forgetSessionPosition(documentPositionKey(id));
         setDocuments((previous) => previous.filter((item) => item.id !== id));
       }),
@@ -151,6 +176,7 @@ export function useProject() {
       if (!current.current) return;
       const next = structuredClone(current.current);
       mutate(next);
+      pristine.current.delete(next.id);
       current.current = next;
       remember(next);
       serial.current++;
@@ -188,6 +214,7 @@ export function useProject() {
   };
   return {
     project,
+    retain,
     documents,
     activate,
     close,

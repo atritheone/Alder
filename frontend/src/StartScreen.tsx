@@ -1,7 +1,7 @@
 import AlderLogo from "./AlderLogo";
 import { useEffect, useRef, useState } from "react";
 import { FilePlus2, FolderOpen, X } from "lucide-react";
-import { api } from "./api";
+import { api, newClip } from "./api";
 import { DOCUMENT_FONT } from "./fontCatalogue";
 import { newChapter } from "./book";
 import type { Project } from "./types";
@@ -71,7 +71,9 @@ export function NewDocument({
                 (_, i) => newChapter(book ? `Chapter ${i + 1}` : project.name),
               ),
             };
-            project.clips = [];
+            project.clips = [
+              newClip(project.tracks[0].id, 0, "", "Untitled Draft"),
+            ];
             project.placements = [];
             Object.assign(project.settings, {
               documentKind: kind,
@@ -240,9 +242,11 @@ export function NewDocument({
 
 export default function StartScreen({
   onOpen,
+  onCreate,
   onOpenFiles,
 }: {
   onOpen: (p: Project) => void;
+  onCreate: (p: Project) => void;
   onOpenFiles: (files: File[]) => Promise<void>;
 }) {
   const [mode, setMode] = useState<"home" | "new" | "open">("home");
@@ -359,7 +363,7 @@ export default function StartScreen({
         />
       </div>
       {mode === "new" && (
-        <NewDocument onCreate={onOpen} onClose={() => setMode("home")} />
+        <NewDocument onCreate={onCreate} onClose={() => setMode("home")} />
       )}
     </main>
   );

@@ -442,7 +442,11 @@ export type EditorHandle = {
     left: number;
     offset: number;
   }) => void;
-  getSpeechText: (start: number, end: number, readLinks: boolean) => SpeechText;
+  getSpeechText: (
+    start: number,
+    end: number,
+    readReferences: boolean,
+  ) => SpeechText;
   setReadingRange: (range: { start: number; end: number } | null) => void;
   pageAtTextOffset: (offset: number) => number | null;
   moveUnit: (unit: ArrangementUnit, destination: number) => void;
@@ -700,10 +704,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           behavior: "instant",
         });
       },
-      getSpeechText(start, end, readLinks) {
+      getSpeechText(start, end, readReferences) {
         return view.current
-          ? speechText(view.current.state.doc, start, end, readLinks)
-          : { text: "", offsets: [0] };
+          ? speechText(view.current.state.doc, start, end, readReferences)
+          : { text: "", offsets: [0], endOffsets: [0] };
       },
       setReadingRange(range) {
         directReadingRange.current = range;

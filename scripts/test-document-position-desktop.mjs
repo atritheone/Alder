@@ -53,9 +53,9 @@ try {
   ).toBeChecked();
   await dialog.getByRole("tab", { name: "Speech", exact: true }).click();
   await expect(
-    dialog.getByLabel("Read hyperlinks", { exact: true }),
+    dialog.getByLabel("Read references", { exact: true }),
   ).not.toBeChecked();
-  await dialog.getByLabel("Read hyperlinks", { exact: true }).check();
+  await dialog.getByLabel("Read references", { exact: true }).check();
   await dialog.press("Escape");
   await page.getByLabel("Page zoom", { exact: true }).selectOption("1.3");
   const scroll = () => page.locator(".book-editor .editor-scroll");
@@ -98,7 +98,7 @@ try {
     .toBeCloseTo(stored.top, 0);
   dialog = await settings(page, "Speech");
   await expect(
-    dialog.getByLabel("Read hyperlinks", { exact: true }),
+    dialog.getByLabel("Read references", { exact: true }),
   ).toBeChecked();
   await dialog.getByRole("tab", { name: "Writing", exact: true }).click();
   await dialog

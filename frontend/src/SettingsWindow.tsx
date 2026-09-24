@@ -1,3 +1,4 @@
+import { useReadReferences } from "./useReadReferences";
 import {
   useEffect,
   useLayoutEffect,
@@ -132,10 +133,7 @@ export default function SettingsWindow(p: Props) {
     "alder.rememberDocumentPosition",
     "true",
   );
-  const [readLinks, setReadLinks] = useStoredPreference(
-    "alder.readHyperlinks",
-    "false",
-  );
+  const [readReferences, setReadReferences] = useReadReferences();
   const [writeChecks, setWriteChecks] = useStoredPreference(
     "alder.writeSpellcheck",
     "true",
@@ -451,14 +449,16 @@ export default function SettingsWindow(p: Props) {
                 <label className="settings-row">
                   <input
                     type="checkbox"
-                    checked={readLinks === "true"}
-                    onChange={(e) => setReadLinks(String(e.target.checked))}
+                    checked={readReferences === "true"}
+                    onChange={(e) =>
+                      setReadReferences(String(e.target.checked))
+                    }
                   />
-                  Read hyperlinks
+                  Read references
                 </label>
                 <p>
-                  Read linked text and URLs aloud. Off skips links and brackets
-                  containing only links.
+                  Read citations, source lists, linked text and URLs aloud. Off
+                  skips detected references and their brackets and numbers.
                 </p>
               </Section>
               <Playback scope="reading" title="Write" />
