@@ -25,7 +25,7 @@ def words(text):
                 "realized": "realised", "realizing": "realising", "realizes": "realises",
                 "organize": "organise", "organized": "organised", "color": "colour", "colors": "colours",
                 "center": "centre", "centers": "centres", "honor": "honour", "honored": "honoured",
-                "eye": "i", "site": "sight", "patients": "patience", "judgment": "judgement", "judgments": "judgements",
+                "eye": "i", "site": "sight", "patients": "patience", "here": "hear", "judgment": "judgement", "judgments": "judgements",
                 "unrecognizable": "unrecognisable", "practise": "practice", "practises": "practices",
                 "licence": "license", "defense": "defence", "offense": "offence",
                 "demeanor": "demeanour", "honourable": "honorable", "splendor": "splendour",
@@ -35,7 +35,7 @@ def words(text):
                 "apologize": "apologise", "apologizes": "apologises", "authorized": "authorised",
                 "dishonored": "dishonoured", "favored": "favoured", "honors": "honours", "humor": "humour",
                 "meager": "meagre", "organizer": "organiser", "practiced": "practised", "theater": "theatre",
-                "skillful": "skilful", "skillfully": "skilfully"}
+                "skillful": "skilful", "skillfully": "skilfully", "vampyress": "vampiress"}
     return [variants.get(w, w) for w in result]
 
 

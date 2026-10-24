@@ -235,3 +235,21 @@ If you find this model useful, please consider citing.
 ```
 ## Disclaimer
 Don't use this model to do bad things. Prompts are sourced from freely available data on the internet.
+
+## Local audiobook section policy
+
+The local preview, audiobook planner and repair splitter keep complete sentences
+together when they fit. The established safety caps remain **240 characters and 45 words**;
+the model also retains its normalised-input and token guards. Smaller section
+targets pack complete sentences without forcing a word or clause split.
+
+Sentences exceeding either safety cap split at commas, colons, semicolons or
+suitable dashes. Numeric separators and internal punctuation in words are not
+cut. If no punctuation split fits the cap, the passage is reported before
+recording with its source text and location (`sentence-boundary-review.json`).
+The workflow does not silently rewrite text, exceed the safety cap, or cut at
+an arbitrary word. Smaller repair targets cannot subdivide a sentence that fits.
+Abbreviations, initials, numbers, quotations and ambiguous punctuation are
+handled conservatively, so some ambiguous passages may also require review.
+Repairs obey the same boundaries. Legacy arbitrary-word checkpoints must be replanned
+before new recording; this policy does not regenerate existing audiobooks.

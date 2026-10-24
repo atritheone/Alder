@@ -100,7 +100,7 @@ def main():
         return str(output), f"Generated {len(chunks)} sections with seed {seed}. Listen through before using the narration. Each section is also saved separately."
 
     with gr.Blocks(title="Chatterbox Local") as demo:
-        gr.Markdown("# Chatterbox Local\nNarrate an English passage. Longer passages are automatically split into short sections and joined into one audio file. Upload a clean voice recording of about 10 seconds, or leave it empty to use the built-in voice.")
+        gr.Markdown("# Chatterbox Local\nNarrate an English passage. Sections keep sentences intact where possible; longer sentences split at commas, colons, semicolons or dashes. Passages without a safe punctuation break are flagged before recording. Upload a clean voice recording of about 10 seconds, or leave it empty to use the built-in voice.")
         text = gr.Textbox(label="Text to narrate", lines=6, value="The local Chatterbox installation is ready. Our audiobook journey begins here.")
         reference = gr.Audio(label="Voice reference (optional)", sources=["upload", "microphone"], type="filepath", format="wav")
         seed = gr.Number(label="Seed (0 for a new variation)", value=0, precision=0)

@@ -16,11 +16,11 @@ import numpy as np
 import soundfile as sf
 import torch
 from chatterbox.tts_turbo import ChatterboxTurboTTS
-from narration import split_narration
+from narration import split_narration, validate_section_breaks, preflight_tracks, BOUNDARY_VERSION
 from mutagen.id3 import ID3, APIC, TIT2, TALB, TPE1, TPE2, TPE3, TCOM, TRCK, TPOS, TCON, TLAN, TIT1, TXXX, COMM, TSSE
 from mutagen.mp3 import MP3
 
-ROOT = DATA / "audiobooks/her-many-faces"
+ROOT = Path(os.environ.get("CHATTERBOX_AUDIOBOOK_ROOT", str(DATA / "audiobooks/her-many-faces")))
 HERE = Path(__file__).parent
 FFMPEG = shutil.which("ffmpeg")
 
@@ -66,12 +66,12 @@ def make_units(track):
 
 
 def render_candidate(model, verifier, text, directory, label, attempt):
-    seed = int(hashlib.sha256(f"{label}:{attempt}:her-many-faces-v1".encode()).hexdigest()[:8], 16)
+    seed = int(hashlib.sha256(f"{label}:{attempt}:{ROOT.name}-v1".encode()).hexdigest()[:8], 16)
     audio_path = directory / f"{label}-a{attempt}.wav"
     qa_path = audio_path.with_suffix(".json")
     if qa_path.exists() and audio_path.exists():
         cached = json.loads(qa_path.read_text(encoding="utf-8"))
-        if cached["text"] == text:
+        if cached["text"] == text and (not cached.get("sha256") or hashlib.sha256(audio_path.read_bytes()).hexdigest() == cached["sha256"]):
             return cached
     torch.manual_seed(seed)
     temperature = [0.7, 0.6, 0.8, 0.65, 0.75][attempt % 5]
@@ -85,7 +85,8 @@ def render_candidate(model, verifier, text, directory, label, attempt):
     plausible = max(0.3, len(text.split()) * 0.1) < duration < len(text.split()) * 1.3 + 4
     result = {"text": text, "file": str(audio_path), "seed": seed, "temperature": temperature,
               "seconds": duration, "accepted": qa["accepted"] and plausible, "plausible_duration": plausible,
-              "asr": qa["results"], "elapsed": time.perf_counter() - started}
+              "asr": qa["results"], "elapsed": time.perf_counter() - started,
+              "sha256": hashlib.sha256(audio_path.read_bytes()).hexdigest()}
     save(qa_path, result)
     return result
 
@@ -152,12 +153,12 @@ def package(track, records, plan):
                   TPE1(encoding=1, text=plan["author"]), TPE2(encoding=1, text=plan["author"]),
                   TCOM(encoding=1, text=plan["author"]), TPE3(encoding=1, text=plan["narrator"]),
                   TRCK(encoding=1, text=f"{track['track']}/{len(plan['tracks'])}"), TPOS(encoding=1, text="1/1"),
-                  TCON(encoding=1, text="Audiobook"), TLAN(encoding=1, text="eng"), TIT1(encoding=1, text=track["group"]),
+                  TCON(encoding=1, text="Audiobook"), TLAN(encoding=1, text=plan["language"]), TIT1(encoding=1, text=track["group"]),
                   TSSE(encoding=1, text="Chatterbox Turbo / FFmpeg libmp3lame"),
                   COMM(encoding=1, lang="eng", desc="", text=plan["description"]),
                   TXXX(encoding=1, desc="NARRATOR", text=plan["narrator"]),
                   TXXX(encoding=1, desc="AUTHOR", text=plan["author"]),
-                  TXXX(encoding=1, desc="PRODUCTION_DATE", text=datetime.now().date().isoformat()),
+                  TXXX(encoding=1, desc="PRODUCTION_DATE", text=plan.get("production_date", datetime.now().date().isoformat())),
                   TXXX(encoding=1, desc="SOURCE_SHA256", text=plan["source_sha256"]),
                   TXXX(encoding=1, desc="BOOK_PART", text=track["group"]),
                   APIC(encoding=1, mime="image/png", type=3, desc="Front cover", data=Path(plan["cover"]).read_bytes())]:
@@ -185,6 +186,15 @@ def main():
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     plan = json.loads((ROOT / "plan.json").read_text(encoding="utf-8"))
+    boundary_review = preflight_tracks([t for t in plan['tracks']
+                                       if not args.tracks or t['track'] in args.tracks])
+    boundary_report = ROOT / 'sentence-boundary-review.json'
+    save(boundary_report, {'policy': BOUNDARY_VERSION, 'findings': boundary_review})
+    if boundary_review:
+        raise ValueError(f'{len(boundary_review)} passages have no punctuation split within the safe recording limit. '
+                         f'Review {boundary_report}. No new audio has been generated.')
+    for key in ("source", "reference", "cover"):
+        assert hashlib.sha256(Path(plan[key]).read_bytes()).hexdigest() == plan[f"{key}_sha256"], f"Input changed: {key}"
     progress = {"started": datetime.now().isoformat(), "status": "running", "tracks": []}
     save(ROOT / "progress.json", progress)
     model = verifier = None
@@ -206,6 +216,10 @@ def main():
                 if checkpoint.exists():
                     selected = json.loads(checkpoint.read_text(encoding="utf-8"))
                     assert selected["text"] == unit["text"]
+                    validate_section_breaks(unit["text"], [p["text"] for p in selected["parts"]])
+                    for part in selected["parts"]:
+                        if part.get("sha256"):
+                            assert hashlib.sha256(Path(part["file"]).read_bytes()).hexdigest() == part["sha256"], "Checkpoint audio changed"
                 elif args.package_only:
                     raise RuntimeError(f"Missing section {checkpoint}")
                 else:
@@ -226,7 +240,7 @@ def main():
                 print(f"TRACK {track['track']:02d} PACKAGED: {result['seconds']:.1f}s", flush=True)
             progress["tracks"].append(result)
             save(ROOT / "progress.json", progress)
-        progress["status"] = "needs_review" if any(t.get("pending") for t in progress["tracks"]) else "complete"
+        progress["status"] = "needs_review" if any(t.get("pending") for t in progress["tracks"]) else "rendered"
         progress["finished"] = datetime.now().isoformat()
         save(ROOT / "progress.json", progress)
         print(f"RUN {progress['status'].upper()}", flush=True)
