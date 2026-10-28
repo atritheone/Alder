@@ -203,6 +203,16 @@ describe a model smoke test as comprehensive proofreading quality validation.
 
 ## Retry and rollback
 
+The word-processing schema update declares compatibility level **2** and a
+supported forward migration from level **1**. Preflight reports `dataMigration`
+and `automaticRollbackCompatible`. Old project snapshots are migrated on a
+validated copy when opened; saving writes schema 2. The pre-update backup remains
+essential. The old application payload is retained, but automatic rollback to
+level 1 is blocked because it cannot read saved schema 2 documents. Recovery with
+an older application requires a separate compatible data copy from the verified
+backup; never overwrite newer work. The updater itself does not rewrite user
+documents, and staged/installed verification uses isolated test data.
+
 Retry the same update after an interruption; components are content checked before
 reuse. `--offline` requires a previously assembled app for this exact source
 fingerprint plus its caches/workspace; it cannot fetch a new release.

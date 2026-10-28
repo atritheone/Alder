@@ -17,7 +17,7 @@ import cli
 import updates
 from common import SetupError, inventory, read_json, write_json
 from doctor import validate_metadata
-from install import activate
+from install import activate, rollback
 
 
 class UpdateTests(unittest.TestCase):
@@ -57,6 +57,28 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(plan['installedVersion'],'0.1.0')
         self.assertEqual(plan['repositoryVersion'],self.version)
         self.assertEqual(before,inventory(self.install))
+
+    def test_schema_upgrade_is_explicit_and_cannot_be_rolled_back_into_old_data(self):
+        plan=self.plan()
+        self.assertTrue(plan['dataMigration'])
+        self.assertEqual(plan['previousDataCompatibility'],1)
+        self.assertEqual(plan['dataCompatibility'],2)
+        self.assertFalse(plan['automaticRollbackCompatible'])
+        self.execution()
+        status,result=self.invoke()
+        self.assertEqual(status,0)
+        self.assertEqual(read_json(self.install/'active.json')['dataCompatibility'],2)
+        with patch('install.require_closed'),self.assertRaisesRegex(SetupError,'compatibility'):
+            rollback(self.install)
+        self.assertEqual(read_json(self.install/'active.json')['dataCompatibility'],2)
+
+    def test_undeclared_schema_upgrade_remains_blocked(self):
+        source=self.root/'unqualified source'
+        package=read_json(ROOT/'package.json')
+        package['alderSetup'].pop('upgradeFromDataCompatibility')
+        write_json(source/'package.json',package)
+        with self.assertRaisesRegex(SetupError,'data migration'):
+            updates.update_plan(source,self.install,'linux-x64',self.fingerprint)
 
     def test_same_version_distinguishes_current_source_from_rebuild(self):
         self.active['version']=self.version;write_json(self.install/'active.json',self.active)
@@ -103,7 +125,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_target_migration_and_escaping_paths_stop_early(self):
         for change,pattern in [({'target':'darwin-arm64'},'does not match'),
-                               ({'dataCompatibility':2},'data migration'),
+                               ({'dataCompatibility':3},'data migration'),
                                ({'directory':'../../outside'},'escaped')]:
             with self.subTest(change=change):
                 write_json(self.install/'active.json',{**self.active,**change})
@@ -213,7 +235,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_migration_failure_precedes_native_dependencies(self):
         resources,desktop,_=self.execution()
-        self.active['dataCompatibility']=2;write_json(self.install/'active.json',self.active)
+        self.active['dataCompatibility']=3;write_json(self.install/'active.json',self.active)
         status,result=self.invoke()
         self.assertEqual(status,1);self.assertEqual(result['code'],'ALDER_MIGRATION')
         resources.assert_not_called();desktop.assert_not_called()

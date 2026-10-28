@@ -1205,7 +1205,7 @@ button.danger {
   min-height: 190px;
   padding: 20px 25px 45px;
   line-height: 1.7;
-  font-size: 15px;
+  font-size: inherit;
   caret-color: #494949;
   overflow-wrap: anywhere;
 }
@@ -1245,14 +1245,18 @@ button.danger {
 .ProseMirror th,
 .ProseMirror td {
   border: 1px solid #999999;
-  min-width: 50px;
+  min-width: var(--default-cell-min-width, 25px);
   padding: 7px;
+  vertical-align: top;
 }
 .ProseMirror td p {
   margin: 0;
 }
+.ProseMirror th { background: #eee; }
 .ProseMirror .selectedCell {
   background: #d6d6d6;
+  outline: 1px solid #293f5e;
+  outline-offset: -1px;
 }
 .ProseMirror a {
   color: #5e5e5e;
@@ -2480,9 +2484,6 @@ button.danger {
   }
   .detail-heading .add-collation svg {
     font-size: 12px;
-  }
-  .format-toolbar > button:nth-of-type(n + 9):nth-of-type(-n + 14) {
-    display: none;
   }
   .titlebar-subtitle {
     display: none;

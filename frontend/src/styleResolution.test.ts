@@ -5,6 +5,7 @@ import {
   styleDeclarations,
   styleSheet,
   styleUsageCount,
+  replaceProjectStyle,
 } from "./styleResolution";
 import { schema, namedStyleTransaction, parseEditorDocument } from "./Editor";
 import type { NamedStyle, Project, DocNode } from "./types";
@@ -19,6 +20,78 @@ const select = (
   EditorState.create({ doc, selection: TextSelection.create(doc, from, to) });
 
 describe("named style inheritance and live presentation", () => {
+  it("inherits paragraph flow but honours explicit off values and exact leading", () => {
+    const resolved = resolveStyles([
+      {
+        id: "base",
+        name: "Base",
+        keepWithNext: true,
+        keepTogether: true,
+        widowOrphan: true,
+        lineSpacingMode: "exact",
+        lineSpacing: 18,
+      },
+      {
+        id: "child",
+        name: "Child",
+        basedOn: "base",
+        keepWithNext: false,
+        widowOrphan: false,
+      },
+    ]).get("child")!;
+    expect(resolved).toMatchObject({
+      keepWithNext: false,
+      keepTogether: true,
+      widowOrphan: false,
+      lineSpacing: 18,
+    });
+    const css = styleDeclarations(resolved);
+    expect(css).toContain("line-height:18pt");
+    expect(css).toContain("break-after:auto");
+    expect(css).toContain("break-inside:avoid");
+    expect(css).toContain("widows:1;orphans:1");
+    expect(
+      styleDeclarations({ lineSpacingMode: "atLeast", lineSpacing: 12 }),
+    ).toContain("line-height:max(1.2em,12pt)");
+    expect(() =>
+      resolveStyles([{ id: "bad", name: "Bad", keepTogether: "false" as any }]),
+    ).toThrow();
+  });
+  it("replaces a used style across stories and relationships without erasing direct formatting", () => {
+    const doc: DocNode = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { styleId: "old", fontSize: 13.5 },
+          content: [{ type: "text", text: "word" }],
+        },
+      ],
+    };
+    const project = structuredClone({
+      styles: [
+        { id: "old", name: "Old" },
+        { id: "new", name: "New" },
+        { id: "child", name: "Child", basedOn: "old", nextStyle: "old" },
+      ],
+      book: { chapters: [{ document: doc }] },
+      clips: [{ document: doc, variants: [{ document: doc }] }],
+      placements: [{ frozenDocument: doc }],
+    }) as Project;
+    replaceProjectStyle(project, "old", "new");
+    expect(styleUsageCount(project, "old")).toBe(0);
+    expect(styleUsageCount(project, "new")).toBe(4);
+    expect(project.book!.chapters[0].document.content![0].attrs?.fontSize).toBe(
+      13.5,
+    );
+    expect(project.styles.find((style) => style.id === "child")).toMatchObject({
+      basedOn: "new",
+      nextStyle: "new",
+    });
+    const original = JSON.stringify(project);
+    expect(() => replaceProjectStyle(project, "new", "child")).toThrow(/cycle/);
+    expect(JSON.stringify(project)).toBe(original);
+  });
   it("resolves base→child without modifying styles and treats zero as explicit", () => {
     const styles: NamedStyle[] = [
       {

@@ -2,6 +2,19 @@ import { api, upload } from "./api";
 import { migrateBook } from "./book";
 import type { Project } from "./types";
 
+export async function rememberDocumentFile(id: string, path: string) {
+  const bytes = new TextEncoder().encode(
+    window.alder?.platform === "win32" ? path.toLowerCase() : path,
+  );
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  localStorage.setItem(
+    "alder.documentSource." + id,
+    Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join(""),
+  );
+}
+
 /** Open each file independently, keeping earlier successes if a later import fails. */
 export async function openDocuments(
   files: File[],
@@ -28,6 +41,8 @@ export async function openDocuments(
     }
     if (file.name.toLowerCase().endsWith(".alder")) {
       result = await upload<Project>("/api/projects/open-file", file);
+      if (path)
+        await window.alder?.bindDocumentFile?.(result.id, file, "alder", true);
       localStorage.setItem("alder.documentSource." + result.id, sourceKey);
       await onOpen(result);
       continue;
@@ -41,6 +56,7 @@ export async function openDocuments(
     );
     const kind = file.name.toLowerCase().endsWith(".txt") ? "txt" : "docx";
     Object.assign(imported.settings, {
+      ...imported.lastImport?.pageSettings,
       documentKind: kind,
       preferredFormat: /\.(md|markdown)$/i.test(file.name) ? "md" : kind,
       includeTitle: false,
@@ -51,6 +67,13 @@ export async function openDocuments(
       project: imported,
     });
     localStorage.setItem("alder.documentSource." + result.id, sourceKey);
+    if (path)
+      await window.alder?.bindDocumentFile?.(
+        result.id,
+        file,
+        result.settings.preferredFormat,
+        kind === "txt",
+      );
     await onOpen(result);
   }
   return result;

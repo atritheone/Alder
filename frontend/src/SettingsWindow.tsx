@@ -15,6 +15,8 @@ import { useInstalledFonts } from "./useInstalledFonts";
 import { usePlaybackSettings } from "./usePlaybackSettings";
 import { useStoredPreference } from "./useStoredPreference";
 import "./settings-window.css";
+import TypingSettings from "./TypingSettings";
+import { pageGeometry } from "./pageGeometry";
 
 const categories = [
   "Appearance",
@@ -159,10 +161,40 @@ export default function SettingsWindow(p: Props) {
     if (content.current) content.current.scrollTop = 0;
     setError("");
   }, [p.category]);
-  const setting = (key: string, value: unknown) =>
+  const setting = (key: string, value: unknown) => {
+    let repairedMargins: Record<string, number> | undefined;
+    if (
+      /^(pageSize|orientation|pageWidthMm|pageHeightMm|margin.*Mm|gutterMm)$/.test(
+        key,
+      )
+    ) {
+      const previous = pageGeometry(p.project?.settings);
+      if (previous.adjusted)
+        repairedMargins = {
+          marginTopMm: previous.margins.top,
+          marginRightMm: previous.margins.right,
+          marginBottomMm: previous.margins.bottom,
+          marginLeftMm: previous.margins.left,
+          gutterMm: 0,
+        };
+      const candidate = {
+        ...p.project?.settings,
+        ...repairedMargins,
+        [key]: value,
+      };
+      if (pageGeometry(candidate).adjusted) {
+        setError(
+          "Page margins must leave at least 20 mm of writing space in each direction. Reduce the margins before choosing a smaller page.",
+        );
+        return;
+      }
+      setError("");
+    }
     p.onChange((project) => {
+      if (repairedMargins) Object.assign(project.settings, repairedMargins);
       project.settings[key] = value;
     });
+  };
   const text = (key: string, label: string, multiline = false) => (
     <label className="settings-row" key={key}>
       {label}
@@ -336,6 +368,7 @@ export default function SettingsWindow(p: Props) {
                   />
                 </label>
               </Section>
+              <TypingSettings />
               <Section title="Spelling & grammar">
                 <label className="settings-row">
                   Check writing
@@ -376,8 +409,28 @@ export default function SettingsWindow(p: Props) {
                   {select(
                     "pageSize",
                     "Page size",
-                    ["A4", "A5", "Letter", "Legal", "6x9"],
+                    ["A4", "A5", "Letter", "Legal", "6x9", "Custom"],
                     "A4",
+                  )}
+                  {p.project?.settings.pageSize === "Custom" && (
+                    <>
+                      {number(
+                        "pageWidthMm",
+                        "Paper width (mm)",
+                        50,
+                        1000,
+                        0.1,
+                        210,
+                      )}
+                      {number(
+                        "pageHeightMm",
+                        "Paper height (mm)",
+                        50,
+                        1000,
+                        0.1,
+                        297,
+                      )}
+                    </>
                   )}
                   {select(
                     "orientation",
@@ -385,7 +438,34 @@ export default function SettingsWindow(p: Props) {
                     ["portrait", "landscape"],
                     "portrait",
                   )}
-                  {number("marginMm", "Margins (mm)", 5, 60, 1, 20)}
+                </Section>
+                <Section title="Margins">
+                  {(["Top", "Bottom", "Left", "Right"] as const).map((edge) => (
+                    <div key={edge}>
+                      {number(
+                        `margin${edge}Mm`,
+                        `${edge} (mm)`,
+                        0,
+                        100,
+                        0.1,
+                        p.project?.settings.marginMm ?? 22,
+                      )}
+                    </div>
+                  ))}
+                  {number(
+                    "gutterMm",
+                    "Left binding gutter (mm)",
+                    0,
+                    50,
+                    0.1,
+                    0,
+                  )}
+                  {p.project && pageGeometry(p.project.settings).adjusted && (
+                    <p role="status">
+                      These older margins are reduced to keep a 20 mm writing
+                      area. Choose smaller margins to set them explicitly.
+                    </p>
+                  )}
                 </Section>
                 <Section title="Headers & numbering">
                   {text("header", "Running header")}

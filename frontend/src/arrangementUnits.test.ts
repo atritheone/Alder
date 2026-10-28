@@ -8,7 +8,7 @@ const schema = new Schema({
     paragraph: {
       group: "block",
       content: "inline*",
-      attrs: { align: { default: null } },
+      attrs: { align: { default: null }, blockId: { default: null } },
     },
     text: { group: "inline" },
     page_break: { group: "block" },
@@ -27,6 +27,22 @@ describe("arrangement units", () => {
     "pictures or conversations in it, 'and what is the use of a book,'",
     "thought Alice 'without pictures or conversation?'",
   ];
+  it("does not mistake stable block identities for a formatting boundary", () => {
+    const original = state(
+      ...wrapped.map((text, index) =>
+        schema.node(
+          "paragraph",
+          { blockId: `line-${index}` },
+          schema.text(text),
+        ),
+      ),
+    );
+    const units = documentUnits(original.doc).filter(
+      (unit) => unit.kind === "paragraph",
+    );
+    expect(units).toHaveLength(1);
+    expect(units[0].text).toBe(wrapped.join(" "));
+  });
   it("groups legacy hard-wrapped prose across source lines without changing the document", () => {
     const original = state(
       ...wrapped.map(p),

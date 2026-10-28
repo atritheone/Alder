@@ -23,8 +23,10 @@ from urllib.parse import unquote, urlparse
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
+from .page_geometry import page_geometry
 
 MAX_IMPORT_BYTES = 100 * 1024 * 1024
+DOCUMENT_FORMAT = json.loads(Path(__file__).with_name('document-format.json').read_text(encoding='utf-8'))
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 SUPPORTED_FORMATS = ("txt", "md", "html", "docx", "pdf", "epub", "azw3")
 MIMES = {"txt": "text/plain", "md": "text/markdown", "html": "text/html",
@@ -162,7 +164,7 @@ def _prepare_publication(project, options=None, warnings=None):
     for style_id in styles:
         resolve(style_id)
     prepared["styles"] = list(resolved.values())
-    metadata = {"id", "name", "kind", "basedOn"}
+    metadata = {"id", "name", "kind", "basedOn", "nextStyle"}
 
     def apply(attrs):
         attrs = attrs or {}
@@ -177,6 +179,10 @@ def _prepare_publication(project, options=None, warnings=None):
             return
         if node.get("attrs"):
             node["attrs"] = apply(node["attrs"])
+        if _kind(node) == "heading":
+            attrs = node.get("attrs") or {}
+            level = int(_number(attrs.get("level"), 1, 1, 6))
+            node["attrs"] = {**DOCUMENT_FORMAT['heading'], 'fontSize': DOCUMENT_FORMAT['headingSizes'][level-1], **attrs}
         for mark in node.get("marks", []):
             if mark.get("type") in ("text_style", "textStyle", "fontFamily", "fontSize", "color"):
                 mark["attrs"] = apply(mark.get("attrs"))
@@ -203,7 +209,7 @@ def _prepare_publication(project, options=None, warnings=None):
             blocks = []
             for entry in sorted(entries, key=lambda item: str(item["word"]).casefold()):
                 blocks.append({"type": "heading", "attrs": {"level": 3}, "content": [{"type": "text", "text": str(entry["word"]).strip()}]})
-                details = " Â· ".join(str(entry.get(key) or "").strip() for key in ("ipa", "partOfSpeech") if entry.get(key))
+                details = " · ".join(str(entry.get(key) or "").strip() for key in ("ipa", "partOfSpeech") if entry.get(key))
                 if not details and entry.get("pos"):
                     details = str(entry["pos"])
                 if details:
@@ -226,10 +232,10 @@ def _settings(project, options=None):
     values.update(project.get("settings", {}))
     values.update(options or {})
     values["fontSize"] = _number(values.get("fontSize"), 12, 6, 72)
-    values["lineHeight"] = _number(values.get("lineHeight"), 1.6, 1, 3)
-    values["marginMm"] = _number(values.get("marginMm"), 22, 5, 65)
+    values["lineHeight"] = _number(values.get("lineHeight"), 1.6, 0.8, 4)
+    values["marginMm"] = _number(values.get("marginMm"), 22, 0, 100)
     values["fontFamily"] = re.sub(r"[^\w ,'-]", "", str(values.get("fontFamily", "Cambria")))[:100] or "Cambria"
-    values["pageSize"] = values.get("pageSize") if values.get("pageSize") in ("A4", "A5", "Letter", "Legal", "6x9") else "A4"
+    values["pageSize"] = values.get("pageSize") if values.get("pageSize") in ("A4", "A5", "Letter", "Legal", "6x9", "Custom") else "A4"
     values["orientation"] = "landscape" if values.get("orientation") == "landscape" else "portrait"
     values["firstPageNumber"] = int(_number(values.get("firstPageNumber"), 1, 1, 9999))
     return values
@@ -329,12 +335,22 @@ def _block_style(node, project):
     if values.get("fontFamily"):
         css.append("font-family:" + re.sub(r"[^\w ,'-]", "", str(values["fontFamily"]))[:100])
     if values.get("lineHeight"):
-        css.append(f"line-height:{_number(values['lineHeight'], 1.6, 1, 3):g}")
-    for field, prop in (("spaceAfter", "margin-bottom"), ("spaceBefore", "margin-top"), ("leftIndent", "margin-left"), ("firstLineIndent" if values.get("firstLineIndent") is not None else "indent", "text-indent")):
+        css.append(f"line-height:{_number(values['lineHeight'], 1.6, 0.8, 4):g}")
+    if values.get("lineSpacingMode") in ("exact", "atLeast") and values.get("lineSpacing") is not None:
+        leading = f"{_number(values['lineSpacing'], 12, 1, 144):g}pt"
+        leading = leading if values["lineSpacingMode"] == "exact" else f"max(1.2em,{leading})"
+        css.append('line-height:' + leading + ';--alder-paragraph-leading:' + leading)
+    elif values.get('lineSpacingMode') == 'multiple':
+        leading = f"{_number(values.get('lineHeight'), project.get('settings', {}).get('lineHeight', 1.6), 0.8, 4):g}"
+        css.append('line-height:' + leading + ';--alder-paragraph-leading:' + leading)
+    for field, prop in (("spaceAfter", "margin-bottom"), ("spaceBefore", "margin-top"), ("leftIndent", "margin-left"), ("rightIndent", "margin-right"), ("firstLineIndent" if values.get("firstLineIndent") is not None else "indent", "text-indent")):
         if values.get(field) is not None:
-            css.append(f"{prop}:{_number(values[field], 0, -144 if field in ('indent', 'firstLineIndent', 'leftIndent') else 0, 144):g}pt")
-    if values.get("keepWithNext"):
-        css.append("break-after:avoid")
+            css.append(f"{prop}:{_number(values[field], 0, -144 if field in ('indent', 'firstLineIndent', 'leftIndent', 'rightIndent') else 0, 144):g}pt")
+    for key, prop, yes in (("keepWithNext", "break-after", "avoid"), ("keepTogether", "break-inside", "avoid"), ("pageBreakBefore", "break-before", "page")):
+        if type(values.get(key)) is bool:
+            css.append(f"{prop}:{yes if values[key] else 'auto'}")
+    if type(values.get("widowOrphan")) is bool:
+        css.append("widows:2;orphans:2" if values['widowOrphan'] else "widows:1;orphans:1")
     if re.fullmatch(r"#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?", str(values.get("color") or "")):
         css.append("color:" + values["color"])
     return ";".join(css)
@@ -370,6 +386,12 @@ def _html_node(node, project, resources, warnings, epub=False):
         return "<br/>"
     if kind == "horizontal_rule":
         return "<hr/>"
+    if kind == "section_break":
+        if epub:
+            _warn(warnings, "Reflowable EPUB retains section boundaries but does not apply fixed paper dimensions or odd/even page starts.")
+        from .sections import validate_section
+        validate_section(attrs)
+        return '<div class="section-break" data-section="' + html.escape(json.dumps({'kind': attrs.get('kind', 'nextPage'), 'page': attrs.get('page', {})}), quote=True) + '"></div>'
     if kind == "page_break":
         return '<div class="page-break"></div>'
     if kind == "image":
@@ -377,8 +399,10 @@ def _html_node(node, project, resources, warnings, epub=False):
         if not image:
             return '<span class="missing-image">' + html.escape(attrs.get("alt") or "[Image unavailable]") + "</span>"
         source = "images/" + image["name"] if epub else "data:image/png;base64," + base64.b64encode(image["data"]).decode()
-        width = f' width="{int(_number(attrs.get("width"), image["width"], 1, 3000))}"' if attrs.get("width") else ""
-        return f'<img src="{source}" alt="{html.escape(attrs.get("alt") or "", quote=True)}"{width}/>'
+        width = f' width="{_number(attrs.get("width"), image["width"], 1, 10000):g}"' if attrs.get("width") else ""
+        alignment = attrs.get('align') if attrs.get('align') in ('left', 'center', 'right') else 'left'
+        title = html.escape(attrs.get('title') or '', quote=True)
+        return f'<figure style="text-align:{alignment};margin:12px 0"><img src="{source}" alt="{html.escape(attrs.get("alt") or "", quote=True)}" title="{title}" data-image-align="{alignment}"{width}/></figure>'
     inner = "".join(_html_node(child, project, resources, warnings, epub) for child in node.get("content", []))
     tags = {"paragraph": "p", "blockquote": "blockquote", "bullet_list": "ul", "ordered_list": "ol", "list_item": "li",
             "table": "table", "table_row": "tr", "table_cell": "td", "table_header": "th", "code_block": "pre"}
@@ -390,33 +414,54 @@ def _html_node(node, project, resources, warnings, epub=False):
         return inner
     extra = ""
     style = _block_style(node, project)
+    if kind in ('table', 'table_row', 'table_cell', 'table_header'):
+        from .table_formatting import table_css
+        style += ';' + table_css(kind, attrs)
+        if kind == 'table': extra += ' data-table-align="' + attrs.get('align', 'left') + '"'
+    if kind in ('ordered_list', 'bullet_list'):
+        from .list_formatting import NUMBER_FORMATS, BULLETS
+        if attrs.get('listStyle') in (NUMBER_FORMATS if kind == 'ordered_list' else BULLETS):
+            style += ';list-style-type:' + attrs['listStyle']
     if style:
         extra += ' style="' + html.escape(style, quote=True) + '"'
     if kind == "ordered_list":
         extra += f' start="{int(_number(attrs.get("order", attrs.get("start")), 1, 1, 100000))}"'
     if kind in ("table_cell", "table_header"):
+        if attrs.get('colwidth'):
+            extra += ' data-colwidth="' + ','.join(str(round(value)) for value in attrs['colwidth']) + '"'
         for field in ("colspan", "rowspan"):
             if attrs.get(field, 1) > 1:
                 extra += f' {field}="{int(_number(attrs[field], 1, 1, 100))}"'
     if kind == "code_block":
         inner = "<code>" + inner + "</code>"
     if kind == "table":
-        inner = "<tbody>" + inner + "</tbody>"
+        from .docx_support import table_grid
+        columns, placed = table_grid(node.get('content', []))
+        widths = {}
+        for _, col, _, _, cell in placed:
+            for offset, width in enumerate(cell.get('attrs', {}).get('colwidth') or []):
+                if width: widths[col + offset] = width
+        colgroup = '<colgroup>' + ''.join(f'<col style="width:{widths[col]:g}px"/>' if col in widths else '<col/>' for col in range(columns)) + '</colgroup>' if widths else ''
+        if len(widths) == columns:
+            extra = extra.replace('style="', f'style="width:{sum(widths.values()):g}px;')
+        inner = colgroup + "<tbody>" + inner + "</tbody>"
     return f"<{tag}{extra}>{inner}</{tag}>"
 
 
 def _css(settings):
-    size = ('9in 6in' if settings.get('orientation') == 'landscape' else '6in 9in') if settings['pageSize'] == '6x9' else settings['pageSize'] + ' ' + settings.get('orientation', 'portrait')
-    return f"""@page {{ size: {size}; margin: {settings['marginMm']:g}mm; }}
+    geometry = page_geometry(settings)
+    margins = geometry['margins']
+    return f"""@page {{ size: {geometry['width']:g}mm {geometry['height']:g}mm; margin: {margins['top']:g}mm {margins['right']:g}mm {margins['bottom']:g}mm {margins['left']:g}mm; }}
 * {{ box-sizing: border-box; }}
 body {{ color: #202020; background: white; font-family: {settings['fontFamily']}, serif;
 font-size: {settings['fontSize']:g}pt; line-height: {settings['lineHeight']:g}; margin: 0; }}
 main {{ max-width: 52em; padding: 2em; margin: 0 auto; }}
 h1,h2,h3,h4,h5,h6 {{ line-height: 1.2; break-after: avoid; color: black; }}
 p {{ margin: 0 0 0.7em; orphans: 2; widows: 2; }}
+p span,h1 span,h2 span,h3 span,h4 span,h5 span,h6 span {{ line-height: var(--alder-paragraph-leading,inherit); }}
 section {{ margin: 1.5em 0; }} img {{ max-width: 100%; height: auto; }}
 table {{ border-collapse: collapse; width: 100%; margin: 1em 0; table-layout: fixed; }}
-td,th {{ border: 1px solid #b8b8b8; padding: 0.4em 0.6em; overflow-wrap: anywhere; vertical-align: top; }}
+td,th {{ border: .75pt solid #999999; padding: 5.25pt; overflow-wrap: anywhere; vertical-align: top; }}
 th {{ background: #eeeeee; }} td p,th p {{ margin: 0; }}
 blockquote {{ border-left: 2px solid #aaaaaa; margin: 1em; padding-left: 1em; }}
 pre {{ white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85em; }}
@@ -440,14 +485,30 @@ def _render_html(project, options, warnings):
         pieces.append('<p class="author">' + html.escape(str(settings["author"])) + "</p>")
     if settings["includeToc"]:
         pieces.append('<nav aria-label="Contents"><h2>Contents</h2><ol>' + "".join(f'<li><a href="#section-{i}">{html.escape(s["title"] or "Untitled section")}</a></li>' for i, s in enumerate(sections)) + "</ol></nav>")
+    page_styles = []
     for i, section in enumerate(sections):
         heading = f'<h2>{html.escape(section["title"])}</h2>' if section["title"] else ""
-        content = "".join(_html_node(b, project, resources, warnings) for b in section["blocks"])
+        chunks, pending, page_style = [], [], None
+        for b in section['blocks']:
+            if _kind(b) == 'section_break':
+                chunks.append(('<div style="' + page_style + '">' if page_style else '<div>') + ''.join(pending) + '</div>')
+                pending = [_html_node(b, project, resources, warnings)]
+                attrs = b.get('attrs', {})
+                geo = page_geometry(attrs.get('page', {}))
+                edges = geo['margins']
+                name = 'alder-section-' + str(len(page_styles))
+                page_styles.append(f"@page {name} {{ size:{geo['width']:g}mm {geo['height']:g}mm; margin:{edges['top']:g}mm {edges['right']:g}mm {edges['bottom']:g}mm {edges['left']:g}mm }}")
+                boundary = {'oddPage':'right', 'evenPage':'left'}.get(attrs.get('kind'), 'page')
+                page_style = f'page:{name};break-before:{boundary}'
+            else:
+                pending.append(_html_node(b, project, resources, warnings))
+        chunks.append(('<div style="' + page_style + '">' if page_style else '<div>') + ''.join(pending) + '</div>')
+        content = ''.join(chunks)
         pieces.append(f'<section id="section-{i}" data-role="{html.escape(section["role"], quote=True)}">{heading}{content}</section>')
     # Used by the preview endpoint: a restrictive document policy survives use in a new tab.
     csp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src 'none'; base-uri 'none'; form-action 'none'"
     language = html.escape(project.get("language", "en"), quote=True)
-    return f'<!DOCTYPE html><html lang="{language}"><head><meta charset="utf-8"/><meta http-equiv="Content-Security-Policy" content="{csp}"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>{title}</title><meta name="author" content="{html.escape(str(settings["author"]), quote=True)}"/><style>{_css(settings)}</style></head><body><main>{"".join(pieces)}</main></body></html>'
+    return f'<!DOCTYPE html><html lang="{language}"><head><meta charset="utf-8"/><meta http-equiv="Content-Security-Policy" content="{csp}"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>{title}</title><meta name="author" content="{html.escape(str(settings["author"]), quote=True)}"/><style>{_css(settings)}{"".join(page_styles)}</style></head><body><main>{"".join(pieces)}</main></body></html>'
 
 
 def _markdown(node, warnings):
@@ -472,8 +533,8 @@ def _markdown(node, warnings):
     if kind == "table":
         _warn(warnings, "Markdown tables are flattened to tab-separated rows.")
         return "\n" + plain_text(node) + "\n\n"
-    if kind == "page_break":
-        _warn(warnings, "Markdown does not preserve print page breaks.")
+    if kind in ("page_break", "section_break"):
+        _warn(warnings, "Markdown does not preserve print page or section breaks.")
         return "\n\n"
     if kind == "horizontal_rule":
         return "\n---\n\n"
@@ -485,6 +546,8 @@ def _markdown(node, warnings):
     if kind == "blockquote":
         return "\n".join("> " + line for line in inner.rstrip().split("\n")) + "\n\n"
     if kind in ("ordered_list", "bullet_list"):
+        if attrs.get('listStyle') not in (None, 'decimal', 'disc'):
+            _warn(warnings, 'Markdown converted custom list markers to ordinary numbered or bullet lists.')
         start = int(_number(attrs.get("order", attrs.get("start")), 1, 1, 100000))
         items = []
         for i, item in enumerate(node.get("content", [])):
@@ -659,6 +722,7 @@ def _epub(project, path, settings, warnings):
 
 
 def _docx(project, path, settings, warnings):
+    from .docx_support import set_font_family, apply_paragraph_flow
     from docx import Document
     from docx.shared import Mm, Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -668,23 +732,27 @@ def _docx(project, path, settings, warnings):
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
     document = Document()
     section = document.sections[0]
-    sizes = {"A4": (210, 297), "A5": (148, 210), "Letter": (215.9, 279.4), "Legal": (215.9, 355.6), "6x9": (152.4, 228.6)}
-    dimensions = sizes[settings["pageSize"]]
-    if settings["orientation"] == "landscape":
-        dimensions = dimensions[::-1]
-    section.page_width, section.page_height = [Mm(x) for x in dimensions]
+    from .sections import write_docx_geometry
+    write_docx_geometry(section, settings)
+    geometry = page_geometry(settings)
     numbering = OxmlElement("w:pgNumType")
     numbering.set(qn("w:start"), str(settings["firstPageNumber"]))
     section._sectPr.append(numbering)
-    section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Mm(settings["marginMm"])
     normal = document.styles["Normal"]
-    normal.font.name = settings["fontFamily"]
+    set_font_family(normal.font, settings["fontFamily"])
     normal.font.size = Pt(settings["fontSize"])
     normal.paragraph_format.line_spacing = settings["lineHeight"]
     normal.paragraph_format.space_after = Pt(8)
     for name in ("Title", "Subtitle", "Heading 1", "Heading 2", "Heading 3", "Heading 4", "Heading 5", "Heading 6"):
         document.styles[name].font.color.rgb = RGBColor(0, 0, 0)
-        document.styles[name].font.name = settings["fontFamily"]
+        set_font_family(document.styles[name].font, settings["fontFamily"])
+    for level, size in enumerate(DOCUMENT_FORMAT['headingSizes'], 1):
+        heading = document.styles[f'Heading {level}']
+        heading.font.size = Pt(size)
+        heading.font.bold = True
+        heading.paragraph_format.line_spacing = DOCUMENT_FORMAT['heading']['lineHeight']
+        heading.paragraph_format.space_before = Pt(DOCUMENT_FORMAT['heading']['spaceBefore'])
+        heading.paragraph_format.space_after = Pt(DOCUMENT_FORMAT['heading']['spaceAfter'])
     style_ids = {}
     character_style_ids = {}
     for style in project.get("styles", []):
@@ -695,15 +763,22 @@ def _docx(project, path, settings, warnings):
         exported = document.styles.add_style(name, WD_STYLE_TYPE.CHARACTER if character else WD_STYLE_TYPE.PARAGRAPH)
         exported.base_style = document.styles["Default Paragraph Font"] if character else normal
         if not character or style.get("fontFamily"):
-            exported.font.name = str(style.get("fontFamily") or settings["fontFamily"])
+            set_font_family(exported.font, str(style.get("fontFamily") or settings["fontFamily"]))
         if not character or style.get("fontSize"):
             exported.font.size = Pt(_number(style.get("fontSize"), settings["fontSize"], 6, 72))
         if re.fullmatch(r"#[\da-fA-F]{6}", style.get("color") or ""):
             exported.font.color.rgb = RGBColor.from_string(style["color"][1:])
         if not character:
-            exported.paragraph_format.line_spacing = _number(style.get("lineHeight"), settings["lineHeight"], 1, 3)
+            exported.paragraph_format.line_spacing = _number(style.get("lineHeight"), settings["lineHeight"], 0.8, 4)
             exported.paragraph_format.space_after = Pt(_number(style.get("spaceAfter"), 8, 0, 144))
+            for key, attribute in (("spaceBefore", "space_before"), ("leftIndent", "left_indent"), ("rightIndent", "right_indent"), ("firstLineIndent", "first_line_indent")):
+                if style.get(key) is not None:
+                    setattr(exported.paragraph_format, attribute, Pt(style[key]))
+            apply_paragraph_flow(exported.paragraph_format, style)
         (character_style_ids if character else style_ids)[style.get("id")] = name
+    for style in project.get('styles', []):
+        if style.get('id') in style_ids and style.get('nextStyle') in style_ids:
+            document.styles[style_ids[style['id']]].next_paragraph_style = document.styles[style_ids[style['nextStyle']]]
     document.core_properties.title = project.get("name", "Untitled")
     document.core_properties.author = str(settings.get("author", ""))
     document.core_properties.subject = str(settings.get("subject", ""))
@@ -717,10 +792,12 @@ def _docx(project, path, settings, warnings):
         elif kind == "image":
             image = resources.image(attrs)
             if image:
-                max_mm = dimensions[0] - 2 * settings["marginMm"]
-                width_mm = min(max_mm, _number(attrs.get("width"), image["width"], 10, 5000) * 25.4 / 96)
+                max_mm = geometry['width'] - geometry['margins']['left'] - geometry['margins']['right']
+                width_mm = min(max_mm, _number(attrs.get("width"), image["width"], 1, 10000) * 25.4 / 96)
                 shape = paragraph.add_run().add_picture(io.BytesIO(image["data"]), width=Mm(width_mm))
                 shape._inline.docPr.set("descr", attrs.get("alt") or "")
+                if attrs.get('title'):
+                    shape._inline.docPr.set('title', attrs['title'])
             elif attrs.get("alt"):
                 paragraph.add_run(attrs["alt"])
         elif kind == "text":
@@ -741,14 +818,14 @@ def _docx(project, path, settings, warnings):
                     from docx.enum.text import WD_COLOR_INDEX
                     run.font.highlight_color = WD_COLOR_INDEX.YELLOW
                 elif name == "code":
-                    run.font.name = "Consolas"
+                    set_font_family(run.font, "Consolas")
                 elif name in ("textStyle", "text_style", "fontFamily", "fontSize", "color"):
                     if a.get("styleId") in character_style_ids:
                         run.style = character_style_ids[a["styleId"]]
                     if a.get("fontSize"):
                         run.font.size = Pt(_number(a["fontSize"], 12, 6, 72))
                     if a.get("fontFamily"):
-                        run.font.name = str(a["fontFamily"])[:100]
+                        set_font_family(run.font, str(a["fontFamily"])[:100])
                     if re.fullmatch(r"#[\da-fA-F]{6}", a.get("color") or ""):
                         run.font.color.rgb = RGBColor.from_string(a["color"][1:])
                 elif name == "link":
@@ -767,44 +844,79 @@ def _docx(project, path, settings, warnings):
             for child in node.get("content", []):
                 inline(paragraph, child)
 
-    def block(container, node, indent=0, prefix=""):
+    from .docx_support import NumberingWriter
+    list_numbering = NumberingWriter(document)
+
+    def block(container, node, indent=0, prefix="", list_info=None):
         kind, attrs = _kind(node), node.get("attrs", {})
         if kind == "table":
+            from .docx_support import table_grid
             rows = node.get("content", [])
-            columns = max((sum(int(_number(c.get("attrs", {}).get("colspan"), 1, 1, 100)) for c in r.get("content", [])) for r in rows), default=1)
+            columns, placed = table_grid(rows)
             table = container.add_table(rows=max(1, len(rows)), cols=columns)
             table.style = "Table Grid"
+            from .table_formatting import write_docx_cell
+            from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
+            table.alignment = {'left': WD_TABLE_ALIGNMENT.LEFT, 'center': WD_TABLE_ALIGNMENT.CENTER, 'right': WD_TABLE_ALIGNMENT.RIGHT}.get(attrs.get('align'), WD_TABLE_ALIGNMENT.LEFT)
+            widths = {}
+            for r, col, height, span, cell in placed:
+                for offset, width in enumerate(cell.get("attrs", {}).get("colwidth") or []):
+                    if width: widths[col + offset] = width
+            if widths:
+                table.autofit = False
+                for col, width in widths.items():
+                    table.columns[col].width = Pt(width * 72 / 96)
+                    for row in table.rows: row.cells[col].width = Pt(width * 72 / 96)
+            for r, col, height, span, cell in placed:
+                target = table.cell(r, col)
+                if span > 1 or height > 1:
+                    target = target.merge(table.cell(r + height - 1, col + span - 1))
+                for child in cell.get("content", []):
+                    block(target, child)
+                if len(target.paragraphs) > 1 and not target.paragraphs[0].text:
+                    target._element.remove(target.paragraphs[0]._p)
+                if _kind(cell) == "table_header":
+                    for paragraph in target.paragraphs:
+                        for run in paragraph.runs: run.bold = True
+                write_docx_cell(target, cell.get('attrs', {}), _kind(cell) == 'table_header')
+                if height > 1:
+                    # Word reads margins/borders on each vertical-merge
+                    # continuation, even though python-docx returns the anchor
+                    # for table.cell(). Keep the full merged outline uniform.
+                    from docx.table import _Cell
+                    for continuation_row in table.rows[r + 1:r + height]:
+                        grid_column = 0
+                        for element in continuation_row._tr.tc_lst:
+                            if grid_column == col and element.vMerge == 'continue':
+                                write_docx_cell(_Cell(element, table), cell.get('attrs', {}), _kind(cell) == 'table_header')
+                                break
+                            grid_column += element.grid_span
             for r, row in enumerate(rows):
-                col = 0
-                for cell in row.get("content", []):
-                    span = int(_number(cell.get("attrs", {}).get("colspan"), 1, 1, columns))
-                    target = table.cell(r, col)
-                    if span > 1:
-                        target = target.merge(table.cell(r, min(columns-1, col+span-1)))
-                    if cell.get("attrs", {}).get("rowspan", 1) > 1:
-                        _warn(warnings, "DOCX preserves table column spans but flattens row spans.")
-                    for child in cell.get("content", []):
-                        block(target, child)
-                    if len(target.paragraphs) > 1 and not target.paragraphs[0].text:
-                        target._element.remove(target.paragraphs[0]._p)
-                    if _kind(cell) == "table_header":
-                        for paragraph in target.paragraphs:
-                            for run in paragraph.runs:
-                                run.bold = True
-                        shading = OxmlElement("w:shd")
-                        shading.set(qn("w:fill"), "EEEEEE")
-                        target._tc.get_or_add_tcPr().append(shading)
-                    col += span
+                if row.get('attrs', {}).get('minHeight') is not None:
+                    table.rows[r].height = Pt(row['attrs']['minHeight'])
+                    table.rows[r].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+                if row.get("content") and all(_kind(c) == "table_header" for c in row["content"]):
+                    table.rows[r]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
             return
         if kind in ("bullet_list", "ordered_list"):
             start = int(_number(attrs.get("order", attrs.get("start")), 1, 1, 100000))
-            for i, item in enumerate(node.get("content", [])):
+            number = list_numbering.create(kind == "ordered_list", start, attrs.get('listStyle'))
+            for item in node.get("content", []):
                 for j, child in enumerate(item.get("content", [])):
-                    block(container, child, indent+1, (f"{start+i}. " if kind == "ordered_list" else "â€¢ ") if j == 0 else "")
+                    block(container, child, indent+1, list_info=(number, indent) if j == 0 else None)
             return
         if kind == "blockquote":
             for child in node.get("content", []):
                 block(container, child, indent+1)
+            return
+        if kind == "section_break":
+            nonlocal geometry
+            from docx.enum.section import WD_SECTION
+            new_section = document.add_section({'nextPage': WD_SECTION.NEW_PAGE, 'oddPage': WD_SECTION.ODD_PAGE, 'evenPage': WD_SECTION.EVEN_PAGE}[attrs.get('kind', 'nextPage')])
+            write_docx_geometry(new_section, attrs.get('page', {}))
+            geometry = page_geometry(attrs.get('page', {}))
+            for numbering in list(new_section._sectPr.findall(qn('w:pgNumType'))):
+                new_section._sectPr.remove(numbering)
             return
         if kind == "page_break":
             container.add_paragraph().add_run().add_break(7)
@@ -825,14 +937,16 @@ def _docx(project, path, settings, warnings):
             paragraph = container.add_paragraph(style=style)
             if prefix:
                 paragraph.add_run(prefix)
+            if list_info:
+                list_numbering.apply(paragraph, *list_info)
             if indent:
                 paragraph.paragraph_format.left_indent = Mm(7 * indent)
             alignment = attrs.get("align") or attrs.get("textAlign")
             if alignment in ("left", "center", "right", "justify"):
                 paragraph.alignment = {"left": WD_ALIGN_PARAGRAPH.LEFT, "center": WD_ALIGN_PARAGRAPH.CENTER, "right": WD_ALIGN_PARAGRAPH.RIGHT, "justify": WD_ALIGN_PARAGRAPH.JUSTIFY}[alignment]
-            for key, attr in (("spaceAfter", "space_after"), ("spaceBefore", "space_before"), ("leftIndent", "left_indent"), ("firstLineIndent" if attrs.get("firstLineIndent") is not None else "indent", "first_line_indent")):
+            for key, attr in (("spaceAfter", "space_after"), ("spaceBefore", "space_before"), ("leftIndent", "left_indent"), ("rightIndent", "right_indent"), ("firstLineIndent" if attrs.get("firstLineIndent") is not None else "indent", "first_line_indent")):
                 if attrs.get(key) is not None:
-                    setattr(paragraph.paragraph_format, attr, Pt(_number(attrs[key], 0, -144 if key in ('indent', 'firstLineIndent', 'leftIndent') else 0, 144)))
+                    setattr(paragraph.paragraph_format, attr, Pt(_number(attrs[key], 0, -144 if key in ('indent', 'firstLineIndent', 'leftIndent', 'rightIndent') else 0, 144)))
             if attrs.get("keepWithNext"):
                 paragraph.paragraph_format.keep_with_next = True
             if kind == "image":
@@ -842,17 +956,20 @@ def _docx(project, path, settings, warnings):
                     inline(paragraph, child)
             if kind == "code_block":
                 for run in paragraph.runs:
-                    run.font.name = "Consolas"
+                    set_font_family(run.font, "Consolas")
             else:
                 for run in paragraph.runs:
                     if attrs.get("fontFamily") and run.font.name is None:
-                        run.font.name = str(attrs["fontFamily"])[:100]
+                        set_font_family(run.font, str(attrs["fontFamily"])[:100])
                     if attrs.get("fontSize") and run.font.size is None:
                         run.font.size = Pt(_number(attrs["fontSize"], settings["fontSize"], 6, 72))
                     if attrs.get("color") and run.font.color.rgb is None and re.fullmatch(r"#[\da-fA-F]{6}", attrs["color"]):
                         run.font.color.rgb = RGBColor.from_string(attrs["color"][1:])
             if attrs.get("lineHeight"):
-                paragraph.paragraph_format.line_spacing = _number(attrs["lineHeight"], settings["lineHeight"], 1, 3)
+                paragraph.paragraph_format.line_spacing = _number(attrs["lineHeight"], settings["lineHeight"], 0.8, 4)
+            elif attrs.get('lineSpacingMode') == 'multiple':
+                paragraph.paragraph_format.line_spacing = settings['lineHeight']
+            apply_paragraph_flow(paragraph.paragraph_format, attrs)
             return
         _warn(warnings, f"DOCX flattened unsupported block '{kind}'.")
         for child in node.get("content", []):
@@ -871,16 +988,20 @@ def _docx(project, path, settings, warnings):
     for i, item in enumerate(sections):
         if settings.get("chapterPageBreaks") and i:
             document.add_page_break()
-        heading = document.add_heading(item["title"], 1) if item["title"] else document.add_paragraph()
+        start_index = len(document._element.body) - 1
+        heading = document.add_heading(item["title"], 1) if item["title"] else None
+        for node in item["blocks"]:
+            block(document, node)
+        anchor = heading._p if heading is not None else next(document._element.body[start_index].iter(qn("w:p")), None)
+        if anchor is None:
+            continue
         bookmark = OxmlElement("w:bookmarkStart")
         bookmark.set(qn("w:id"), str(i))
         bookmark.set(qn("w:name"), f"section{i}")
-        heading._p.insert(0, bookmark)
+        anchor.insert(1 if anchor.find(qn("w:pPr")) is not None else 0, bookmark)
         end = OxmlElement("w:bookmarkEnd")
         end.set(qn("w:id"), str(i))
-        heading._p.append(end)
-        for node in item["blocks"]:
-            block(document, node)
+        anchor.append(end)
     if settings.get("header"):
         section.header.paragraphs[0].text = str(settings["header"])
     if settings.get("footer"):
@@ -900,7 +1021,7 @@ def _pdf(project, path, settings, warnings):
     from reportlab.lib.units import mm
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle, Image, HRFlowable
+    from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Flowable, Paragraph, Spacer, PageBreak, CondPageBreak, KeepTogether, Table, TableStyle, Image, HRFlowable
     from .fonts import installed_faces, register_pdf_font
     faces = installed_faces()
     font_cache = {}
@@ -929,16 +1050,69 @@ def _pdf(project, path, settings, warnings):
             return requested
         _warn(warnings, f"PDF substituted the publication font for {family}, which is unavailable or cannot be embedded.")
         return font
-    pagesize = {"A4": A4, "A5": A5, "Letter": LETTER, "Legal": LEGAL, "6x9": (432, 648)}[settings["pageSize"]]
-    if settings["orientation"] == "landscape":
-        pagesize = pagesize[::-1]
-    margin = settings["marginMm"] * mm
-    width = pagesize[0] - 2 * margin
-    document = SimpleDocTemplate(str(path), pagesize=pagesize, leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
+    geometry = page_geometry(settings)
+    pagesize = (geometry['width'] * mm, geometry['height'] * mm)
+    margins = {edge: value * mm for edge, value in geometry['margins'].items()}
+    width = pagesize[0] - margins['left'] - margins['right']
+    body_height = pagesize[1] - margins['top'] - margins['bottom']
+    document = BaseDocTemplate(str(path), pagesize=pagesize, leftMargin=margins['left'], rightMargin=margins['right'], topMargin=margins['top'], bottomMargin=margins['bottom'],
                                  title=project.get("name", "Untitled"), author=str(settings.get("author", "")), subject=str(settings.get("description", "")))
     resources = _Resources(project, settings, warnings)
     base = ParagraphStyle("Body", fontName=font, fontSize=settings["fontSize"], leading=settings["fontSize"] * settings["lineHeight"], spaceAfter=8)
+    templates = []
+    blank_pages = set()
+    def add_template(page_settings):
+        geo = page_geometry(page_settings)
+        size = (geo['width'] * mm, geo['height'] * mm)
+        edges = {edge: value * mm for edge, value in geo['margins'].items()}
+        body_width = size[0] - edges['left'] - edges['right']
+        body_h = size[1] - edges['top'] - edges['bottom']
+        name = 'section-' + str(len(templates))
+        def paint(canvas, doc):
+            if doc.page in blank_pages:
+                return
+            canvas.saveState()
+            canvas.setFont(font, 9)
+            canvas.setFillColor(colors.HexColor('#555555'))
+            if settings.get('header'):
+                header = str(settings['header'])
+                while pdfmetrics.stringWidth(header, font, 9) > body_width and len(header) > 1:
+                    header = header[:-2] + '\u2026'
+                canvas.drawString(edges['left'], size[1] - edges['top']/2, header)
+            if settings.get('footer'):
+                canvas.drawCentredString(size[0]/2, edges['bottom']/2, str(doc.page + settings['firstPageNumber'] - 1))
+            canvas.restoreState()
+        frame = Frame(edges['left'], edges['bottom'], body_width, body_h, id=name, leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
+        templates.append(PageTemplate(id=name, pagesize=size, frames=[frame], onPage=paint))
+        return name, body_width, body_h
+    add_template(settings)
+
+    class SectionBreak(Flowable):
+        def __init__(self, name, kind):
+            super().__init__()
+            self.name, self.kind = name, kind
+        def wrap(self, available_width, available_height):
+            frame = self._doctemplateAttr('frame')
+            parity = {'oddPage': 1, 'evenPage': 0}.get(self.kind)
+            if parity is not None and (self.canv.getPageNumber() + settings['firstPageNumber']) % 2 != parity:
+                blank_pages.add(self.canv.getPageNumber() + 1)
+                frame.add_generated_content(PageBreak(), PageBreak(nextTemplate=self.name))
+            else:
+                frame.add_generated_content(PageBreak(nextTemplate=self.name))
+            return 0, 0
+        def draw(self):
+            pass
     story = []
+
+    class Destination(Flowable):
+        # A simple document still needs its link destination, but an empty
+        # heading must not introduce a phantom line and heading spacing.
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+            self.keepWithNext = True
+        def draw(self):
+            self.canv.bookmarkPage(self.name)
 
     def inline(node):
         kind = _kind(node)
@@ -979,31 +1153,56 @@ def _pdf(project, path, settings, warnings):
                 _warn(warnings, f"PDF omitted unsupported mark '{name}'.")
         return text
 
-    def block(node, available=width, indent=0, prefix=""):
+    def block(node, available=None, indent=0, prefix=""):
+        available = width if available is None else available
         kind, attrs = _kind(node), node.get("attrs", {})
         output = []
         if kind == "table":
-            rows = []
-            for row in node.get("content", []):
-                cells = []
-                for cell in row.get("content", []):
-                    if any(cell.get("attrs", {}).get(k, 1) > 1 for k in ("colspan", "rowspan")):
-                        _warn(warnings, "PDF table cells are laid out as equal columns; merged cells are flattened.")
-                    cells.append(cell)
-                rows.append(cells)
-            columns = max(map(len, rows), default=1)
-            data = [[sum((block(c, available/columns-14) for c in cell.get("content", [])), []) for cell in row] + [""]*(columns-len(row)) for row in rows]
-            if not data:
+            from .docx_support import table_grid
+            rows = node.get("content", [])
+            if not rows:
                 return []
-            table = Table(data, colWidths=[available/columns]*columns, hAlign="LEFT", splitInRow=1, repeatRows=1 if rows and any(_kind(c)=="table_header" for c in rows[0]) else 0)
-            table.setStyle(TableStyle([("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6)] + ([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#eeeeee"))] if table.repeatRows else [])))
+            columns, placed = table_grid(rows)
+            widths = [None] * columns
+            for r, col, height, span, cell in placed:
+                for offset, value in enumerate((cell.get("attrs", {}).get("colwidth") or [])[:span]):
+                    if value: widths[col + offset] = _number(value, available/columns, 1, 10000) * .75
+            missing = widths.count(None)
+            remaining = max(12 * missing, available - sum(value or 0 for value in widths))
+            widths = [value if value is not None else remaining / max(1, missing) for value in widths]
+            if sum(widths) > available:
+                scale = available / sum(widths)
+                widths = [value * scale for value in widths]
+                _warn(warnings, "A table wider than the printable area was scaled to fit the page width.")
+            data = [[""] * columns for _ in rows]
+            commands = []
+            for r, col, height, span, cell in placed:
+                ca = cell.get('attrs', {})
+                padding = {side: ca.get('padding' + side) if ca.get('padding' + side) is not None else 5.25 for side in ('Top', 'Bottom', 'Left', 'Right')}
+                data[r][col] = sum((block(child, max(1, sum(widths[col:col+span])-padding['Left']-padding['Right'])) for child in cell.get("content", [])), [])
+                start, end = (col, r), (col + span - 1, r + height - 1)
+                for side, value in padding.items(): commands.append((side.upper() + 'PADDING', start, end, value))
+                commands.append(('VALIGN', start, end, (ca.get('verticalAlign') or 'top').upper()))
+                border_width = ca.get('borderWidth') if ca.get('borderWidth') is not None else .75
+                if border_width: commands.append(('BOX', start, end, border_width, colors.HexColor(ca.get('borderColor') or '#999999')))
+                if span > 1 or height > 1:
+                    commands.append(("SPAN", (col, r), (col + span - 1, r + height - 1)))
+                background = ca.get('background') or ('#eeeeee' if _kind(cell) == 'table_header' else None)
+                if background: commands.append(('BACKGROUND', start, end, colors.HexColor(background)))
+            repeat = 0
+            for row in rows:
+                if not row.get("content") or not all(_kind(cell) == "table_header" for cell in row["content"]): break
+                repeat += 1
+            table = Table(data, colWidths=widths, hAlign=(attrs.get('align') or 'left').upper(), splitInRow=1, repeatRows=repeat, minRowHeights=[row.get('attrs', {}).get('minHeight') or 0 for row in rows])
+            table.setStyle(TableStyle(commands))
             return [table, Spacer(1, 10)]
         if kind == "image":
             image = resources.image(attrs)
             if image:
                 desired = _number(attrs.get("width"), image["width"], 1, 10000) * .75
-                scale = min(available / image["width"], desired/image["width"], (pagesize[1]-2*margin-40)/image["height"])
-                output.append(Image(io.BytesIO(image["data"]), width=image["width"]*scale, height=image["height"]*scale, hAlign="LEFT"))
+                scale = min(available / image["width"], desired/image["width"], max(1, body_height-40)/image["height"])
+                alignment = attrs.get('align', 'left')
+                output.append(Image(io.BytesIO(image["data"]), width=image["width"]*scale, height=image["height"]*scale, hAlign=alignment.upper() if alignment in ('left', 'center', 'right') else 'LEFT'))
                 output.append(Spacer(1, 8))
             elif attrs.get("alt"):
                 output.append(Paragraph(html.escape(attrs["alt"]), base))
@@ -1013,10 +1212,12 @@ def _pdf(project, path, settings, warnings):
         if kind == "horizontal_rule":
             return [HRFlowable(width="100%", color=colors.HexColor("#aaaaaa")), Spacer(1, 8)]
         if kind in ("bullet_list", "ordered_list"):
+            from .list_formatting import list_marker
             start = int(_number(attrs.get("order", attrs.get("start")), 1, 1, 100000))
             for i, item in enumerate(node.get("content", [])):
                 for j, child in enumerate(item.get("content", [])):
-                    output.extend(block(child, available, indent+12, (f"{start+i}. " if kind == "ordered_list" else "â€¢ ") if j == 0 else ""))
+                    marker = list_marker(start+i, attrs.get('listStyle') or ('decimal' if kind == 'ordered_list' else 'disc'))
+                    output.extend(block(child, available, indent+12, (marker + ('. ' if kind == 'ordered_list' else ' ')) if j == 0 else ""))
             return output
         if kind == "blockquote":
             return sum((block(child, available, indent+16) for child in node.get("content", [])), [])
@@ -1026,21 +1227,31 @@ def _pdf(project, path, settings, warnings):
             block_font = publication_font(merged.get("fontFamily") or settings["fontFamily"])
             size = _number(merged.get("fontSize"), base.fontSize, 6, 72)
             level = int(_number(attrs.get("level"), 2, 1, 6))
-            if kind == "heading":
-                size = max(12, 24-2*level)
-            style = ParagraphStyle("Block", parent=base, leftIndent=indent+_number(merged.get("leftIndent"), 0, -144, 144), firstLineIndent=_number(merged.get("firstLineIndent", merged.get("indent")), 0, -144, 144), fontSize=size,
-                                   leading=size*_number(merged.get("lineHeight"), 1.25 if kind == "heading" else settings["lineHeight"], 1, 3),
+            if kind == "heading" and merged.get('fontSize') is None:
+                size = DOCUMENT_FORMAT['headingSizes'][level-1]
+            style = ParagraphStyle("Block", parent=base, leftIndent=indent+_number(merged.get("leftIndent"), 0, -144, 144), firstLineIndent=_number(merged.get("firstLineIndent", merged.get("indent")), 0, -144, 144), rightIndent=_number(merged.get("rightIndent"), 0, -144, 144), fontSize=size,
+                                   leading=size*_number(merged.get("lineHeight"), 1.25 if kind == "heading" else settings["lineHeight"], 0.8, 4),
                                    spaceBefore=_number(merged.get("spaceBefore"), 12 if kind == "heading" else 0, 0, 144), spaceAfter=_number(merged.get("spaceAfter"), 8, 0, 144),
-                                   keepWithNext=kind == "heading" or bool(merged.get("keepWithNext")), fontName=block_font+"-Bold" if kind == "heading" and block_font.startswith("Alder") else block_font,
+                                   keepWithNext=bool(merged.get("keepWithNext", kind == "heading")), fontName=block_font+"-Bold" if kind == "heading" and block_font.startswith("Alder") else block_font,
                                    alignment={"left":TA_LEFT,"center":TA_CENTER,"right":TA_RIGHT,"justify":TA_JUSTIFY}.get(merged.get("align") or merged.get("textAlign"), TA_LEFT),
                                    textColor=colors.HexColor(merged["color"]) if re.fullmatch(r"#[\da-fA-F]{6}", str(merged.get("color") or "")) else base.textColor)
+            style.allowWidows = style.allowOrphans = int(merged.get("widowOrphan") is False)
+            if merged.get("lineSpacingMode") in ("exact", "atLeast") and merged.get("lineSpacing") is not None:
+                style.leading = _number(merged['lineSpacing'], size * 1.2, 1, 144)
+                style.autoLeading = "max" if merged['lineSpacingMode'] == "atLeast" else ""
             if kind == "code_block":
                 text = html.escape(plain_text(node)).replace("\n", "<br/>").replace("  ", "&#160; ")
                 style.fontName = "Courier"
                 style.fontSize = min(10, size)
             else:
                 text = "".join(inline(c) for c in node.get("content", []))
-            output.append(Paragraph(html.escape(prefix)+text or "&#160;", style))
+            if merged.get('pageBreakBefore'):
+                output.append(CondPageBreak(body_height))
+            paragraph = Paragraph(html.escape(prefix)+text or "&#160;", style)
+            if merged.get('keepTogether'):
+                paragraph = KeepTogether([paragraph])
+                paragraph.keepWithNext = style.keepWithNext
+            output.append(paragraph)
             for child in node.get("content", []):
                 if _kind(child) == "image":
                     output.extend(block(child, available, indent))
@@ -1061,25 +1272,21 @@ def _pdf(project, path, settings, warnings):
     for i, item in enumerate(sections):
         if settings.get("chapterPageBreaks") and i:
             story.append(PageBreak())
-        heading = Paragraph(f'<a name="section{i}"/>' + html.escape(item["title"] or ""), ParagraphStyle("Section", parent=base, fontSize=18, leading=23, spaceBefore=18, spaceAfter=12, keepWithNext=True))
-        story.append(heading)
+        if item['title']:
+            story.append(Paragraph(f'<a name="section{i}"/>' + html.escape(item["title"]), ParagraphStyle("Section", parent=base, fontSize=18, leading=23, spaceBefore=18, spaceAfter=12, keepWithNext=True)))
+        else:
+            story.append(Destination(f'section{i}'))
         for node in item["blocks"]:
-            story.extend(block(node))
+            if _kind(node) == 'section_break':
+                attrs = node.get('attrs', {})
+                name, width, body_height = add_template(attrs.get('page', {}))
+                story.append(SectionBreak(name, attrs.get('kind', 'nextPage')))
+            else:
+                story.extend(block(node))
     if not story:
         story.append(Spacer(1, 1))
-    def page(canvas, doc):
-        canvas.saveState()
-        canvas.setFont(font, 9)
-        canvas.setFillColor(colors.HexColor("#555555"))
-        if settings.get("header"):
-            header = str(settings["header"])
-            while pdfmetrics.stringWidth(header, font, 9) > width and len(header) > 1:
-                header = header[:-2] + "â€¦"
-            canvas.drawString(margin, pagesize[1]-margin/2, header)
-        if settings.get("footer"):
-            canvas.drawCentredString(pagesize[0]/2, margin/2, str(doc.page + settings["firstPageNumber"] - 1))
-        canvas.restoreState()
-    document.build(story, onFirstPage=page, onLaterPages=page)
+    document.addPageTemplates(templates)
+    document.build(story)
 
 
 def build_export(project: dict, format: str, output_dir: Path, options: dict | None = None) -> dict:
@@ -1096,6 +1303,8 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
     filename = f"{stem}-{uuid.uuid4().hex[:8]}.{format}"
     path = output_dir / filename
     settings = _settings(project, options)
+    if page_geometry(settings)['adjusted']:
+        _warn(warnings, "The document's margins were reduced proportionally to retain a 20 mm writing area, matching Write.")
     sections = project_document(project)
     ids = [cid for section in sections for cid in section["clipIds"]]
     omitted = len({c["id"] for c in project.get("clips", [])} - set(ids))
@@ -1115,8 +1324,22 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
                 if section["title"]:
                     pieces.append(("## " if format == "md" else "") + section["title"] + "\n\n")
                 pieces.append((section["text"] + "\n\n") if format == "txt" else section["rawMarkdown"] + "\n\n" if "rawMarkdown" in section else "".join(_markdown(n, warnings) for n in section["blocks"]))
-            path.write_text("".join(pieces).rstrip() + "\n", "utf-8", newline="")
+            output = "".join(pieces)
+            # Remove only our final section separator, never authored trailing
+            # spaces or empty paragraphs when saving an existing text file.
             if format == "txt":
+                if sections: output = output[:-2]
+            else:
+                output = output.rstrip() + "\n"
+            path.write_text(output, "utf-8", newline="")
+            def has_rich_content(node):
+                if _kind(node) not in ("doc", "paragraph", "text", "hard_break") or node.get("marks"):
+                    return True
+                if any(value is not None and value != "" and key != "blockId"
+                       for key, value in (node.get("attrs") or {}).items()):
+                    return True
+                return any(has_rich_content(child) for child in node.get("content", []))
+            if format == "txt" and any(has_rich_content(block) for section in sections for block in section["blocks"]):
                 _warn(warnings, "Plain text preserves wording and order but omits rich formatting, images, links and page settings.")
         elif format == "docx":
             _docx(project, path, settings, warnings)
@@ -1165,15 +1388,44 @@ def _asset_from_bytes(data, name, assets, warnings):
 
 
 def _import_html(content, warnings, assets, image_reader=None):
-    from bs4 import BeautifulSoup, NavigableString, Tag, Comment
+    from bs4 import BeautifulSoup, NavigableString, Tag, Comment, Doctype, ProcessingInstruction
     soup = BeautifulSoup(content, "html.parser")
     if soup.find(["script", "iframe", "object", "embed", "form"]):
         _warn(warnings, "Active HTML content was removed during import.")
     for tag in soup.find_all(["script", "style", "iframe", "object", "embed", "form", "head", "nav"]):
         tag.decompose()
-    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+    for comment in soup.find_all(string=lambda text: isinstance(text, (Comment, Doctype, ProcessingInstruction))):
         comment.extract()
     _warn(warnings, "HTML import preserves semantic blocks and inline formatting; external CSS, scripts and exact page layout are not imported.")
+
+    def paragraph_attributes(element):
+        css = {key.lower(): value.strip() for key, value in re.findall(r'([\w-]+)\s*:\s*([^;]+)', element.get('style', ''))}
+        attrs = {}
+        if css.get('text-align') in ('left', 'right', 'center', 'justify'): attrs['align'] = css['text-align']
+        for prop, key, minimum, maximum in (('font-size', 'fontSize', 6, 72), ('margin-top', 'spaceBefore', 0, 144), ('margin-bottom', 'spaceAfter', 0, 144), ('margin-left', 'leftIndent', -144, 144), ('margin-right', 'rightIndent', -144, 144), ('text-indent', 'firstLineIndent', -144, 144)):
+            match = re.fullmatch(r'(-?[\d.]+)(pt|px)', css.get(prop, ''))
+            if match:
+                try: value = float(match[1]) * (0.75 if match[2] == 'px' else 1)
+                except ValueError: continue
+                if minimum <= value <= maximum: attrs[key] = value
+        for prop, key in (('break-after', 'keepWithNext'), ('break-inside', 'keepTogether'), ('break-before', 'pageBreakBefore')):
+            value = css.get(prop, css.get('page-' + prop, ''))
+            if value in ('avoid', 'page', 'always', 'auto'):
+                attrs[key] = value == ('page' if key == 'pageBreakBefore' else 'avoid') or (key == 'pageBreakBefore' and value == 'always')
+        if css.get('widows', '').isdigit(): attrs['widowOrphan'] = int(css['widows']) > 1
+        leading = css.get('line-height', '')
+        match = re.fullmatch(r'([\d.]+)(pt|px)', leading)
+        minimum = re.fullmatch(r'max\(1\.2em,\s*([\d.]+)pt\)', leading)
+        try:
+            if match or minimum:
+                value = float(match[1]) * (0.75 if match[2] == 'px' else 1) if match else float(minimum[1])
+                if 1 <= value <= 144: attrs.update(lineSpacingMode='exact' if match else 'atLeast', lineSpacing=value)
+            elif re.fullmatch(r'[\d.]+', leading) and 0.8 <= float(leading) <= 4:
+                attrs.update(lineSpacingMode='multiple', lineHeight=float(leading))
+        except ValueError: pass
+        if css.get('font-family'): attrs['fontFamily'] = re.sub(r"[^\w ,'-]", '', css['font-family'])[:100]
+        if re.fullmatch(r'#[\da-fA-F]{6}', css.get('color', '')): attrs['color'] = css['color']
+        return attrs
 
     def inline(element, marks=None):
         marks = marks or []
@@ -1200,8 +1452,13 @@ def _import_html(content, warnings, assets, image_reader=None):
             asset_id = _asset_from_bytes(data, element.get("alt") or "Imported image", assets, warnings) if data else None
             if asset_id:
                 attrs = {"assetId": asset_id, "src": "asset:"+asset_id, "alt": element.get("alt", "")}
+                if element.get('title'):
+                    attrs['title'] = element['title']
+                alignment = element.get('data-image-align') or paragraph_attributes(element.parent).get('align')
+                if alignment in ('left', 'center', 'right'):
+                    attrs['align'] = alignment
                 if element.get("width"):
-                    attrs["width"] = int(_number(element["width"], 500, 1, 3000))
+                    attrs["width"] = _number(element["width"], 500, 1, 10000)
                 return [{"type": "image", "attrs": attrs}]
             _warn(warnings, "An unavailable or external image was replaced with its alt text; no remote resource was fetched.")
             return [{"type": "text", "text": element.get("alt") or "[Image unavailable]"}]
@@ -1249,32 +1506,44 @@ def _import_html(content, warnings, assets, image_reader=None):
                 flush()
                 if name in ("p", "h1", "h2", "h3", "h4", "h5", "h6", "figcaption"):
                     node = {"type":"heading" if re.fullmatch("h[1-6]",name) else "paragraph", "content":sum((inline(c) for c in element.children), [])}
-                    attrs = {"level":int(name[1])} if node["type"] == "heading" else {}
-                    match = re.search(r"text-align\s*:\s*(left|right|center|justify)", element.get("style", ""))
-                    if match:
-                        attrs["align"] = match.group(1)
+                    attrs = paragraph_attributes(element)
+                    if node['type'] == 'heading': attrs['level'] = int(name[1])
                     if attrs:
                         node["attrs"] = attrs
                     output.append(node)
                 elif name == "pre":
-                    output.append({"type":"code_block", "content":[{"type":"text", "text":element.get_text()}]})
+                    output.append({"type":"code_block", "attrs": paragraph_attributes(element), "content":[{"type":"text", "text":element.get_text()}]})
                 elif name in ("ul", "ol"):
                     items = [{"type":"list_item", "content":blocks(child) or [{"type":"paragraph"}]} for child in element.find_all("li", recursive=False)]
-                    output.append({"type":"ordered_list" if name == "ol" else "bullet_list", "attrs":{"order":int(_number(element.get("start"),1,1,100000))}, "content":items})
+                    from .list_formatting import NUMBER_FORMATS, BULLETS
+                    marker = re.search(r'(?:^|;)\s*list-style-type\s*:\s*([\w-]+)', element.get('style', ''))
+                    marker = marker.group(1) if marker else {'a':'lower-alpha', 'A':'upper-alpha', 'i':'lower-roman', 'I':'upper-roman', '1':'decimal'}.get(element.get('type'))
+                    attrs = {'order':int(_number(element.get('start'),1,1,100000))}
+                    if marker in (NUMBER_FORMATS if name == 'ol' else BULLETS): attrs['listStyle'] = marker
+                    output.append({"type":"ordered_list" if name == "ol" else "bullet_list", "attrs": attrs, "content":items})
                 elif name == "blockquote":
                     output.append({"type":"blockquote", "content":blocks(element)})
                 elif name == "table":
+                    from .table_formatting import html_table_attributes
                     rows = []
                     for row in element.find_all("tr"):
                         if row.find_parent("table") is not element:
                             continue
                         cells = []
                         for cell in row.find_all(["td", "th"], recursive=False):
-                            cells.append({"type":"table_header" if cell.name == "th" else "table_cell", "attrs":{"colspan":int(_number(cell.get("colspan"),1,1,100)), "rowspan":int(_number(cell.get("rowspan"),1,1,100))}, "content":blocks(cell) or [{"type":"paragraph"}]})
-                        rows.append({"type":"table_row", "content":cells})
-                    output.append({"type":"table", "content":rows})
+                            cells.append({"type":"table_header" if cell.name == "th" else "table_cell", "attrs":{**html_table_attributes('table_cell', cell), "colspan":int(_number(cell.get("colspan"),1,1,100)), "rowspan":int(_number(cell.get("rowspan"),1,1,100))}, "content":blocks(cell) or [{"type":"paragraph"}]})
+                        rows.append({"type":"table_row", "attrs":html_table_attributes('table_row', row), "content":cells})
+                    output.append({"type":"table", "attrs":html_table_attributes('table', element), "content":rows})
                 elif name == "hr":
                     output.append({"type":"horizontal_rule"})
+                elif name == "div" and element.get("data-section"):
+                    from .sections import validate_section
+                    try:
+                        attrs = json.loads(element['data-section'])
+                        validate_section(attrs)
+                        output.append({'type':'section_break', 'attrs':attrs})
+                    except (ValueError, TypeError, AttributeError):
+                        _warn(warnings, 'Invalid section page settings were omitted.')
                 elif name == "div" and "page-break" in element.get("class", []):
                     output.append({"type":"page_break"})
                 else:
@@ -1295,7 +1564,9 @@ def _import_docx(path, warnings, assets):
         if any(n in names for n in ("word/footnotes.xml", "word/endnotes.xml", "word/comments.xml")):
             _warn(warnings, "DOCX notes/comments are not imported; inspect the original for additional material.")
     doc = Document(path)
-    _warn(warnings, "DOCX import preserves body order, text, basic marks, headings, tables and embedded raster images; exact layout, list numbering, fields, headers and footers are not retained.")
+    from .docx_support import NumberingReader, paragraph_attributes
+    list_numbering = NumberingReader(doc)
+    _warn(warnings, "DOCX import preserves body order, text, basic marks, headings, paragraph flow, ordinary list numbering, tables and embedded raster images; exact layout, complex multilevel labels, fields, headers and footers are not retained.")
     def paragraph(p):
         content = []
         def visit(element, inherited=None):
@@ -1315,6 +1586,23 @@ def _import_docx(path, warnings, assets):
                         found = props.find(qn("w:"+key))
                         if found is not None and found.get(qn("w:val")) not in ("0","false","none","off"):
                             marks.append({"type":mark})
+                    appearance = {}
+                    family = props.find(qn("w:rFonts"))
+                    size = props.find(qn("w:sz"))
+                    colour = props.find(qn("w:color"))
+                    if family is not None:
+                        appearance["fontFamily"] = family.get(qn("w:ascii")) or family.get(qn("w:hAnsi"))
+                    if size is not None:
+                        appearance["fontSize"] = float(size.get(qn("w:val"))) / 2
+                    if colour is not None and re.fullmatch(r"[0-9a-fA-F]{6}", colour.get(qn("w:val"), "")):
+                        appearance["color"] = "#" + colour.get(qn("w:val"))
+                    if appearance: marks.append({"type": "text_style", "attrs": appearance})
+                    vertical = props.find(qn("w:vertAlign"))
+                    if vertical is not None and vertical.get(qn("w:val")) in ("subscript", "superscript"):
+                        marks.append({"type": vertical.get(qn("w:val"))})
+                    highlight = props.find(qn("w:highlight"))
+                    if highlight is not None and highlight.get(qn("w:val")) not in ("none", None):
+                        marks.append({"type": "highlight", "attrs": {"color": highlight.get(qn("w:val"))}})
                 for child in element:
                     child_tag = child.tag.rsplit("}",1)[-1]
                     if child_tag == "t" and child.text:
@@ -1330,8 +1618,14 @@ def _import_docx(path, warnings, assets):
                                 part = doc.part.related_parts[rid]
                                 asset_id = _asset_from_bytes(part.blob, Path(str(part.partname)).name, assets, warnings)
                                 if asset_id:
-                                    desc = next((e.get("descr", "") for e in child.iter(qn("wp:docPr"))), "")
-                                    content.append({"type":"image", "attrs":{"assetId":asset_id,"src":"asset:"+asset_id,"alt":desc}})
+                                    properties = next(child.iter(qn('wp:docPr')), None)
+                                    attrs = {'assetId': asset_id, 'src': 'asset:'+asset_id, 'alt': properties.get('descr', '') if properties is not None else ''}
+                                    if properties is not None and properties.get('title'):
+                                        attrs['title'] = properties.get('title')
+                                    extent = next(child.iter(qn('wp:extent')), None)
+                                    if extent is not None and extent.get('cx'):
+                                        attrs['width'] = _number(extent.get('cx'), 9525, 9525, 95250000) / 9525
+                                    content.append({'type': 'image', 'attrs': attrs})
                 return
             for child in element:
                 visit(child, inherited)
@@ -1339,32 +1633,64 @@ def _import_docx(path, warnings, assets):
         style = p.style.name if p.style else ""
         heading = re.match(r"Heading (\d)", style)
         node = {"type":"heading" if heading else "paragraph", "content":content}
-        attrs = {"level":min(6,int(heading.group(1)))} if heading else {}
+        attrs = paragraph_attributes(p)
+        if heading: attrs["level"] = min(6, int(heading.group(1)))
         if p.alignment is not None:
             attrs["align"] = {0:"left",1:"center",2:"right",3:"justify"}.get(int(p.alignment),"left")
         if attrs:
             node["attrs"] = attrs
         return node
+    doc_sections = list(doc.sections)
+    section_index = 0
+    def append_section(child, output):
+        nonlocal section_index
+        if child._p.pPr is not None and child._p.pPr.sectPr is not None:
+            section_index += 1
+            from .page_geometry import docx_page_settings
+            from docx.enum.section import WD_SECTION
+            following = doc_sections[section_index]
+            kind = {WD_SECTION.NEW_PAGE: 'nextPage', WD_SECTION.ODD_PAGE: 'oddPage', WD_SECTION.EVEN_PAGE: 'evenPage'}.get(following.start_type)
+            if kind is None:
+                kind = 'nextPage'
+                _warn(warnings, 'Continuous and column section breaks are converted to next-page sections.')
+            output.append({'type':'section_break', 'attrs':{'kind':kind, 'page':docx_page_settings(doc, warnings, following)}})
     def container(item):
+        nonlocal section_index
         from docx.table import Table
         from docx.text.paragraph import Paragraph
-        output = []
+        output, stack = [], []
         for child in item.iter_inner_content():
             if isinstance(child, Paragraph):
-                output.append(paragraph(child))
+                node = paragraph(child)
+                info = list_numbering.info(child)
+                section_end = child._p.pPr is not None and child._p.pPr.sectPr is not None and item is doc
+                if not info:
+                    stack = []
+                    if not section_end or node.get('content'):
+                        output.append(node)
+                    if section_end:
+                        append_section(child, output)
+                    continue
+                number, level, kind, start, marker = info
+                while stack and (stack[-1][0] > level or (stack[-1][0] == level and stack[-1][1] != number)):
+                    stack.pop()
+                if not stack or stack[-1][0] != level:
+                    target = stack[-1][2]["content"][-1]["content"] if stack else output
+                    listing = {"type": kind, "content": []}
+                    listing['attrs'] = {'listStyle': marker, **({'order': start} if kind == 'ordered_list' else {})}
+                    target.append(listing)
+                    stack.append((level, number, listing))
+                stack[-1][2]["content"].append({"type": "list_item", "content": [node]})
+                if section_end:
+                    append_section(child, output)
+                    stack = []
             elif isinstance(child, Table):
-                rows = []
-                for row in child.rows:
-                    cells, seen = [], set()
-                    for cell in row.cells:
-                        if cell._tc in seen:
-                            continue
-                        seen.add(cell._tc)
-                        cells.append({"type":"table_cell", "attrs":{"colspan":cell._tc.grid_span}, "content":container(cell)})
-                    rows.append({"type":"table_row", "content":cells})
-                output.append({"type":"table", "content":rows})
+                stack = []
+                from .docx_support import import_table
+                output.append(import_table(child, container, warnings))
         return output
-    return {"type":"doc", "content":container(doc) or [{"type":"paragraph"}]}, doc.core_properties.title or path.stem
+    from .page_geometry import docx_page_settings
+    return {"type":"doc", "content":container(doc) or [{"type":"paragraph"}]}, doc.core_properties.title or path.stem, docx_page_settings(doc, warnings)
 
 
 def _normalise_import_blocks(document):
@@ -1377,6 +1703,9 @@ def _normalise_import_blocks(document):
                 pending = []
                 for child in node.get("content", []):
                     if _kind(child) == "image":
+                        inherited_align = node.get('attrs', {}).get('align')
+                        if inherited_align in ('left', 'center', 'right'):
+                            child.setdefault('attrs', {}).setdefault('align', inherited_align)
                         if pending:
                             result.append({**node,"content":pending})
                             pending = []
@@ -1403,6 +1732,7 @@ def import_document(path: Path) -> dict:
     warnings, assets = [], []
     title = path.stem
     raw_source = None
+    imported_settings = None
     if extension in (".txt", ".md", ".markdown", ".html", ".htm"):
         raw = path.read_bytes()
         try:
@@ -1419,7 +1749,7 @@ def import_document(path: Path) -> dict:
                 text = MarkdownIt("commonmark", {"html": False}).render(text)
             document = _import_html(text, warnings, assets)
     elif extension == ".docx":
-        document, title = _import_docx(path, warnings, assets)
+        document, title, imported_settings = _import_docx(path, warnings, assets)
     elif extension == ".epub":
         with _zip(path) as archive:
             container = _xml(archive.read("META-INF/container.xml"))
@@ -1462,4 +1792,4 @@ def import_document(path: Path) -> dict:
         warnings.extend(notices)
         document = text_document(text)
     document = _normalise_import_blocks(document)
-    return {"title":title, "document":document, "text":plain_text(document), "warnings":warnings, "assets":assets, **({"rawSource":raw_source, "rawFormat":"markdown"} if raw_source else {})}
+    return {"title":title, "document":document, "text":plain_text(document), "warnings":warnings, "assets":assets, **({"settings": imported_settings} if imported_settings else {}), **({"rawSource":raw_source, "rawFormat":"markdown"} if raw_source else {})}

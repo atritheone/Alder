@@ -5,7 +5,8 @@
   "description": "Alder Organic Language Engine for Windows",
   "homepage": "https://atritheone.com/alder",
   "alderSetup": {
-    "dataCompatibility": 1,
+    "dataCompatibility": 2,
+    "upgradeFromDataCompatibility": [1],
     "descriptions": {
       "win32": "Alder Organic Language Engine for Windows",
       "linux": "Alder Organic Language Engine for Linux",

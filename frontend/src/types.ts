@@ -111,10 +111,18 @@ export type StyleProperties = {
   fontFamily?: string | null;
   fontSize?: number | null;
   lineHeight?: number | null;
+  lineSpacing?: number | null;
+  lineSpacingMode?: "multiple" | "exact" | "atLeast" | null;
+  keepWithNext?: boolean | null;
+  keepTogether?: boolean | null;
+  widowOrphan?: boolean | null;
+  pageBreakBefore?: boolean | null;
   spaceAfter?: number | null;
+  spaceBefore?: number | null;
   color?: string | null;
   align?: "left" | "center" | "right" | "justify" | null;
   leftIndent?: number | null;
+  rightIndent?: number | null;
   firstLineIndent?: number | null;
 };
 export type NamedStyle = StyleProperties & {
@@ -122,9 +130,15 @@ export type NamedStyle = StyleProperties & {
   name: string;
   kind?: StyleKind;
   basedOn?: string | null;
+  nextStyle?: string | null;
 };
 export type Project = {
-  lastImport?: { name: string; clipId?: string; warnings?: string[] };
+  lastImport?: {
+    name: string;
+    clipId?: string;
+    warnings?: string[];
+    pageSettings?: import("./pageGeometry").PageSettings;
+  };
   book?: { version: 1; chapters: Chapter[] };
   id: string;
   name: string;
@@ -148,6 +162,13 @@ export type Project = {
     description: string;
     pageSize: string;
     marginMm: number;
+    pageWidthMm?: number;
+    pageHeightMm?: number;
+    marginTopMm?: number;
+    marginRightMm?: number;
+    marginBottomMm?: number;
+    marginLeftMm?: number;
+    gutterMm?: number;
     fontFamily: string;
     fontSize: number;
     lineHeight: number;
@@ -369,7 +390,24 @@ declare global {
         command: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll",
       ) => Promise<void>;
       readClipboard?: () => Promise<string>;
+      readClipboardContent?: () => Promise<{ text: string; html: string }>;
+      printProof?: (
+        resource: string,
+        name: string,
+      ) => Promise<{ opened: boolean }>;
       filePath?: (file: File) => string;
+      bindDocumentFile?: (
+        id: string,
+        file: File,
+        format: string,
+        direct: boolean,
+      ) => Promise<void>;
+      saveDocument?: (
+        id: string,
+        format: string,
+        name: string,
+        mode: "save" | "saveAs" | "copy",
+      ) => Promise<string | null>;
       request: (method: string, path: string, body?: unknown) => Promise<any>;
       upload: (
         path: string,

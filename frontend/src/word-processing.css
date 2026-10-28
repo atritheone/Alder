@@ -1,0 +1,222 @@
+.word-dialog {
+  zoom: var(--ui-scale, 1);
+  color: var(--text, #333);
+  background: var(--panel, #dedede);
+  border: 1px solid #aaa;
+  border-radius: 0;
+  padding: 0;
+  width: min(35rem, calc((100vw - 2rem) / var(--ui-scale, 1)));
+  max-height: calc((100dvh - 2rem) / var(--ui-scale, 1));
+  overflow: auto;
+}
+.word-dialog::backdrop {
+  background: #0004;
+}
+.word-dialog header,
+.word-dialog footer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+}
+.word-dialog header {
+  justify-content: space-between;
+  border-bottom: 1px solid #aaa;
+}
+.word-dialog footer {
+  justify-content: flex-end;
+  border-top: 1px solid #aaa;
+}
+.word-dialog button,
+.word-dialog input,
+.word-dialog select {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.word-dialog button {
+  padding: 0.4rem 0.7rem;
+}
+.word-dialog button:hover {
+  background: #0001;
+}
+.word-dialog button.accent {
+  color: #293f5e;
+}
+.word-dialog-fields {
+  padding: 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+.word-dialog-fields label {
+  display: grid;
+  grid-template-columns: 1fr 10rem;
+  align-items: center;
+  gap: 1rem;
+}
+.word-dialog-fields input,
+.word-dialog-fields select {
+  min-width: 0;
+  padding: 0.3rem;
+}
+.table-colour-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.table-colour-field input {
+  width: 3rem;
+  height: 1.8rem;
+  padding: 0;
+}
+.find-advanced {
+  margin: 0.4rem 0;
+}
+.find-advanced summary {
+  cursor: pointer;
+}
+.find-replacement-preview {
+  margin-top: 0.7rem;
+  max-height: 12rem;
+  overflow: auto;
+}
+.find-replacement-preview p {
+  overflow-wrap: anywhere;
+  margin: 0.5rem 0;
+}
+.find-replacement-preview ins {
+  text-decoration: none;
+  color: #293f5e;
+}
+.paragraph-preview {
+  margin: 0 1rem 1rem;
+  padding: 0.6rem;
+  background: #fff;
+  max-height: 9rem;
+  overflow: auto;
+}
+.paragraph-preview p {
+  font-family: Cambria, serif;
+  font-size: 12pt;
+}
+.format-toolbar input.font-size-input {
+  width: 3.6rem;
+  min-width: 3.6rem;
+  border: 0;
+  background: transparent;
+  padding: 0.25rem;
+  font: inherit;
+}
+.format-toolbar [aria-pressed="mixed"] {
+  box-shadow: inset 0 -2px #293f5e;
+}
+.format-toolbar {
+  container: formatting / inline-size;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+}
+.format-toolbar > button,
+.format-toolbar > select {
+  flex-shrink: 0;
+}
+@container formatting (max-width: 700px) {
+  .format-toolbar > button[data-overflow],
+  .format-toolbar > i {
+    display: none;
+  }
+}
+.word-find-panel {
+  width: 17rem;
+  flex: 0 0 17rem;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.8rem;
+  background: #dadada;
+  border-left: 1px solid #aaa;
+}
+.word-find-panel header,
+.find-navigation {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  justify-content: space-between;
+  margin-bottom: 0.7rem;
+}
+.word-find-panel > label {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+.word-find-panel > label.find-option {
+  display: flex;
+  align-items: center;
+}
+.word-find-panel input:not([type="checkbox"]) {
+  width: 100%;
+  border: 0;
+  background: #e3e3e3;
+  padding: 0.4rem;
+  font: inherit;
+}
+.word-find-panel button {
+  border: 0;
+  background: transparent;
+  color: #293f5e;
+  font: inherit;
+  padding: 0.3rem;
+}
+.word-find-panel button:hover {
+  background: #0001;
+}
+.word-find-panel button:disabled {
+  opacity: 0.4;
+}
+.document-outline {
+  display: flex;
+  flex-direction: column;
+}
+.document-outline nav {
+  min-height: 0;
+  overflow: auto;
+  flex: 1;
+}
+.document-outline section {
+  margin-bottom: 0.7rem;
+}
+.outline-chapter {
+  display: block;
+  padding: 0.4rem;
+}
+.outline-row {
+  display: flex;
+  align-items: center;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+.outline-row.selected {
+  background: #293f5e15;
+}
+.outline-row.drop-before {
+  border-top-color: #293f5e;
+}
+.outline-row.drop-after {
+  border-bottom-color: #293f5e;
+}
+.outline-collapse {
+  width: 1.4rem;
+  flex: 0 0 1.4rem;
+}
+.outline-heading {
+  text-align: left;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.outline-heading[draggable="true"] {
+  cursor: grab;
+}
+.document-outline footer {
+  margin-top: 0.7rem;
+}

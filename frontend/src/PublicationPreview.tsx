@@ -372,6 +372,26 @@ export default function PublicationPreview({
             <button disabled={!proof} onClick={() => void saveProof()}>
               Save this PDF
             </button>
+            {window.alder?.printProof && (
+              <button
+                disabled={!pdf || !proof}
+                onClick={() => {
+                  if (proof)
+                    void window.alder!.printProof!(
+                      proof.downloadUrl,
+                      project.name,
+                    )
+                      .then(() =>
+                        setStatus(
+                          "Use the print button in the PDF window to choose your printer, pages and copies.",
+                        ),
+                      )
+                      .catch((error) => setError(error.message));
+                }}
+              >
+                Print this PDF…
+              </button>
+            )}
           </>
         ) : (
           <>

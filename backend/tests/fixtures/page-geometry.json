@@ -1,0 +1,7 @@
+[
+  {"name":"old uniform margins","settings":{},"expected":{"width":210,"height":297,"margins":{"top":22,"right":22,"bottom":22,"left":22},"adjusted":false}},
+  {"name":"independent landscape margins with binding","settings":{"pageSize":"A5","orientation":"landscape","marginMm":12,"marginTopMm":10,"marginRightMm":15,"marginBottomMm":17,"marginLeftMm":19,"gutterMm":6},"expected":{"width":210,"height":148,"margins":{"top":10,"right":15,"bottom":17,"left":25},"adjusted":false}},
+  {"name":"custom paper","settings":{"pageSize":"Custom","pageWidthMm":180,"pageHeightMm":240,"marginMm":0,"marginRightMm":31},"expected":{"width":180,"height":240,"margins":{"top":0,"right":31,"bottom":0,"left":0},"adjusted":false}},
+  {"name":"rotate custom paper once","settings":{"pageSize":"Custom","pageWidthMm":180,"pageHeightMm":240,"orientation":"landscape","marginMm":8},"expected":{"width":240,"height":180,"margins":{"top":8,"right":8,"bottom":8,"left":8},"adjusted":false}},
+  {"name":"recover impossible legacy margins consistently","settings":{"pageSize":"A5","marginMm":100},"expected":{"width":148,"height":210,"margins":{"top":95,"right":64,"bottom":95,"left":64},"adjusted":true}}
+]

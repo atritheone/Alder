@@ -155,7 +155,10 @@ def test_html_sanitizes_attributes_and_preserves_semantics(publication):
         {"type": "ordered_list", "attrs": {"order": 3}, "content": [{"type": "list_item", "content": [paragraph("A list item")]}]},
     ]}
     output = render_html(publication, {"includeToc": True})
-    assert "<h3>A heading</h3>" in output
+    from bs4 import BeautifulSoup
+    heading = BeautifulSoup(output, 'html.parser').find('h3')
+    assert heading.get_text() == 'A heading'
+    assert 'font-size:16pt' in heading['style']
     assert "<strong>&lt;script&gt; is text</strong>" in output
     assert "javascript:" not in output
     assert "font-size:13pt" in output and '<ol start="3">' in output

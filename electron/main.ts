@@ -1,4 +1,10 @@
 import { WindowsMenu } from "./windows-menu";
+import { openPrintProof } from "./printProof";
+import {
+  DocumentFiles,
+  atomicDocumentWrite,
+  type SaveMode,
+} from "./documentFiles";
 import {
   app,
   BrowserWindow,
@@ -382,13 +388,17 @@ function registerIPC() {
                   ? "CmdOrCtrl+O"
                   : item.label === "Close Document"
                     ? "CmdOrCtrl+W"
-                    : item.label.startsWith("Save ")
+                    : /^Save (Document|Project)/.test(item.label)
                       ? "CmdOrCtrl+S"
-                      : item.label.startsWith("Find And Replace")
-                        ? "CmdOrCtrl+F"
-                        : item.label === "Settings…"
-                          ? "CmdOrCtrl+,"
-                          : undefined;
+                      : item.label === "Save As…"
+                        ? "CmdOrCtrl+Shift+S"
+                        : item.label.startsWith("Find And Replace")
+                          ? "CmdOrCtrl+F"
+                          : item.label === "Settings…"
+                            ? "CmdOrCtrl+,"
+                            : item.label === "Print…"
+                              ? "CmdOrCtrl+P"
+                              : undefined;
               return {
                 label: item.label,
                 type: item.checked === undefined ? "normal" : "radio",
@@ -457,9 +467,17 @@ function registerIPC() {
       flushRequests.delete(id);
     }
   });
-  ipcMain.handle("alder:request", (e, method, p, body) => {
+  ipcMain.handle("alder:request", async (e, method, p, body) => {
     trusted(e);
-    return request(method, p, body);
+    const result = await request(method, p, body);
+    if (
+      method === "POST" &&
+      p === "/api/projects/open" &&
+      result?.id &&
+      typeof body?.path === "string"
+    )
+      await documentFiles.bind(result.id, body.path, "alder", true);
+    return result;
   });
   ipcMain.handle("alder:upload", async (e, p, name, bytes, fields) => {
     trusted(e);
@@ -468,7 +486,10 @@ function registerIPC() {
     const destination = apiPath(p);
     if (
       destination !== "/api/projects/open-file" &&
-      !/\/(import|assets|voices)$/.test(destination)
+      !/\/(import|assets|voices)$/.test(destination) &&
+      !/^\/api\/projects\/[A-Za-z0-9_.-]+\/assets\?register=false$/.test(
+        destination,
+      )
     )
       throw new Error("Unsupported upload destination");
     const form = new FormData();
@@ -515,6 +536,135 @@ function registerIPC() {
       filters: [{ name: "Alder project", extensions: ["alder"] }],
     });
     return result.canceled ? null : result.filePath;
+  });
+  const documentFiles = new DocumentFiles(
+    path.join(app.getPath("userData"), "document-files.json"),
+  );
+  ipcMain.handle("alder:clipboard-content", async (event) => {
+    trusted(event);
+    const contents = { text: "", html: "" };
+    for (const item of await clipboard.read()) {
+      for (const [type, key] of [
+        ["text/plain", "text"],
+        ["text/html", "html"],
+      ] as const) {
+        if (!item.types.includes(type) || contents[key]) continue;
+        const blob = (await item.getType(type)) as Blob;
+        if (blob.size > 8_000_000)
+          throw new Error(
+            "Clipboard content exceeds the eight-megabyte limit.",
+          );
+        contents[key] = await blob.text();
+      }
+    }
+    return contents;
+  });
+  let savingDocument = false;
+  ipcMain.handle(
+    "alder:bind-document-file",
+    async (e, id, filename, format, direct) => {
+      trusted(e);
+      if (!["txt", "md", "docx", "alder"].includes(format)) return;
+      await documentFiles.bind(
+        String(id),
+        String(filename),
+        format,
+        Boolean(direct),
+      );
+    },
+  );
+  ipcMain.handle(
+    "alder:save-document",
+    async (e, id, requestedFormat, name, mode: SaveMode = "save") => {
+      trusted(e);
+      if (
+        !/^[\w.-]+$/.test(id) ||
+        !["txt", "md", "docx", "alder"].includes(requestedFormat) ||
+        !["save", "saveAs", "copy"].includes(mode)
+      )
+        throw new Error("Invalid document save request.");
+      if (savingDocument) return null;
+      savingDocument = true;
+      try {
+        const format = await documentFiles.formatFor(id, requestedFormat);
+        const destination = await documentFiles.destination(
+          id,
+          format,
+          mode,
+          async (suggested) => {
+            const result = await dialog.showSaveDialog(window!, {
+              title: mode === "copy" ? "Save a Copy" : "Save As",
+              defaultPath:
+                suggested || `${path.basename(String(name))}.${format}`,
+              filters: [
+                {
+                  name:
+                    format === "alder"
+                      ? "Alder project"
+                      : `${format.toUpperCase()} document`,
+                  extensions: [format],
+                },
+              ],
+            });
+            return result.canceled ? null : result.filePath || null;
+          },
+        );
+        if (!destination) return null;
+        let written = destination;
+        if (format === "alder") {
+          await documentFiles.assertUnchanged(id, destination, mode);
+          const result = await request("POST", `/api/projects/${id}/save`, {
+            path: destination,
+          });
+          written = result.path;
+        } else {
+          const result = await request("POST", `/api/projects/${id}/export`, {
+            format,
+          });
+          if (result.warnings?.length) {
+            const answer = await dialog.showMessageBox(window!, {
+              type: "warning",
+              title: "Save document",
+              message: "This format cannot retain all document features.",
+              detail: result.warnings.join("\n"),
+              buttons: ["Cancel", "Save"],
+              defaultId: 0,
+              cancelId: 0,
+            });
+            if (answer.response !== 1) return null;
+          }
+          const response = await fetch(base + apiPath(result.downloadUrl), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!response.ok)
+            throw new Error("Unable to prepare the saved document.");
+          const bytes = Buffer.from(await response.arrayBuffer());
+          await documentFiles.assertUnchanged(id, destination, mode);
+          await atomicDocumentWrite(destination, bytes);
+        }
+        await documentFiles.written(id, written, format, mode);
+        return written;
+      } finally {
+        savingDocument = false;
+      }
+    },
+  );
+  ipcMain.handle("alder:print-proof", async (event, resource, name) => {
+    trusted(event);
+    if (
+      typeof resource !== "string" ||
+      !/^\/api\/exports\/export_[a-f0-9]{32}$/.test(resource)
+    )
+      throw new Error("Invalid print proof.");
+    const response = await fetch(base + resource, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error("Unable to load the print proof.");
+    return openPrintProof(
+      window!,
+      Buffer.from(await response.arrayBuffer()),
+      String(name || "Alder document").slice(0, 200),
+    );
   });
   ipcMain.handle("alder:open-path", async (e) => {
     trusted(e);
@@ -647,7 +797,8 @@ async function createWindow() {
   });
   if (process.platform === "win32") {
     windowsMenu = new WindowsMenu(window);
-    if (applicationMenu) windowsMenu.set(applicationMenu, applicationMenuBackground);
+    if (applicationMenu)
+      windowsMenu.set(applicationMenu, applicationMenuBackground);
   }
   window.on("close", (event) => {
     if (!closeAllowed) {

@@ -5,7 +5,7 @@ import re
 import shlex
 import sys
 
-from common import SetupError, inside, read_json
+from common import SetupError, inside, read_json, data_upgrade_allowed
 from install import default_install, executable
 
 
@@ -108,14 +108,18 @@ def update_plan(source, root, target, fingerprint, expected_version=None):
         raise SetupError('ALDER_VERSION', f'This repository contains {release_label(version)}, not requested version {expected_version}. Obtain the correct repository; do not edit its version.')
     if version_tuple(version) < version_tuple(active['version']):
         raise SetupError('ALDER_DOWNGRADE', f'Installed Alder {release_label(active["version"])} is newer than repository {release_label(version)}. Use a newer repository or the explicit rollback command.')
-    if active.get('dataCompatibility') != package['alderSetup']['dataCompatibility']:
+    if not data_upgrade_allowed(active.get('dataCompatibility'), package['alderSetup']):
         raise SetupError('ALDER_MIGRATION', 'This update requires a data migration that is not supplied. The current installation and user data remain unchanged.')
+    migration = active['dataCompatibility'] != package['alderSetup']['dataCompatibility']
     status = ('current' if active['fingerprint'] == fingerprint else
               'rebuild-available' if active['version'] == version else 'update-available')
     return {'status':status,'installedVersion':active['version'],'repositoryVersion':version,
             'installedRelease':release_label(active['version']),'repositoryRelease':release_label(version),
             'installation':str(root),'launcher':active.get('launcher'),
-            'dataCompatibility':active['dataCompatibility'],'sourceFingerprint':fingerprint,
+            'dataCompatibility':package['alderSetup']['dataCompatibility'],
+            'previousDataCompatibility':active['dataCompatibility'],
+            'dataMigration':migration,'automaticRollbackCompatible':not migration,
+            'sourceFingerprint':fingerprint,
             'userDataDirectory':str(user_data_directory()),
             'verification':active.get('verification','unknown'),
             'next':'Close Alder, back up your projects, then run the same update command without --check.'}

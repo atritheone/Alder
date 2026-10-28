@@ -224,6 +224,8 @@ def execute(args):
         if result['status']=='passed':prune_versions(install)
         return {'status':result['status'],'version':version,'previousVersion':active['version'] if active else None,'target':target,'installation':str(install),
                 'launcher':new['launcher'],'sourceUnchanged':True,'offlineRuntime':True,
+                'dataCompatibility':new['dataCompatibility'],
+                'automaticRollbackCompatible':bool(active and active.get('dataCompatibility')==new['dataCompatibility']),
                 'speechDevice':'cpu baseline','humanListeningApproval':False,'warnings':info['warnings'],'features':info.get('features',{})}
 
 

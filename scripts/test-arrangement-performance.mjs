@@ -4,6 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 const data = fs.mkdtempSync(path.join(os.tmpdir(), "alder-arrangement-"));
+const report = "work/arrangement-performance-report.json";
+let stage = "launch";
+const checkpoint = (value) => {
+  stage = value;
+  fs.mkdirSync("work", { recursive: true });
+  fs.writeFileSync(report, JSON.stringify({ status: "running", stage }));
+};
+checkpoint(stage);
 const app = await electron.launch({
   executablePath: desktopExecutable(),
   args: [".", "--headless-test", `--user-data-dir=${data}/profile`],
@@ -13,12 +21,16 @@ const app = await electron.launch({
 try {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
-  await app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0].setSize(1280, 900),
-  );
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.setSize(1280, 900);
+    window.show();
+    window.focus();
+  });
   page.on("dialog", (dialog) => dialog.accept().catch(() => {}));
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  checkpoint("create fixture");
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   const editor = page.getByRole("textbox", {
@@ -118,6 +130,7 @@ try {
     });
     return p.name;
   });
+  checkpoint("open long document");
   await page.reload();
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await page.getByRole("button", { name, exact: true }).first().click();
@@ -140,6 +153,7 @@ try {
   await editor.press("Backspace");
   await expect(page.locator(".save-status")).toHaveText("Saved");
   const before = await saved();
+  checkpoint("arrangement");
   await page.getByRole("tab", { name: "Pages", exact: true }).click();
   const cards = page.locator(".page-card");
   await expect.poll(() => cards.count()).toBeGreaterThan(3);
@@ -148,6 +162,7 @@ try {
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].showInactive(),
   );
+  checkpoint("drag units");
   const timings = await page.evaluate(async () => {
     const waitFrame = () =>
       new Promise((resolve) =>
@@ -222,7 +237,9 @@ try {
       if (kind === "sentence")
         dispatch("pointerup", target.left + 2, target.top + 68);
       else
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        (document.activeElement || document.body).dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
       Element.prototype.setPointerCapture = original;
       await waitFrame();
       const drop = performance.now() - dropStart;
@@ -241,7 +258,8 @@ try {
     }
     return results;
   });
-  console.log(JSON.stringify({ pages: await cards.count(), timings }));
+  checkpoint("save and undo");
+  const pageCount = await cards.count();
   await expect(page.locator(".save-status")).toHaveText("Saved");
   expect((await saved()).book.chapters[0].document).not.toEqual(
     before.book.chapters[0].document,
@@ -260,6 +278,44 @@ try {
       expect(Math.max(...result.moves.map((m) => m.frame))).toBeLessThan(150);
     }
   }
+  expect(errors).toEqual([]);
+  fs.writeFileSync(
+    report,
+    JSON.stringify(
+      {
+        status: "passed",
+        pages: pageCount,
+        timings,
+        system: {
+          platform: process.platform,
+          release: os.release(),
+          architecture: os.arch(),
+          cpu: os.cpus()[0]?.model,
+        },
+      },
+      null,
+      2,
+    ),
+  );
+} catch (error) {
+  const failurePage = await app.firstWindow();
+  fs.writeFileSync(
+    report,
+    JSON.stringify(
+      {
+        status: "failed",
+        stage,
+        error: error.stack,
+        content: await failurePage
+          .locator('[role="alert"], .error-banner, .save-status')
+          .allTextContents()
+          .catch(() => []),
+      },
+      null,
+      2,
+    ),
+  );
+  throw error;
 } finally {
   await app.close();
 }

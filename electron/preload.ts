@@ -1,6 +1,22 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 contextBridge.exposeInMainWorld("alder", {
+  printProof: (resource: string, name: string) =>
+    ipcRenderer.invoke("alder:print-proof", resource, name),
   filePath: (file: File) => webUtils.getPathForFile(file),
+  bindDocumentFile: (id: string, file: File, format: string, direct: boolean) =>
+    ipcRenderer.invoke(
+      "alder:bind-document-file",
+      id,
+      webUtils.getPathForFile(file),
+      format,
+      direct,
+    ),
+  saveDocument: (
+    id: string,
+    format: string,
+    name: string,
+    mode: "save" | "saveAs" | "copy",
+  ) => ipcRenderer.invoke("alder:save-document", id, format, name, mode),
   setWindowLayout: (
     mode: "start" | "workspace",
     width?: number,
@@ -11,6 +27,7 @@ contextBridge.exposeInMainWorld("alder", {
   editCommand: (command: string) =>
     ipcRenderer.invoke("alder:edit-command", command),
   readClipboard: () => ipcRenderer.invoke("alder:clipboard-text"),
+  readClipboardContent: () => ipcRenderer.invoke("alder:clipboard-content"),
   request: (method: string, path: string, body?: unknown) =>
     ipcRenderer.invoke("alder:request", method, path, body),
   upload: (

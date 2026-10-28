@@ -19,6 +19,17 @@ class SetupError(RuntimeError):
         self.code = code
 
 
+def data_upgrade_allowed(previous, metadata):
+    """Only declared forward migrations may cross a data compatibility boundary.
+
+    Project schema 1 -> 2 is implemented by alder.document_schema on validated
+    copies. This permits activation, not rollback or rewriting user data here.
+    """
+    current = metadata['dataCompatibility']
+    return type(previous) is int and (previous == current or
+        previous < current and previous in metadata.get('upgradeFromDataCompatibility', []))
+
+
 def digest(path):
     h = hashlib.sha256()
     with Path(path).open('rb') as stream:

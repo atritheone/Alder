@@ -50,7 +50,18 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
       if (
         run.length &&
         (run.at(-1)!.pos + run.at(-1)!.node.nodeSize !== pos ||
-          !run[0].node.sameMarkup(node))
+          !run[0].node.hasMarkup(
+            node.type,
+            {
+              ...node.attrs,
+              // Block identity is not formatting. Legacy wrapped paragraphs
+              // still form one unit after receiving stable schema identities.
+              ...("blockId" in run[0].node.attrs
+                ? { blockId: run[0].node.attrs.blockId }
+                : {}),
+            },
+            node.marks,
+          ))
       )
         flush();
       run.push({ node, pos });

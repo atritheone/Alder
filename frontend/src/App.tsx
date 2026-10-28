@@ -84,11 +84,15 @@ import Editor, { type EditorHandle } from "./Editor";
 import DefinitionStudio from "./DefinitionStudio";
 import NarrationReview from "./NarrationReview";
 import StylesManager from "./StylesManager";
+import DocumentVersions from "./DocumentVersions";
 import { DEFAULT_SPEECH_OPTIONS } from "./SpeechOptions";
 
 import DocumentTabs from "./DocumentTabs";
 import StartScreen, { NewDocument } from "./StartScreen";
-import { openDocuments } from "./openDocuments";
+import { openDocuments, rememberDocumentFile } from "./openDocuments";
+import FindPanel from "./FindPanel";
+import { replaceBookMatches } from "./bookFind";
+import DocumentOutline from "./OutlinePanel";
 import { helpFor } from "./contextHelp";
 import { useNarrationGain } from "./audioPlayback";
 import PlaybackSpeed from "./PlaybackSpeed";
@@ -249,6 +253,7 @@ export default function App() {
     void window.alder?.setWindowLayout(workspaceOpen ? "workspace" : "start");
   }, [workspaceOpen]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] =
     useState<SettingsCategory>("Appearance");
   const [newOpen, setNewOpen] = useState(false);
@@ -291,6 +296,15 @@ export default function App() {
     [jobs, setJobs] = useState<Job[]>([]),
     [capabilities, setCapabilities] = useState<any>(null);
   const [browserCategory, setBrowserCategory] = useState("Words");
+  const [findPanel, setFindPanel] = useState<{
+    initial: string;
+    selection: { start: number; end: number };
+    identity: string;
+    projectId: string;
+    book: boolean;
+  } | null>(null);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  useEffect(() => setOutlineOpen(false), [project?.id]);
   const [voiceTestPlaying, setVoiceTestPlaying] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(
       () => localStorage.getItem("alder.browserOpen") === "true",
@@ -352,6 +366,9 @@ export default function App() {
   const [chapterId, setChapterId] = useState<string | null>(null);
   const [writingFocus, setWritingFocus] = useState(true);
   const bookEditor = useRef<EditorHandle>(null);
+  const imageDestination = useRef<{ book: boolean; identity: string } | null>(
+    null,
+  );
   const editor = useRef<EditorHandle>(null),
     audio = useRef<HTMLAudioElement>(null),
     importFile = useRef<HTMLInputElement>(null),
@@ -601,7 +618,11 @@ export default function App() {
         pending = pending
           .then(async () => {
             await flush();
-            await load(await api("/api/projects/open", "POST", { path }));
+            const opened = await api<Project>("/api/projects/open", "POST", {
+              path,
+            });
+            await rememberDocumentFile(opened.id, path);
+            await load(opened);
             setPanel(null);
           })
           .catch((error) => setError(String(error.message || error)));
@@ -774,9 +795,26 @@ export default function App() {
       else void narrationTransport.resume().catch((e) => setError(e.message));
     } else void run(() => startSpeech(selected || undefined, "collation"));
   };
-  const saveProject = async () => {
+  const saveProject = async (mode: "save" | "saveAs" | "copy" = "save") => {
     if (!project) return;
     await flush();
+    if (window.alder?.saveDocument) {
+      const format = ["txt", "docx"].includes(project.settings.documentKind)
+        ? project.settings.preferredFormat || project.settings.documentKind
+        : "alder";
+      const saved = await window.alder.saveDocument(
+        project.id,
+        format,
+        project.name,
+        mode,
+      );
+      if (saved) {
+        retain(project.id);
+        if (mode !== "copy") await rememberDocumentFile(project.id, saved);
+        setHint(`Saved ${saved}`);
+      }
+      return;
+    }
     if (["txt", "docx"].includes(project.settings.documentKind)) {
       const format =
         project.settings.preferredFormat || project.settings.documentKind;
@@ -787,7 +825,8 @@ export default function App() {
         result.downloadUrl,
         `${project.name}.${format}`,
       );
-      if (saved) retain(project.id);
+      if (!saved) return;
+      retain(project.id);
       setHint(`Saved ${project.name}.${format}`);
       return;
     }
@@ -810,6 +849,8 @@ export default function App() {
     void run(flush);
   };
   const openPanel = (name: string) => {
+    setFindPanel(null);
+    setOutlineOpen(false);
     setMenu(null);
     if (["settings", "rules", "accessibility"].includes(name)) {
       openSettings(
@@ -1012,37 +1053,44 @@ export default function App() {
       "Created a combined draft. The source drafts, takes and collation placements are retained.",
     );
   };
-  const findReplace = () =>
-    setForm({
-      title: "Find and replace",
-      description:
-        "Search the active chapter or sandbox draft. Replacements preserve surrounding formatting and can be undone.",
-      fields: [
-        { name: "find", label: "Find", value: word },
-        { name: "replace", label: "Replace with" },
-        {
-          name: "mode",
-          label: "Action",
-          options: [
-            { value: "find", label: "Find next" },
-            { value: "replace", label: "Replace all" },
-          ],
-        },
-      ],
-      submit: "Apply",
-      action: (v) => {
-        if (!activeContent || !v.find) return;
-        const start = targetEditor()?.getSelectionOffsets().end || 0;
-        const next = activeContent.text.indexOf(v.find, start),
-          at = next >= 0 ? next : activeContent.text.indexOf(v.find);
-        if (at < 0) {
-          setHint("No matching text.");
-          return;
-        }
-        if (v.mode === "find")
-          targetEditor()?.selectRange(at, at + v.find.length);
-        else targetEditor()?.replaceAll(v.find, v.replace || "");
-      },
+  const findReplace = () => {
+    if (!project || !activeContent) return;
+    setPanel(null);
+    setOutlineOpen(false);
+    setFindPanel({
+      initial: targetEditor()?.getSelection() || "",
+      selection: targetEditor()?.getSelectionOffsets() || { start: 0, end: 0 },
+      identity: `${project.id}:${activeContent.id}`,
+      projectId: project.id,
+      book: writingFocus,
+    });
+  };
+  const withOutlineEditor = (
+    id: string,
+    action: (editor: EditorHandle) => void,
+  ) => {
+    const expectedIdentity = `${project?.id}:${id}:formatted`;
+    setChapterId(id);
+    setWritingFocus(true);
+    setView("Write");
+    setWritePreview(false);
+    window.dispatchEvent(new Event("alder-show-formatted-document"));
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (bookEditor.current?.getIdentity() === expectedIdentity)
+          action(bookEditor.current);
+      }),
+    );
+  };
+  const printDocument = () =>
+    void run(async () => {
+      await flush();
+      setView("Write");
+      setPreviewRevision((n) => n + 1);
+      setWritePreview(true);
+      setHint(
+        "Review the PDF, then choose Print this PDF to select your printer, pages and copies.",
+      );
     });
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1083,11 +1131,15 @@ export default function App() {
       );
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        void run(saveProject);
+        void run(() => saveProject(e.shiftKey ? "saveAs" : "save"));
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
         findReplace();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p" && project) {
+        e.preventDefault();
+        printDocument();
       }
       if (!editable) {
         if (e.code === "Space") {
@@ -1172,12 +1224,52 @@ export default function App() {
       setBusy("");
     }
   };
+  const chooseImage = (book = writingFocus) => {
+    const target = (book ? bookEditor : editor).current;
+    if (!target) return;
+    imageDestination.current = { book, identity: target.getIdentity() };
+    imageFile.current?.click();
+  };
   const onImage = async (file: File) => {
     if (!project) return;
+    const destination = imageDestination.current;
+    imageDestination.current = null;
+    const destinationEditor = () =>
+      destination
+        ? (destination.book ? bookEditor : editor).current
+        : targetEditor();
+    const target = destinationEditor();
+    if (!target) return;
+    const identity = destination?.identity || target.getIdentity(),
+      projectId = project.id;
+    if (target.getIdentity() !== identity)
+      throw new Error(
+        "The intended editor changed. Insert the image again in the intended document.",
+      );
+    // Collect bytes without advancing the stored project revision. Register
+    // metadata through the current editing session so typing during the upload
+    // cannot be discarded by loading a stale project snapshot.
+    const asset = await upload(
+      `/api/projects/${projectId}/assets?register=false`,
+      file,
+    );
+    if (destinationEditor()?.getIdentity() !== identity)
+      throw new Error(
+        "The active editor changed while the image was loading. Insert it again in the intended document.",
+      );
+    change((draft) => {
+      if (draft.id !== projectId)
+        throw new Error(
+          "The active document changed while the image was loading.",
+        );
+      draft.assets.push(asset);
+    });
     await flush();
-    const asset = await upload(`/api/projects/${project.id}/assets`, file);
-    load(await api(`/api/projects/${project.id}`));
-    targetEditor()?.image(
+    if (destinationEditor()?.getIdentity() !== identity)
+      throw new Error(
+        "The image was collected. Return to the original document to insert it.",
+      );
+    target.image(
       `/api/projects/${project.id}/assets/${asset.id}`,
       asset.id,
       file.name.replace(/\.[^.]+$/, ""),
@@ -1409,6 +1501,7 @@ export default function App() {
       {browserCategory === "Styles" && (
         <StylesManager
           project={project}
+          onCapture={() => targetEditor()?.getFormatting() || null}
           onChange={change}
           onError={setError}
           onApply={(id, kind) => {
@@ -1430,9 +1523,7 @@ export default function App() {
           ) : (
             <p>No Project Assets</p>
           )}
-          <button onClick={() => imageFile.current?.click()}>
-            Insert image…
-          </button>
+          <button onClick={() => chooseImage()}>Insert image…</button>
         </>
       )}
       {browserCategory === "Templates" && (
@@ -1473,11 +1564,28 @@ export default function App() {
         label: ["txt", "docx"].includes(project.settings.documentKind)
           ? "Save document…"
           : "Save project…",
-        action: () => void run(saveProject),
+        action: () => void run(() => saveProject()),
+      },
+      {
+        label: "Save As…",
+        action: () => void run(() => saveProject("saveAs")),
+      },
+      {
+        label: "Save a Copy…",
+        action: () => void run(() => saveProject("copy")),
       },
       { label: "Close document", action: () => void close(project.id) },
+      {
+        label: "Saved versions…",
+        action: () =>
+          void run(async () => {
+            await flush();
+            setVersionsOpen(true);
+          }),
+      },
       { label: "Import document…", action: () => openPanel("import") },
       { label: "Export…", action: () => openPanel("export") },
+      { label: "Print…", action: printDocument },
     ],
     Edit: [
       { label: "Paste From Clipboard", action: pasteClipboard },
@@ -1490,6 +1598,26 @@ export default function App() {
         action: () => void run(() => history("redo")),
       },
       { label: "Find and replace…", action: findReplace },
+      {
+        label: "Format",
+        submenu: [
+          { label: "Paragraph…", action: () => targetEditor()?.paragraph() },
+          ...[
+            ["strong", "Bold"],
+            ["em", "Italic"],
+            ["underline", "Underline"],
+            ["strike", "Strikethrough"],
+            ["subscript", "Subscript"],
+            ["superscript", "Superscript"],
+            ["highlight", "Highlight"],
+            ["clear", "Clear character formatting"],
+            ["resetParagraph", "Reset paragraph formatting"],
+          ].map(([name, label]) => ({
+            label,
+            action: () => targetEditor()?.format(name),
+          })),
+        ],
+      },
       { label: "Project dictionary…", action: () => openPanel("dictionary") },
       { label: "Settings…", action: () => openSettings() },
     ],
@@ -1544,6 +1672,14 @@ export default function App() {
     ],
     View: [
       {
+        label: outlineOpen ? "Hide outline" : "Show outline",
+        action: () => {
+          setFindPanel(null);
+          setPanel(null);
+          setOutlineOpen((open) => !open);
+        },
+      },
+      {
         label: browserOpen ? "Hide browser" : "Show browser",
         action: () => setBrowserOpen((v) => !v),
       },
@@ -1585,6 +1721,13 @@ export default function App() {
       }
     >
       {settingsWindow}
+      {versionsOpen && (
+        <DocumentVersions
+          projectId={project.id}
+          onRecover={load}
+          onClose={() => setVersionsOpen(false)}
+        />
+      )}
       {window.alder ? (
         <NativeMenu items={menuItems} onError={setError} />
       ) : (
@@ -1794,7 +1937,7 @@ export default function App() {
                 .then((r) => setCompletion(r.suggestions))
                 .catch((e) => setError(e.message))
             }
-            onImage={() => imageFile.current?.click()}
+            onImage={() => chooseImage(true)}
             onLink={() =>
               setForm({
                 title: "Insert link",
@@ -1841,6 +1984,96 @@ export default function App() {
               `/api/projects/${project.id}/preview?r=${previewRevision}`,
             )}
           />
+          {outlineOpen && (
+            <DocumentOutline
+              chapters={project.book?.chapters || []}
+              onSelect={(chapter, heading) =>
+                withOutlineEditor(chapter, (editor) =>
+                  editor.navigateHeading(heading),
+                )
+              }
+              onMove={(chapter, source, target, after) =>
+                withOutlineEditor(chapter, (editor) =>
+                  editor.moveHeading(source, target, after),
+                )
+              }
+              onClose={() => {
+                setOutlineOpen(false);
+                bookEditor.current?.focus();
+              }}
+            />
+          )}
+          {findPanel &&
+            activeContent &&
+            findPanel.projectId === project.id &&
+            (findPanel.book ||
+              findPanel.identity === `${project.id}:${activeContent.id}`) && (
+              <FindPanel
+                key={findPanel.identity}
+                text={findPanel.book ? chapter?.text || "" : activeContent.text}
+                initial={findPanel.initial}
+                selection={findPanel.selection}
+                sourceId={findPanel.book ? chapter?.id || "" : activeContent.id}
+                sources={
+                  findPanel.book
+                    ? project.book?.chapters.map((chapter) => ({
+                        id: chapter.id,
+                        title: chapter.title || "Untitled chapter",
+                        text: chapter.text,
+                      }))
+                    : undefined
+                }
+                onSelect={(match, sourceId) =>
+                  findPanel.book
+                    ? withOutlineEditor(sourceId, (editor) =>
+                        editor.selectRange(match.start, match.end),
+                      )
+                    : targetEditor()?.selectRange(match.start, match.end)
+                }
+                onReplace={(matches, replacement, expected, sourceId) => {
+                  if (findPanel.book && chapter?.id !== sourceId)
+                    withOutlineEditor(sourceId, (editor) => {
+                      try {
+                        editor.replaceMatches(matches, replacement, expected);
+                      } catch (error) {
+                        setError((error as Error).message);
+                      }
+                    });
+                  else
+                    (findPanel.book
+                      ? bookEditor.current
+                      : targetEditor()
+                    )?.replaceMatches(matches, replacement, expected);
+                }}
+                onReplaceBook={
+                  findPanel.book
+                    ? async (groups, replacement) => {
+                        const expectedProject = project.id;
+                        await flush();
+                        change((draft) => {
+                          if (draft.id !== expectedProject)
+                            throw new Error(
+                              "The active document changed. Search again before replacing.",
+                            );
+                          replaceBookMatches(draft, groups, replacement);
+                        });
+                        await flush();
+                        setHint(
+                          `Replaced ${groups.reduce((total, group) => total + group.matches.length, 0)} matches across ${groups.length} chapters. Undo project change restores them together.`,
+                        );
+                      }
+                    : undefined
+                }
+                onClose={() => {
+                  setFindPanel(null);
+                  (findPanel.book
+                    ? bookEditor.current
+                    : targetEditor()
+                  )?.focus();
+                }}
+                onError={setError}
+              />
+            )}
         </div>
       </div>
       <div
@@ -2078,7 +2311,9 @@ export default function App() {
                     }
                     onFocus={() => setWritingFocus(false)}
                     document={content.document}
-                    identity={`${clip.id}:${clip.activeVariantId || "original"}`}
+                    identity={`${project.id}:${clip.id}:${clip.activeVariantId || "original"}`}
+                    projectId={project.id}
+                    assets={project.assets}
                     onChange={updateContent}
                     onSelection={(w, s, range) => {
                       setSandboxSelection((previous) => {
@@ -2100,7 +2335,7 @@ export default function App() {
                     annotationText={analysis?.sourceText}
                     showStructure={structure}
                     onToggleStructure={() => setStructure((v) => !v)}
-                    onImage={() => imageFile.current?.click()}
+                    onImage={() => chooseImage(false)}
                     onComplete={() => {
                       api<{ suggestions: string[] }>(
                         `/api/complete?prefix=${encodeURIComponent(word)}&projectId=${project.id}`,

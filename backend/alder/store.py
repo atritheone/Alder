@@ -81,7 +81,8 @@ class Store:
             row = conn.execute("SELECT snapshot FROM projects WHERE id=?", (project_id,)).fetchone()
             if row is None:
                 raise KeyError("Project does not exist.")
-            return json.loads(row[0])
+            project = json.loads(row[0])
+            return validate_project(project) if project.get("schemaVersion", 1) != 2 else project
 
     def create(self, name: str | None = None, template: str = "demo") -> dict:
         return self.insert(create_project(name, template))
@@ -144,6 +145,65 @@ class Store:
                          (p["name"], p["revision"], p["updatedAt"], current["cursor"] + direction, json.dumps(p, ensure_ascii=False), project_id))
             conn.commit()
             return p
+
+    def versions(self, project_id: str) -> list[dict]:
+        with self.connection() as conn:
+            current = conn.execute("SELECT cursor FROM projects WHERE id=?", (project_id,)).fetchone()
+            if current is None:
+                raise KeyError("Project does not exist.")
+            return [{**dict(row), "current": row["sequence"] == current[0]} for row in conn.execute(
+                "SELECT seq AS sequence, json_extract(snapshot,'$.name') AS name, "
+                "json_extract(snapshot,'$.revision') AS revision, json_extract(snapshot,'$.updatedAt') AS updatedAt "
+                "FROM history WHERE project_id=? ORDER BY seq DESC LIMIT 201", (project_id,))]
+
+    def recover_version(self, project_id: str, sequence: int) -> dict:
+        with self.connection() as conn:
+            row = conn.execute("SELECT snapshot FROM history WHERE project_id=? AND seq=?", (project_id, sequence)).fetchone()
+            if row is None:
+                raise KeyError("This saved version is no longer available.")
+            recovered = json.loads(row[0])
+        new_id = uid("project_")
+        def relocate(value):
+            if isinstance(value, dict):
+                attrs = value.get("attrs") or {}
+                if value.get("type") == "image" and str(attrs.get("src", "")).startswith(f"/api/projects/{project_id}/"):
+                    attrs["src"] = attrs["src"].replace(f"/api/projects/{project_id}/", f"/api/projects/{new_id}/", 1)
+                for child in value.values():
+                    relocate(child)
+            elif isinstance(value, list):
+                for child in value:
+                    relocate(child)
+        relocate(recovered)
+        recovered.update(id=new_id, name=recovered["name"][:280] + " — recovered", createdAt=now())
+        recovered = validate_project(recovered)
+        # History stores metadata, not another copy of each image. Collect the
+        # snapshot's assets before inserting the recovered project; otherwise
+        # its relocated image URLs would point to an empty asset directory.
+        assets = self.data_dir / 'assets'
+        assets.mkdir(exist_ok=True)
+        source_root = self.asset_dir(project_id).resolve()
+        destination = assets / new_id
+        if destination.exists():
+            raise ValidationError('Could not allocate an independent recovery directory.')
+        with tempfile.TemporaryDirectory(prefix='.recover-', dir=assets) as stage:
+            for asset in recovered['assets']:
+                filename = asset.get('path')
+                if not filename:
+                    if asset.get('data'):
+                        continue
+                    raise ValidationError(f"Saved version asset is unavailable: {asset.get('name', asset['id'])}")
+                source = (source_root / filename).resolve()
+                if not source.is_relative_to(source_root) or not source.is_file():
+                    raise ValidationError(f"Saved version asset is missing: {asset.get('name', asset['id'])}")
+                target = Path(stage) / filename
+                shutil.copyfile(source, target)
+                with target.open('rb+') as stream:
+                    actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+                    os.fsync(stream.fileno())
+                if actual != filename.split('.')[0].lower():
+                    raise ValidationError('Saved version asset failed its integrity check.')
+            os.replace(stage, destination)
+        return self.insert(recovered)
 
     def history_status(self, project_id: str) -> dict:
         with self.connection() as conn:

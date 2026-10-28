@@ -1,3 +1,4 @@
+import { screenPageGeometry } from "./pageGeometry";
 import {
   documentPositionKey,
   readDocumentPosition,
@@ -77,6 +78,15 @@ export default function BookWorkspace(p: Props) {
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
   const [rawActive, setRawActive] = useState(false);
   const [rawOpenError, setRawOpenError] = useState("");
+  useEffect(() => {
+    const showFormatted = () => setRawActive(false);
+    window.addEventListener("alder-show-formatted-document", showFormatted);
+    return () =>
+      window.removeEventListener(
+        "alder-show-formatted-document",
+        showFormatted,
+      );
+  }, []);
   useEffect(() => {
     setRawActive(false);
     setRawOpenError("");
@@ -236,30 +246,31 @@ export default function BookWorkspace(p: Props) {
     if (page !== null && page !== undefined) setPageNumber(String(page + 1));
   }, [speechPlaying, readingPosition, pages, chapter?.id, showRaw]);
   const layout = useMemo(() => {
-    const size: Record<string, [number, number]> = {
-      A4: [210, 297],
-      A5: [148, 210],
-      Letter: [215.9, 279.4],
-      Legal: [215.9, 355.6],
-      "6x9": [152.4, 228.6],
-    };
-    const dimensions = size[p.project.settings.pageSize] || size.A4;
-    const [w, h] =
-      p.project.settings.orientation === "landscape"
-        ? [dimensions[1], dimensions[0]]
-        : dimensions;
     return {
-      width: (w * 96) / 25.4,
-      height: (h * 96) / 25.4,
-      margin: (Math.min(p.project.settings.marginMm, w / 3, h / 3) * 96) / 25.4,
+      ...screenPageGeometry(p.project.settings),
       lineHeight: p.project.settings.lineHeight,
+      header: p.project.settings.header,
+      footer: p.project.settings.footer,
+      firstPageNumber: p.project.settings.firstPageNumber || 1,
+      fontFamily: p.project.settings.fontFamily,
       zoom,
     };
   }, [
     p.project.settings.orientation,
     p.project.settings.pageSize,
     p.project.settings.marginMm,
+    p.project.settings.marginTopMm,
+    p.project.settings.marginRightMm,
+    p.project.settings.marginBottomMm,
+    p.project.settings.marginLeftMm,
+    p.project.settings.gutterMm,
+    p.project.settings.pageWidthMm,
+    p.project.settings.pageHeightMm,
     p.project.settings.lineHeight,
+    p.project.settings.header,
+    p.project.settings.footer,
+    p.project.settings.firstPageNumber,
+    p.project.settings.fontFamily,
     zoom,
   ]);
   if (!chapter) return null;
@@ -483,6 +494,7 @@ export default function BookWorkspace(p: Props) {
             <PageArrangement
               key={chapter.id}
               snapshots={snapshots}
+              pages={pages}
               layout={layout}
               zoom={arrangementZoom}
               onZoom={setArrangementZoom}
@@ -502,7 +514,14 @@ export default function BookWorkspace(p: Props) {
               ref={p.editorRef}
               label={showRaw ? "Raw text editor" : "Chapter text editor"}
               document={showRaw ? rawDocument : chapter.document}
-              identity={chapter.id + (showRaw ? ":raw" : ":formatted")}
+              identity={
+                p.project.id +
+                ":" +
+                chapter.id +
+                (showRaw ? ":raw" : ":formatted")
+              }
+              projectId={p.project.id}
+              assets={p.project.assets}
               rawMode={showRaw}
               onToggleRaw={p.view === "Write" ? toggleRaw : undefined}
               rawDisabled={

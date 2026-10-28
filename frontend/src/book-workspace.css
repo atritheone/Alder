@@ -121,8 +121,14 @@
   background: #9c9c9c;
   padding: 22px;
 }
-.flow-canvas {
+.flow-display {
   position: relative;
+  flex: none;
+}
+.flow-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
   min-height: var(--page-height);
   flex: none;
 }
@@ -143,27 +149,21 @@
   background: #fefefe;
   box-shadow: 0 2px 7px #4e4e4e55;
 }
-.page-sheet > span {
-  position: absolute;
-  bottom: 24px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font:
-    11px "Aptos",
-    Arial,
-    sans-serif;
-  color: #666666;
-}
 .page-flow {
   position: relative;
-  padding-top: var(--page-margin);
-  padding-left: var(--page-margin);
+  padding-top: var(--page-margin-top, var(--page-margin));
+  padding-left: var(--page-margin-left, var(--page-margin));
 }
 .page-flow .ProseMirror {
   padding: 0;
-  width: calc(var(--page-width) - 2 * var(--page-margin));
-  min-height: calc(var(--page-height) - 2 * var(--page-margin));
+  width: calc(
+    var(--page-width) - var(--page-margin-left, var(--page-margin)) -
+      var(--page-margin-right, var(--page-margin))
+  );
+  min-height: calc(
+    var(--page-height) - var(--page-margin-top, var(--page-margin)) -
+      var(--page-margin-bottom, var(--page-margin))
+  );
   height: auto;
   font-size: inherit;
   line-height: var(--page-leading);
@@ -185,7 +185,10 @@
   break-inside: avoid;
 }
 .page-flow .ProseMirror img {
-  max-height: calc(var(--page-height) - 2 * var(--page-margin) - 24px);
+  max-height: calc(
+    var(--page-height) - var(--page-margin-top, var(--page-margin)) -
+      var(--page-margin-bottom, var(--page-margin)) - 24px
+  );
   object-fit: contain;
 }
 .page-flow .ProseMirror .page-break {

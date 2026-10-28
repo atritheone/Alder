@@ -202,6 +202,27 @@ def test_uploaded_asset_cannot_be_served_from_another_project(tmp_path):
         store.asset_path(second["id"], asset["id"])
 
 
+def test_image_collection_does_not_advance_or_overwrite_an_editing_session(tmp_path):
+    from fastapi.testclient import TestClient
+    from alder.app import create_app
+    with TestClient(create_app(tmp_path, session_token="")) as client:
+        project = client.post('/api/projects', json={'template': 'blank', 'name': 'Images'}).json()
+        original_revision = project['revision']
+        response = client.post(f"/api/projects/{project['id']}/assets?register=false", files={'file': ('image.png', b'collected image', 'application/octet-stream')})
+        assert response.status_code == 200
+        asset = response.json()
+        assert asset['mime'] == 'image/png'
+        stored = client.get(f"/api/projects/{project['id']}").json()
+        assert stored['revision'] == original_revision
+        assert not stored['assets']
+        project['assets'].append(asset)
+        project['clips'][0]['document'] = text_document('Typed during collection')
+        saved = client.put(f"/api/projects/{project['id']}", json={'project': project, 'expectedRevision': original_revision})
+        assert saved.status_code == 200
+        assert saved.json()['clips'][0]['text'] == 'Typed during collection'
+        assert client.get(asset['url']).content == b'collected image'
+
+
 def test_api_import_export_and_preview(tmp_path):
     from fastapi.testclient import TestClient
     from alder.app import create_app
@@ -306,7 +327,9 @@ def test_named_styles_and_null_inheritance_survive_project_archive(tmp_path):
     archive = store.save_archive(saved["id"], str(tmp_path / "styles.alder"))
     reopened = Store(tmp_path / "two").open_archive(str(archive))
     assert reopened["styles"] == styles
-    assert reopened["clips"][0]["document"] == document
+    assert reopened["clips"][0]["document"] == saved["clips"][0]["document"]
+    assert reopened["clips"][0]["document"]["content"][0]["attrs"]["styleId"] == "lead"
+    assert reopened["clips"][0]["document"]["content"][0]["content"] == document["content"][0]["content"]
     assert reopened["clips"][0]["text"] == "A named term"
 
 

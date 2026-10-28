@@ -1,3 +1,5 @@
+import { pageFrame } from "./sectionLayout";
+import type { FlowPage } from "./pageFlow";
 import {
   useEffect,
   useLayoutEffect,
@@ -26,6 +28,7 @@ type Drag = {
 
 export default function PageArrangement({
   snapshots,
+  pages,
   layout,
   zoom,
   onZoom,
@@ -34,6 +37,7 @@ export default function PageArrangement({
   onMoveUnit,
 }: {
   snapshots: string[];
+  pages: FlowPage[];
   layout: PageLayout;
   zoom: number;
   onZoom: (update: (zoom: number) => number) => void;
@@ -41,11 +45,26 @@ export default function PageArrangement({
   areaRef: RefObject<HTMLDivElement | null>;
   onMoveUnit: (unit: ArrangementUnit, destination: number) => void;
 }) {
+  const pageLayout = (index: number) => pageFrame(pages, index, layout).layout;
+  const maxWidth = Math.max(
+    layout.width,
+    ...pages.map((page) => page.frame?.layout.width || layout.width),
+  );
+  const maxHeight = Math.max(
+    layout.height,
+    ...pages.map((page) => page.frame?.layout.height || layout.height),
+  );
   const gridRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<Drag | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const units = useUnitDragging(onMoveUnit, snapshots);
   const rendered = snapshots;
+  const canMovePage = (from: number, to: number) =>
+    !!pages[from] &&
+    !!pages[to] &&
+    pages[from].to > pages[from].from &&
+    pages[to].to > pages[to].from &&
+    (pages[from].section ?? 0) === (pages[to].section ?? 0);
   const [selection, setSelection] = useState<{
     pages: number[];
     anchor: number;
@@ -226,6 +245,7 @@ export default function PageArrangement({
     const overlay = focusRef.current;
     if (!overlay) return;
     const fit = () => {
+      const layout = pageLayout(focusedPage!.index);
       const scale = Math.max(
         0.05,
         Math.min(
@@ -321,6 +341,7 @@ export default function PageArrangement({
         to = i;
       }
     });
+    if (!canMovePage(current.from, to)) to = current.from;
     const next = { ...current, x, y, clientX, clientY, to };
     dragRef.current = next;
     setDrag(next);
@@ -417,8 +438,8 @@ export default function PageArrangement({
   const order = snapshots.map((_, i) => i);
   if (drag) order.splice(drag.to, 0, order.splice(drag.from, 1)[0]);
   const displayScale = group ? (group.scale * zoom) / group.zoom : zoom * 0.35;
-  const width = layout.width * displayScale;
-  const height = layout.height * displayScale;
+  const width = maxWidth * displayScale;
+  const height = maxHeight * displayScale;
   const visiblePages = group ? group.pages : rendered.map((_, i) => i);
   return (
     <>
@@ -504,6 +525,35 @@ export default function PageArrangement({
                 key={i}
                 data-page={i}
                 aria-label={`Page ${i + 1}`}
+                tabIndex={0}
+                aria-keyshortcuts="Enter Shift+F10 Alt+ArrowUp Alt+ArrowDown"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    focusPage(i);
+                  } else if (
+                    event.key === "ContextMenu" ||
+                    (event.shiftKey && event.key === "F10")
+                  ) {
+                    event.preventDefault();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    event.currentTarget.dispatchEvent(
+                      new MouseEvent("contextmenu", {
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: rect.left + 12,
+                        clientY: rect.top + 12,
+                      }),
+                    );
+                  } else if (
+                    event.altKey &&
+                    ["ArrowUp", "ArrowDown"].includes(event.key)
+                  ) {
+                    event.preventDefault();
+                    const to = i + (event.key === "ArrowUp" ? -1 : 1);
+                    if (!group && canMovePage(i, to)) onMove(i, to);
+                  }
+                }}
                 style={{ transform }}
                 onDoubleClick={() => {
                   if (selection) return;
@@ -528,6 +578,16 @@ export default function PageArrangement({
                       {
                         label: "Focus page",
                         run: () => focusPage(i),
+                      },
+                      {
+                        label: "Move page earlier",
+                        disabled: !!group || !canMovePage(i, i - 1),
+                        run: () => onMove(i, i - 1),
+                      },
+                      {
+                        label: "Move page later",
+                        disabled: !!group || !canMovePage(i, i + 1),
+                        run: () => onMove(i, i + 1),
                       },
                       ...(group
                         ? [{ label: "Back to Arrangement", run: closeGroup }]
@@ -567,7 +627,7 @@ export default function PageArrangement({
                     units.start(event, unit);
                     return;
                   }
-                  if (group || units.active) return;
+                  if (group || units.active || !canMovePage(i, i)) return;
                   if (event.button !== 0 || dragRef.current) return;
                   event.preventDefault();
                   const grid = gridRef.current!;
@@ -600,7 +660,13 @@ export default function PageArrangement({
                   event.currentTarget.setPointerCapture(event.pointerId);
                 }}
               >
-                <div className="page-miniature" style={{ width, height }}>
+                <div
+                  className="page-miniature"
+                  style={{
+                    width: pageLayout(i).width * displayScale,
+                    height: pageLayout(i).height * displayScale,
+                  }}
+                >
                   <div
                     aria-hidden="true"
                     style={{
@@ -632,8 +698,8 @@ export default function PageArrangement({
                   0.15,
                   Math.min(
                     (area.clientWidth - 72) /
-                      (layout.width * Math.min(2, selection.pages.length)),
-                    (area.clientHeight - 72) / layout.height,
+                      (maxWidth * Math.min(2, selection.pages.length)),
+                    (area.clientHeight - 72) / maxHeight,
                   ),
                 ),
               });
@@ -688,8 +754,8 @@ export default function PageArrangement({
               className="focused-page-sheet page-miniature"
               data-page={focusedPage.index}
               style={{
-                width: layout.width,
-                height: layout.height,
+                width: pageLayout(focusedPage.index).width,
+                height: pageLayout(focusedPage.index).height,
               }}
             >
               <div

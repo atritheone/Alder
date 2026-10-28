@@ -1,0 +1,4 @@
+{
+  "headingSizes": [24, 20, 16, 14, 12, 12],
+  "heading": { "lineHeight": 1.2, "spaceBefore": 12, "spaceAfter": 8 }
+}

@@ -1,5 +1,67 @@
+import SectionDialog from "./SectionDialog";
+import {
+  validSection,
+  sectionBreakSpec,
+  settingsForLayout,
+  sectionLayout,
+  documentCanvasWidth,
+  pageFrame,
+  pageCanvasHeight,
+  pageAtY,
+  type SectionSettings,
+} from "./sectionLayout";
 import { speechText, type SpeechText } from "./speechText";
+import { pageGeometryCSS } from "./pageGeometry";
+import { tableHeaderHTML } from "./tablePageHeaders";
+import { PageFurniture } from "./pageFurniture";
+import { editorFontPoints } from "./documentFormatting";
+import {
+  selectionFormatting,
+  setTextStyle,
+  setParagraph,
+  formattingCommands,
+} from "./editorCommands";
+import { rememberEditorSession, editorSession } from "./editorSessions";
+import ParagraphDialog from "./ParagraphDialog";
+import FontSizeField from "./FontSizeField";
+import TextColourDialog from "./TextColourDialog";
+import { blockIdentities } from "./blockIdentities";
+import { clipboardSlice, type PasteMode } from "./pasteText";
+import InsertTableDialog from "./InsertTableDialog";
+import ImageDialog from "./ImageDialog";
+import TableDialog from "./TableDialog";
+import {
+  AlderTableView,
+  tableCellAttributes,
+  tableSpec,
+  rowSpec,
+  selectedTableProperties,
+  setTableProperties,
+  sizeTableColumns,
+  sortTableRows,
+  tableToText,
+  textToTable,
+  tableContext,
+} from "./tableFormatting";
+import { selectedImage, setImageProperties } from "./imageFormatting";
+import { moveTableRows, splitTable, joinTable } from "./tableStructure";
+import ListDialog from "./ListDialog";
+import {
+  selectedList,
+  setListFormatting,
+  numberedMarkers,
+  bulletMarkers,
+} from "./listFormatting";
+import { replaceMatches, type TextMatch } from "./findText";
+import {
+  copyFormatting,
+  hasCopiedFormatting,
+  pasteFormatting,
+} from "./formatClipboard";
+import { documentOutline, moveOutlineSection } from "./documentOutline";
 import { useStoredPreference } from "./useStoredPreference";
+import { typingAssistance } from "./typingAssistance";
+import { useTypingPreferences } from "./TypingSettings";
 import {
   proofreadingTransaction,
   type ProofreadingEdit,
@@ -42,6 +104,8 @@ import {
 } from "prosemirror-model";
 import {
   AllSelection,
+  type Selection,
+  NodeSelection,
   EditorState,
   Plugin,
   TextSelection,
@@ -49,17 +113,15 @@ import {
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
 import {
   baseKeymap,
-  toggleMark,
-  setBlockType,
   wrapIn,
   chainCommands,
   exitCode,
+  splitBlock,
 } from "prosemirror-commands";
 import { history, undo, redo, closeHistory } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import {
   addListNodes,
-  wrapInList,
   splitListItem,
   sinkListItem,
   liftListItem,
@@ -69,12 +131,21 @@ import {
   columnResizing,
   tableEditing,
   addRowAfter,
+  addRowBefore,
   addColumnAfter,
+  addColumnBefore,
+  deleteRow,
+  deleteColumn,
+  mergeCells,
+  splitCell,
+  toggleHeaderRow,
+  goToNextCell,
   deleteTable,
 } from "prosemirror-tables";
 import { dropCursor } from "prosemirror-dropcursor";
 import {
   paginatePages,
+  disposePageLayout,
   pageAtPosition,
   rearrangePages,
   PAGE_GAP,
@@ -100,12 +171,24 @@ import {
   WrapText,
   Pilcrow,
   SpellCheck,
+  MoreHorizontal,
 } from "lucide-react";
-import type { Annotation, DocNode, Idea, Project, StyleKind } from "./types";
+import type {
+  Annotation,
+  DocNode,
+  Idea,
+  Project,
+  StyleKind,
+  StyleProperties,
+} from "./types";
 import { mediaUrl } from "./api";
 import { projectText, projectedRange } from "./textProjection";
 import { styleDeclarations, styleSheet } from "./styleResolution";
 import { pageSnapshots } from "./pageSnapshots";
+import {
+  capturePagePublication,
+  type PagePublication,
+} from "./pagePublication";
 import { moveArrangementUnit, type ArrangementUnit } from "./arrangementUnits";
 
 const attrs = {
@@ -114,14 +197,24 @@ const attrs = {
   fontFamily: { default: null },
   fontSize: { default: null },
   lineHeight: { default: null },
+  lineSpacing: { default: null },
+  lineSpacingMode: { default: null },
+  keepWithNext: { default: null },
+  keepTogether: { default: null },
+  widowOrphan: { default: null },
+  pageBreakBefore: { default: null },
   spaceAfter: { default: null },
+  spaceBefore: { default: null },
   color: { default: null },
   leftIndent: { default: null },
+  rightIndent: { default: null },
   firstLineIndent: { default: null },
   indent: { default: null },
 };
 const points = (value: string) =>
-  value ? parseFloat(value) * (value.endsWith("px") ? 0.75 : 1) : null;
+  /^-?\d+(?:\.\d+)?(?:pt|px)?$/.test(value)
+    ? parseFloat(value) * (value.endsWith("px") ? 0.75 : 1)
+    : null;
 const blockDOMAttrs = (dom: HTMLElement) => ({
   styleId: dom.getAttribute("data-style"),
   align: dom.style.textAlign || null,
@@ -131,12 +224,32 @@ const blockDOMAttrs = (dom: HTMLElement) => ({
     ? Number(dom.style.lineHeight)
     : null,
   spaceAfter: points(dom.style.marginBottom),
+  spaceBefore: points(dom.style.marginTop),
   color: dom.style.color || null,
   leftIndent: points(dom.style.marginLeft),
+  rightIndent: points(dom.style.marginRight),
   firstLineIndent: points(dom.style.textIndent),
+  lineSpacingMode:
+    dom.getAttribute("data-line-spacing-mode") ||
+    (/^[\d.]+(?:pt|px)$/.test(dom.style.lineHeight) ? "exact" : null),
+  lineSpacing:
+    points(dom.getAttribute("data-line-spacing") || "") ??
+    (/^[\d.]+(?:pt|px)$/.test(dom.style.lineHeight)
+      ? points(dom.style.lineHeight)
+      : null),
+  keepWithNext: dom.style.breakAfter ? dom.style.breakAfter === "avoid" : null,
+  keepTogether: dom.style.breakInside
+    ? dom.style.breakInside === "avoid"
+    : null,
+  pageBreakBefore: dom.style.breakBefore
+    ? dom.style.breakBefore === "page"
+    : null,
+  widowOrphan: dom.style.widows ? Number(dom.style.widows) > 1 : null,
 });
 const blockDOM = (attributes: Record<string, any>) => ({
   "data-style": attributes.styleId,
+  "data-line-spacing-mode": attributes.lineSpacingMode,
+  "data-line-spacing": attributes.lineSpacing,
   style:
     styleDeclarations({
       ...attributes,
@@ -145,7 +258,8 @@ const blockDOM = (attributes: Record<string, any>) => ({
 });
 const baseSchema = new Schema({
   nodes: {
-    doc: { content: "block+" },
+    doc: { content: "(block | section_break)+" },
+    section_break: sectionBreakSpec,
     paragraph: {
       content: "inline*",
       group: "block",
@@ -216,6 +330,7 @@ const baseSchema = new Schema({
         alt: { default: "" },
         title: { default: null },
         width: { default: null },
+        align: { default: "left" },
       },
       parseDOM: [
         {
@@ -225,13 +340,25 @@ const baseSchema = new Schema({
             alt: dom.getAttribute("alt") || "",
             title: dom.getAttribute("title"),
             width: dom.getAttribute("width"),
+            align:
+              dom.getAttribute("data-image-align") ||
+              (dom.parentElement?.tagName === "FIGURE"
+                ? dom.parentElement.style.textAlign
+                : "") ||
+              "left",
             assetId: dom.getAttribute("data-asset-id"),
           }),
         },
       ],
       toDOM: (n) => [
         "figure",
-        {},
+        {
+          style:
+            "text-align:" +
+            (["left", "center", "right"].includes(n.attrs.align)
+              ? n.attrs.align
+              : "left"),
+        },
         [
           "img",
           {
@@ -241,7 +368,12 @@ const baseSchema = new Schema({
             alt: n.attrs.alt,
             title: n.attrs.title,
             width: n.attrs.width,
+            style:
+              n.attrs.width && Number.isFinite(Number(n.attrs.width))
+                ? `width:${Number(n.attrs.width)}px`
+                : null,
             "data-asset-id": n.attrs.assetId,
+            "data-image-align": n.attrs.align,
           },
         ],
       ],
@@ -304,9 +436,64 @@ nodes = addListNodes(nodes, "paragraph block*", "block").append(
   tableNodes({
     tableGroup: "block",
     cellContent: "block+",
-    cellAttributes: {},
+    cellAttributes: tableCellAttributes,
   }),
 );
+nodes = nodes.update("table", tableSpec(nodes.get("table")!));
+nodes = nodes.update("table_row", rowSpec(nodes.get("table_row")!));
+nodes.forEach((name, spec) => {
+  if (!["doc", "text", "hard_break"].includes(name))
+    nodes = nodes.update(name, {
+      ...spec,
+      attrs: { ...spec.attrs, blockId: { default: null } },
+    });
+});
+for (const name of ["ordered_list", "bullet_list"]) {
+  const spec = nodes.get(name)!;
+  const ordered = name === "ordered_list";
+  const tag = ordered ? "ol" : "ul";
+  const valid = (value: string) =>
+    (ordered ? [...numberedMarkers] : [...bulletMarkers]).includes(
+      value as never,
+    )
+      ? value
+      : null;
+  nodes = nodes.update(name, {
+    ...spec,
+    attrs: { ...spec.attrs, listStyle: { default: null } },
+    parseDOM: [
+      {
+        tag,
+        getAttrs: (dom) => ({
+          ...(ordered ? { order: Number(dom.getAttribute("start") || 1) } : {}),
+          listStyle: valid(
+            dom.style.listStyleType ||
+              (
+                {
+                  a: "lower-alpha",
+                  A: "upper-alpha",
+                  i: "lower-roman",
+                  I: "upper-roman",
+                  "1": "decimal",
+                } as Record<string, string>
+              )[dom.getAttribute("type") || ""] ||
+              "",
+          ),
+        }),
+      },
+    ],
+    toDOM: (node) => [
+      tag,
+      {
+        ...(ordered ? { start: node.attrs.order } : {}),
+        style: valid(node.attrs.listStyle)
+          ? `list-style-type:${node.attrs.listStyle}`
+          : null,
+      },
+      0,
+    ],
+  });
+}
 export const schema = new Schema({
   nodes,
   marks: baseSchema.spec.marks!.append({
@@ -314,8 +501,16 @@ export const schema = new Schema({
       parseDOM: [{ tag: "s" }, { tag: "del" }, { tag: "strike" }],
       toDOM: () => ["s", 0],
     },
-    subscript: { parseDOM: [{ tag: "sub" }], toDOM: () => ["sub", 0] },
-    superscript: { parseDOM: [{ tag: "sup" }], toDOM: () => ["sup", 0] },
+    subscript: {
+      excludes: "subscript superscript",
+      parseDOM: [{ tag: "sub" }],
+      toDOM: () => ["sub", 0],
+    },
+    superscript: {
+      excludes: "subscript superscript",
+      parseDOM: [{ tag: "sup" }],
+      toDOM: () => ["sup", 0],
+    },
     highlight: {
       attrs: { color: { default: "#f0dc8a" } },
       parseDOM: [
@@ -366,6 +561,11 @@ export function parseEditorDocument(input: DocNode): {
   try {
     const normalised = normaliseDoc(input);
     const validateAttributes = (node: DocNode) => {
+      if (
+        node.type === "section_break" &&
+        !validSection({ kind: "nextPage", page: {}, ...node.attrs })
+      )
+        throw new Error("Invalid section settings.");
       const supported = schema.nodes[node.type]?.spec.attrs || {};
       for (const key of Object.keys(node.attrs || {})) {
         if (!(key in supported))
@@ -436,6 +636,18 @@ export function namedStyleTransaction(
   return tr;
 }
 export type EditorHandle = {
+  getPagePublication: () => PagePublication;
+  getIdentity: () => string;
+  navigateHeading: (id: string) => void;
+  moveHeading: (source: string, target: string, after: boolean) => void;
+  getFormatting: () => StyleProperties | null;
+  format: (name: string) => void;
+  paragraph: () => void;
+  replaceMatches: (
+    matches: TextMatch[],
+    replacement: string,
+    expectedText: string,
+  ) => void;
   getDocumentPosition: () => { top: number; left: number; offset: number };
   restoreDocumentPosition: (position: {
     top: number;
@@ -485,6 +697,8 @@ type Props = {
   readingRange?: { start: number; end: number } | null;
   document: DocNode;
   identity: string;
+  projectId: string;
+  assets: Project["assets"];
   onChange: (document: DocNode, text: string) => void;
   onSelection: (
     word: string,
@@ -515,7 +729,7 @@ function refreshEditorDecorations(v: EditorView) {
     live.focusNode &&
     v.dom.contains(live.anchorNode) &&
     v.dom.contains(live.focusNode) &&
-    v.state.selection instanceof TextSelection
+    (v.state.selection instanceof TextSelection || live.isCollapsed)
   ) {
     try {
       const selection = TextSelection.between(
@@ -535,11 +749,34 @@ function refreshEditorDecorations(v: EditorView) {
 
 export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const editorScope = useId();
+  const [paragraphDialog, setParagraphDialog] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [tableDialog, setTableDialog] = useState(false);
+  const [imageDialog, setImageDialog] = useState<Record<string, any> | null>(
+    null,
+  );
+  const [tableProperties, setTablePropertiesDialog] = useState<{
+    initial: NonNullable<ReturnType<typeof selectedTableProperties>>;
+    doc: PMNode;
+    selection: EditorState["selection"];
+  } | null>(null);
+  const [listDialog, setListDialog] = useState<{
+    ordered: boolean;
+    order: number;
+    listStyle: string;
+    index: number;
+  } | null>(null);
+  const [colourDialog, setColourDialog] = useState(false);
   const directReadingRange = useRef<
     { start: number; end: number } | null | undefined
   >(undefined);
   const [caseMode, setCaseMode] = useState<CaseMode>("free");
   const inputCase = useRef<CaseMode>("free");
+  const typingPreferences = useTypingPreferences();
+  const typingPreferencesRef = useRef(typingPreferences);
+  typingPreferencesRef.current = typingPreferences;
   inputCase.current = caseMode;
   const spellcheckKey =
     props.caseScope === "document"
@@ -577,31 +814,35 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const [documentVersion, documentTick] = useState(0);
   const pageDecorations = useRef(DecorationSet.empty);
   const measuredPages = useRef<FlowPage[]>([]);
-  const lastPageMeasurement = useRef<{ doc: PMNode; key: string } | null>(null);
+  const lastPageMeasurement = useRef<{
+    doc: PMNode;
+    key: string;
+    layout: string;
+    flowKey: string;
+  } | null>(null);
+  const [sectionDialog, setSectionDialog] = useState<{
+    initial: SectionSettings;
+    doc: PMNode;
+    selection: Selection;
+    pos: number | null;
+  } | null>(null);
+  const canvasWidth = props.pageLayout
+    ? documentCanvasWidth(view.current?.state.doc, props.pageLayout)
+    : 0;
   const [flowPages, setFlowPages] = useState<FlowPage[]>([]);
+  const [flowHeaders, setFlowHeaders] = useState<string[]>([]);
   const [pageInset, setPageInset] = useState(0);
-  const selectedTextStyle = (state: EditorState) => {
-    let marks = state.storedMarks || state.selection.$from.marks();
-    if (!state.selection.empty) {
-      let found = false;
-      state.doc.nodesBetween(
-        state.selection.from,
-        state.selection.to,
-        (node) => {
-          if (found) return false;
-          if (node.isText) {
-            marks = node.marks;
-            found = true;
-          }
-        },
-      );
-    }
-    return schema.marks.text_style.isInSet(marks)?.attrs || {};
-  };
-  const currentFont =
-    (view.current && selectedTextStyle(view.current.state).fontFamily) ||
-    props.fontFamily ||
-    DOCUMENT_FONT;
+  const [pageDisplayScale, setPageDisplayScale] = useState(1);
+  const [pageFontVersion, setPageFontVersion] = useState(0);
+  const formatting = view.current
+    ? selectionFormatting(view.current.state, props.styles, {
+        fontFamily: props.fontFamily || DOCUMENT_FONT,
+        fontSize: editorFontPoints(props.fontSize),
+      })
+    : null;
+  const currentFont = formatting
+    ? formatting.fontFamily
+    : props.fontFamily || DOCUMENT_FONT;
   const fontCatalogue = useFontCatalogue(currentFont);
   const installedFonts = fontCatalogue.families;
   useEffect(() => {
@@ -622,13 +863,325 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   }, [props.document, props.styles, props.fontFamily, fontCatalogue.catalogue]);
   latest.current = props;
   decos.current = visibleAnnotations;
-  const command = (cmd: any) => {
+  const command = (cmd: import("prosemirror-state").Command) => {
     if (view.current && !blocked.current) {
+      refreshEditorDecorations(view.current);
       cmd(view.current.state, view.current.dispatch, view.current);
       view.current.focus();
     }
   };
   const editableView = () => (blocked.current ? null : view.current);
+  const runFormat = (name: string) => {
+    const v = editableView();
+    if (v) command(formattingCommands(v.state)[name].command);
+  };
+  const showParagraph = () => {
+    const v = editableView();
+    if (v)
+      setParagraphDialog(
+        selectionFormatting(v.state, latest.current.styles).paragraph,
+      );
+  };
+  const copyFormat = () => {
+    const v = editableView();
+    if (!v || latest.current.rawMode) return false;
+    refreshEditorDecorations(v);
+    const copied = copyFormatting(v.state, latest.current.styles, {
+      fontFamily: latest.current.fontFamily || DOCUMENT_FONT,
+      fontSize: editorFontPoints(latest.current.fontSize),
+      lineHeight: latest.current.pageLayout?.lineHeight || 1.7,
+    });
+    if (copied) {
+      setRangeWarning(
+        "Formatting copied. Paste formatting applies it to selected text; a whole paragraph or caret also receives paragraph formatting.",
+      );
+      v.focus();
+    }
+    return copied;
+  };
+  const tableCommands = [
+    { label: "Insert row above", command: addRowBefore },
+    { label: "Insert row below", command: addRowAfter },
+    { label: "Insert column left", command: addColumnBefore },
+    { label: "Insert column right", command: addColumnAfter },
+    { label: "Delete row", command: deleteRow },
+    { label: "Delete column", command: deleteColumn },
+    { label: "Merge cells", command: mergeCells },
+    { label: "Split cell", command: splitCell },
+    { label: "Toggle header row", command: toggleHeaderRow },
+    { label: "Move rows up", command: moveTableRows(-1) },
+    { label: "Move rows down", command: moveTableRows(1) },
+    { label: "Split table before this row", command: splitTable },
+    { label: "Join with previous table", command: joinTable(-1) },
+    { label: "Join with next table", command: joinTable(1) },
+    { label: "Sort by this column, ascending", command: sortTableRows(1) },
+    { label: "Sort by this column, descending", command: sortTableRows(-1) },
+    { label: "Convert table to text", command: tableToText() },
+    { label: "Delete table", command: deleteTable },
+  ];
+  const formatActions = () => {
+    const v = editableView();
+    if (!v || latest.current.rawMode) return [];
+    const commands = formattingCommands(v.state);
+    return [
+      ...(selectedImage(v.state)
+        ? [
+            {
+              label: "Image properties…",
+              run: () =>
+                setImageDialog({ ...selectedImage(v.state)!.node.attrs }),
+            },
+          ]
+        : []),
+      { label: "Paragraph…", run: showParagraph },
+      ...(selectedList(v.state)
+        ? [
+            {
+              label: "List…",
+              run: () => {
+                const current = selectedList(v.state);
+                if (current)
+                  setListDialog({
+                    ordered: current.node.type.name === "ordered_list",
+                    order: current.node.attrs.order || 1,
+                    listStyle:
+                      current.node.attrs.listStyle ||
+                      (current.node.type.name === "ordered_list"
+                        ? "decimal"
+                        : "disc"),
+                    index: current.index,
+                  });
+              },
+            },
+          ]
+        : []),
+      { label: "Text colour…", run: () => setColourDialog(true) },
+      { label: "Copy formatting", run: copyFormat },
+      {
+        label: "Paste formatting",
+        disabled: !hasCopiedFormatting() || !pasteFormatting()(v.state),
+        run: () => command(pasteFormatting()),
+      },
+      ...(
+        [
+          ["source", "Paste keeping formatting"],
+          ["destination", "Paste matching destination"],
+          ["plain", "Paste plain text"],
+        ] as const
+      ).map(([mode, label]) => ({ label, run: () => void paste(mode) })),
+      ...[
+        "left",
+        "center",
+        "right",
+        "justify",
+        "bullets",
+        "numbers",
+        "strike",
+        "subscript",
+        "superscript",
+        "highlight",
+        "clear",
+        "resetParagraph",
+      ].map((name) => ({
+        label: commands[name].label,
+        disabled: !commands[name].command(v.state),
+        run: () => runFormat(name),
+      })),
+      {
+        label: "Block quote",
+        run: () => command(wrapIn(schema.nodes.blockquote)),
+      },
+      {
+        label: "Insert image…",
+        run: () => latest.current.onImage(),
+      },
+      { label: "Insert table…", run: () => setTableDialog(true) },
+      {
+        label: "Convert tab-separated text to table",
+        disabled: !textToTable()(v.state),
+        run: () => command(textToTable()),
+      },
+      {
+        label: "Insert link…",
+        run: () => latest.current.onLink(),
+      },
+      {
+        label: "Insert page break",
+        run: () =>
+          command((state, dispatch) => {
+            dispatch?.(
+              state.tr.replaceSelectionWith(schema.nodes.page_break.create()),
+            );
+            return true;
+          }),
+      },
+      ...(latest.current.pageLayout
+        ? [
+            {
+              label: "Insert section break…",
+              disabled: v.state.selection.$from.depth > 1,
+              run: () => {
+                let active = latest.current.pageLayout!;
+                v.state.doc.forEach((node, pos) => {
+                  if (
+                    pos <= v.state.selection.from &&
+                    node.type.name === "section_break"
+                  )
+                    active = sectionLayout(active, node.attrs.page);
+                });
+                setSectionDialog({
+                  initial: {
+                    kind: "nextPage",
+                    page: settingsForLayout(active),
+                  },
+                  doc: v.state.doc,
+                  selection: v.state.selection,
+                  pos: null,
+                });
+              },
+            },
+            {
+              label: "Section properties…",
+              disabled:
+                !Array.from({ length: v.state.doc.childCount }, (_, i) =>
+                  v.state.doc.child(i),
+                ).some((n) => n.type.name === "section_break") ||
+                !(() => {
+                  let found = false;
+                  v.state.doc.forEach((n, p) => {
+                    if (
+                      p <= v.state.selection.from &&
+                      n.type.name === "section_break"
+                    )
+                      found = true;
+                  });
+                  return found;
+                })(),
+              run: () => {
+                let pos: number | null = null;
+                v.state.doc.forEach((node, at) => {
+                  if (
+                    at <= v.state.selection.from &&
+                    node.type.name === "section_break"
+                  )
+                    pos = at;
+                });
+                if (pos !== null)
+                  setSectionDialog({
+                    initial: v.state.doc.nodeAt(pos)!.attrs as SectionSettings,
+                    doc: v.state.doc,
+                    selection: v.state.selection,
+                    pos,
+                  });
+              },
+            },
+          ]
+        : []),
+      ...(deleteTable(v.state)
+        ? [
+            {
+              label: "Table properties…",
+              run: () => {
+                const initial = selectedTableProperties(v.state);
+                if (initial)
+                  setTablePropertiesDialog({
+                    initial,
+                    doc: v.state.doc,
+                    selection: v.state.selection,
+                  });
+              },
+            },
+            {
+              label: "Fit table to page",
+              run: () => {
+                const context = tableContext(v.state);
+                const node = context && v.nodeDOM(context.tableStart - 1);
+                const container = node instanceof HTMLElement ? node : v.dom;
+                const css = getComputedStyle(container);
+                const width =
+                  container.clientWidth -
+                  parseFloat(css.paddingLeft) -
+                  parseFloat(css.paddingRight);
+                if (context && context.map.width * 25 > width) {
+                  setRangeWarning(
+                    "This table has too many columns to fit at the minimum column width. Use a wider page or fewer columns.",
+                  );
+                  return;
+                }
+                command(sizeTableColumns(null));
+              },
+            },
+            {
+              label: "Distribute columns evenly",
+              run: () => {
+                const context = tableContext(v.state);
+                if (!context) return;
+                const dom = v.nodeDOM(
+                  context.tableStart - 1,
+                ) as HTMLElement | null;
+                const table = dom?.querySelector("table");
+                const width = table?.offsetWidth || v.dom.clientWidth;
+                command(
+                  sizeTableColumns(
+                    Array.from({ length: context.map.width }, () =>
+                      Math.max(25, Math.round(width / context.map.width)),
+                    ),
+                  ),
+                );
+              },
+            },
+            ...tableCommands.map((item) => ({
+              label: item.label,
+              disabled: !item.command(v.state),
+              run: () => command(item.command),
+            })),
+          ]
+        : []),
+    ];
+  };
+  const paste = async (mode: PasteMode) => {
+    const v = editableView();
+    if (!v) return;
+    const doc = v.state.doc,
+      range = v.state.selection;
+    try {
+      const contents = window.alder?.readClipboardContent
+        ? await window.alder.readClipboardContent()
+        : { text: await navigator.clipboard.readText(), html: "" };
+      if (
+        v !== view.current ||
+        v.state.doc !== doc ||
+        !v.state.selection.eq(range)
+      )
+        throw new Error(
+          "The text changed before paste completed. Select the destination again.",
+        );
+      let notice = "";
+      const slice = clipboardSlice(
+        schema,
+        contents.text,
+        contents.html,
+        latest.current.rawMode ? "plain" : mode,
+        (message) => {
+          notice = message;
+        },
+        new Set(latest.current.styles?.map((style) => style.id)),
+        new Map(
+          latest.current.assets.map((asset) => [
+            `/api/projects/${latest.current.projectId}/assets/${asset.id}`,
+            asset.id,
+          ]),
+        ),
+      );
+      v.dispatch(
+        closeHistory(v.state.tr).replaceSelection(slice).scrollIntoView(),
+      );
+      if (notice) setRangeWarning(notice);
+      v.focus();
+    } catch (error) {
+      setRangeWarning((error as Error).message);
+    }
+  };
   const selectionRange = (v: EditorView) => {
     const span = selection.current || v.state.selection;
     if (
@@ -665,6 +1218,56 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   useImperativeHandle(
     ref,
     () => ({
+      getPagePublication() {
+        const v = editableView();
+        const layout = latest.current.pageLayout;
+        if (
+          !v ||
+          !layout ||
+          lastPageMeasurement.current?.doc !== v.state.doc ||
+          lastPageMeasurement.current.layout !==
+            JSON.stringify([
+              layout,
+              latest.current.fontFamily,
+              latest.current.fontSize,
+              latest.current.styles,
+            ]) ||
+          document.fonts.status !== "loaded"
+        )
+          throw new Error("Wait for the current document layout to finish.");
+        return capturePagePublication(
+          v,
+          layout,
+          measuredPages.current,
+          latest.current.identity,
+        );
+      },
+      getIdentity: () => latest.current.identity,
+      navigateHeading(id) {
+        const v = editableView();
+        if (!v) return;
+        const heading = documentOutline(v.state.doc).find(
+          (item) => item.id === id,
+        );
+        if (!heading) return;
+        v.dispatch(
+          v.state.tr
+            .setSelection(
+              TextSelection.near(v.state.doc.resolve(heading.from + 1)),
+            )
+            .scrollIntoView(),
+        );
+        v.focus();
+      },
+      moveHeading(source, target, after) {
+        const v = editableView();
+        if (!v) return;
+        const tr = moveOutlineSection(v.state, source, target, after);
+        if (tr) {
+          v.dispatch(tr);
+          v.dispatch(closeHistory(v.state.tr));
+        }
+      },
       getDocumentPosition() {
         const v = view.current;
         const viewport = v?.dom.closest<HTMLElement>(".editor-scroll");
@@ -712,6 +1315,31 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       setReadingRange(range) {
         directReadingRange.current = range;
         if (view.current) view.current.updateState(view.current.state);
+      },
+      format: runFormat,
+      getFormatting() {
+        const v = editableView();
+        if (!v) return null;
+        const values = selectionFormatting(v.state, latest.current.styles, {
+          fontFamily: latest.current.fontFamily || "Cambria",
+          fontSize: editorFontPoints(latest.current.fontSize),
+        });
+        return {
+          ...Object.fromEntries(
+            Object.entries(values.paragraph).filter(
+              ([, value]) => value != null,
+            ),
+          ),
+          ...(values.fontFamily ? { fontFamily: values.fontFamily } : {}),
+          ...(values.fontSize ? { fontSize: Number(values.fontSize) } : {}),
+        };
+      },
+      paragraph: showParagraph,
+      replaceMatches(matches, replacement, expectedText) {
+        const v = editableView();
+        if (!v) throw new Error("The document is not editable.");
+        v.dispatch(replaceMatches(v.state, matches, replacement, expectedText));
+        v.focus();
       },
       replaceAll(find, replacement) {
         const v = editableView();
@@ -805,12 +1433,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         if (!target) return;
         v.dispatch(
           v.state.tr.setSelection(
-            TextSelection.near(v.state.doc.resolve(target.from)),
+            TextSelection.findFrom(v.state.doc.resolve(target.from), 1, true) ||
+              TextSelection.atEnd(v.state.doc),
           ),
         );
         const scroll = host.current?.closest(".editor-scroll");
         scroll?.scrollTo({
-          top: page * (layout.height + PAGE_GAP) * layout.zoom,
+          top: pageFrame(pages, page, layout).top * layout.zoom,
           behavior: "smooth",
         });
       },
@@ -825,10 +1454,18 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             from,
             to,
           );
-          if (next !== v.state.doc)
+          if (next !== v.state.doc) {
             v.dispatch(
-              v.state.tr.replaceWith(0, v.state.doc.content.size, next.content),
+              closeHistory(
+                v.state.tr.replaceWith(
+                  0,
+                  v.state.doc.content.size,
+                  next.content,
+                ),
+              ),
             );
+            v.dispatch(closeHistory(v.state.tr));
+          }
         } catch (e) {
           setRangeWarning((e as Error).message);
         }
@@ -881,18 +1518,24 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         const span = textRange(v, start, end);
         if (!span) return;
         v.dispatch(
-          v.state.tr.setSelection(
-            TextSelection.create(v.state.doc, span.from, span.to),
-          ),
+          v.state.tr
+            .setSelection(TextSelection.create(v.state.doc, span.from, span.to))
+            .scrollIntoView(),
         );
         v.focus();
       },
       image(src, assetId, alt) {
         const v = editableView();
         if (!v) return;
+        const selected = selectedImage(v.state);
         v.dispatch(
-          v.state.tr.replaceSelectionWith(
-            schema.nodes.image.create({ src, assetId, alt }),
+          closeHistory(v.state.tr).replaceSelectionWith(
+            schema.nodes.image.create({
+              ...(selected?.node.attrs || {}),
+              src,
+              assetId,
+              alt: selected?.node.attrs.alt || alt,
+            }),
           ),
         );
         v.focus();
@@ -970,6 +1613,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       state: EditorState.create({
         doc,
         plugins: [
+          typingAssistance(() =>
+            !latest.current.rawMode && inputCase.current === "free"
+              ? typingPreferencesRef.current
+              : null,
+          ),
           caseInputPlugin(
             () => inputCase.current,
             () => view.current?.composing || false,
@@ -982,6 +1630,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             ? [persistentCaret()]
             : []),
           history(),
+          blockIdentities(),
           keymap({
             "Mod-Enter": () => {
               if (!latest.current.onToggleSpeech) return false;
@@ -995,27 +1644,71 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             "Mod-z": undo,
             "Mod-y": redo,
             "Mod-Shift-z": redo,
-            "Mod-b": props.rawMode
-              ? () => true
-              : toggleMark(schema.marks.strong),
-            "Mod-i": props.rawMode ? () => true : toggleMark(schema.marks.em),
-            "Mod-u": props.rawMode
-              ? () => true
-              : toggleMark(schema.marks.underline),
-            Enter: splitListItem(schema.nodes.list_item),
+            "Mod-Shift-v": () => {
+              void paste("plain");
+              return true;
+            },
+            "Mod-Alt-c": () => (latest.current.rawMode ? false : copyFormat()),
+            "Mod-Alt-v": (state, dispatch) =>
+              latest.current.rawMode
+                ? false
+                : pasteFormatting()(state, dispatch),
+            ...(!props.rawMode
+              ? Object.fromEntries(
+                  Object.values(formattingCommands(EditorState.create({ doc })))
+                    .filter((c) => c.shortcut)
+                    .map((c) => [c.shortcut!, c.command]),
+                )
+              : {
+                  "Mod-b": () => true,
+                  "Mod-i": () => true,
+                  "Mod-u": () => true,
+                }),
+            Enter: chainCommands(
+              splitListItem(schema.nodes.list_item),
+              (state, dispatch) => {
+                const { $from, empty } = state.selection;
+                const next = latest.current.styles?.find(
+                  (style) => style.id === $from.parent.attrs.styleId,
+                )?.nextStyle;
+                if (
+                  !empty ||
+                  $from.parentOffset !== $from.parent.content.size ||
+                  !next ||
+                  !latest.current.styles?.some((style) => style.id === next)
+                )
+                  return false;
+                return splitBlock(
+                  state,
+                  dispatch &&
+                    ((tr) => {
+                      tr.setNodeMarkup(
+                        tr.selection.$from.before(),
+                        schema.nodes.paragraph,
+                        { styleId: next },
+                      );
+                      dispatch(tr);
+                    }),
+                );
+              },
+            ),
             Tab: props.rawMode
               ? (state, dispatch) => {
                   dispatch?.(state.tr.insertText("\t"));
                   return true;
                 }
               : chainCommands(
+                  goToNextCell(1),
                   sinkListItem(schema.nodes.list_item),
                   (state, dispatch) => {
                     dispatch?.(state.tr.insertText("\t"));
                     return true;
                   },
                 ),
-            "Shift-Tab": liftListItem(schema.nodes.list_item),
+            "Shift-Tab": chainCommands(
+              goToNextCell(-1),
+              liftListItem(schema.nodes.list_item),
+            ),
             "Shift-Enter": props.rawMode
               ? baseKeymap.Enter
               : chainCommands(exitCode, (state, dispatch) => {
@@ -1028,7 +1721,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                 }),
           }),
           keymap(baseKeymap),
-          columnResizing(),
+          columnResizing({ View: AlderTableView, defaultCellMinWidth: 25 }),
           tableEditing(),
           dropCursor(),
           readingHighlight(
@@ -1143,11 +1836,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         );
         if (docChanged) {
           annotationSource.current = null;
-          for (const transaction of applied.transactions)
+          for (const transaction of applied.transactions) {
             pageDecorations.current = pageDecorations.current.map(
               transaction.mapping,
               transaction.doc,
             );
+          }
         }
         v.updateState(next);
         if (docChanged) {
@@ -1166,8 +1860,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             parent = s.$from.parent.textContent,
             at = s.from - start;
           const left =
-              parent.slice(0, at).match(/[\p{L}\p{N}â€™'-]+$/u)?.[0] || "",
-            right = parent.slice(at).match(/^[\p{L}\p{N}â€™'-]+/u)?.[0] || "";
+              parent.slice(0, at).match(/[\p{L}\p{N}\u2019'-]+$/u)?.[0] || "",
+            right =
+              parent.slice(at).match(/^[\p{L}\p{N}\u2019'-]+/u)?.[0] || "";
           word = left + right;
           if (word)
             selection.current = {
@@ -1183,21 +1878,73 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         tick((n) => n + 1);
       },
       handlePaste(v, event) {
-        if (!latest.current.rawMode) return false;
         const text = event.clipboardData?.getData("text/plain");
+        const html = event.clipboardData?.getData("text/html") || "";
         if (text === undefined) return false;
+        if (!text && !html) {
+          if (event.clipboardData?.files.length) {
+            setRangeWarning(
+              "Use Insert image to collect image files from the clipboard.",
+            );
+            return true;
+          }
+          return false;
+        }
         refreshEditorDecorations(v);
-        const doc = schema.nodeFromJSON({
-          type: "doc",
-          content: text.split(/\r?\n/).map((line) => ({
-            type: "paragraph",
-            content: line ? [{ type: "text", text: line }] : [],
-          })),
-        });
-        v.dispatch(v.state.tr.replaceSelection(Slice.maxOpen(doc.content)));
+        try {
+          let notice = "";
+          const slice = clipboardSlice(
+            schema,
+            text,
+            html,
+            latest.current.rawMode ? "plain" : "source",
+            (message) => {
+              notice = message;
+            },
+            new Set(latest.current.styles?.map((style) => style.id)),
+            new Map(
+              latest.current.assets.map((asset) => [
+                `/api/projects/${latest.current.projectId}/assets/${asset.id}`,
+                asset.id,
+              ]),
+            ),
+          );
+          v.dispatch(
+            closeHistory(v.state.tr).replaceSelection(slice).scrollIntoView(),
+          );
+          if (notice) setRangeWarning(notice);
+        } catch (error) {
+          setRangeWarning((error as Error).message);
+        }
         return true;
       },
       handleDOMEvents: {
+        keydown(_view, event) {
+          // AltGr produces Ctrl+Alt on several layouts. Leave its character
+          // input to the browser instead of interpreting it as format paste.
+          return (
+            event.getModifierState("AltGraph") &&
+            ["c", "v"].includes(event.key.toLowerCase())
+          );
+        },
+        dblclick(v, event) {
+          if (
+            !v.editable ||
+            latest.current.rawMode ||
+            !(event.target instanceof HTMLImageElement)
+          )
+            return false;
+          const figure = event.target.closest("figure");
+          if (!figure) return false;
+          const pos = v.posAtDOM(figure, 0);
+          if (v.state.doc.nodeAt(pos)?.type.name !== "image") return false;
+          v.dispatch(
+            v.state.tr.setSelection(NodeSelection.create(v.state.doc, pos)),
+          );
+          setImageDialog({ ...v.state.doc.nodeAt(pos)!.attrs });
+          event.preventDefault();
+          return true;
+        },
         compositionend(v) {
           setTimeout(() => {
             if (!v.isDestroyed)
@@ -1260,6 +2007,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                   v.focus();
                 },
               },
+              ...formatActions(),
             ],
             { label: "Text actions" },
           );
@@ -1329,7 +2077,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
     });
     view.current = v;
+    const cached = editorSession(props.identity);
+    if (!blocked.current && cached?.doc.eq(doc))
+      v.updateState(cached.reconfigure({ plugins: v.state.plugins }));
+    tick((n) => n + 1);
     return () => {
+      if (!blocked.current) rememberEditorSession(props.identity, v.state);
+      disposePageLayout(v);
       v.destroy();
       view.current = null;
       selection.current = null;
@@ -1388,13 +2142,21 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         scroll.clientWidth -
         parseFloat(style.paddingLeft) -
         parseFloat(style.paddingRight);
-      setPageInset(Math.max(0, (available / layout.zoom - layout.width) / 2));
+      let scale = 1;
+      for (
+        let element: HTMLElement | null = scroll;
+        element;
+        element = element.parentElement
+      )
+        scale *= Number(getComputedStyle(element).zoom) || 1;
+      setPageDisplayScale(scale);
+      setPageInset(Math.max(0, (available - canvasWidth * layout.zoom) / 2));
     };
     centrePage();
     const observer = new ResizeObserver(centrePage);
     observer.observe(scroll);
     return () => observer.disconnect();
-  }, [props.pageLayout?.width, props.pageLayout?.zoom, props.layoutVisible]);
+  }, [canvasWidth, props.pageLayout?.zoom, props.layoutVisible]);
   useLayoutEffect(() => {
     const v = view.current;
     if (
@@ -1412,6 +2174,17 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       frame = requestAnimationFrame(() => {
         if (!view.current || !v.dom.getBoundingClientRect().width) return;
         const settings = latest.current;
+        const flowKey = JSON.stringify([
+          settings.pageLayout?.width,
+          settings.pageLayout?.height,
+          settings.pageLayout?.margin,
+          settings.pageLayout?.margins,
+          settings.pageLayout?.lineHeight,
+          settings.fontFamily,
+          settings.fontSize,
+          namedStyles.css,
+          v.dom.offsetWidth,
+        ]);
         const key = JSON.stringify([
           settings.pageLayout,
           settings.capturePages,
@@ -1420,6 +2193,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           settings.fontSize,
           namedStyles.css,
           v.dom.getBoundingClientRect().width,
+          v.dom.closest(".flow-canvas")?.getBoundingClientRect().width,
         ]);
         if (
           !forceMeasurement &&
@@ -1427,30 +2201,71 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           lastPageMeasurement.current.key === key
         )
           return;
+        const invalidateFlow =
+          forceMeasurement || lastPageMeasurement.current?.flowKey !== flowKey;
         forceMeasurement = false;
         const viewport = v.dom.closest<HTMLElement>(".editor-scroll");
         const scrollTop = viewport?.scrollTop;
         const scrollLeft = viewport?.scrollLeft;
         refreshEditorDecorations(v);
         const layout = latest.current.pageLayout!;
-        const pages = paginatePages(v, layout, (decorations) => {
-          pageDecorations.current = decorations;
-          v.updateState(v.state);
-        });
+        const pages = paginatePages(
+          v,
+          layout,
+          (decorations) => {
+            pageDecorations.current = decorations;
+            v.updateState(v.state);
+          },
+          invalidateFlow,
+        );
         if (viewport && scrollTop !== undefined && scrollLeft !== undefined) {
           viewport.scrollTop = scrollTop;
           viewport.scrollLeft = scrollLeft;
         }
         measuredPages.current = pages;
+        const headerCache = new Map<number, string>();
+        const headers = pages.map((page) => {
+          if (!page.header) return "";
+          if (!headerCache.has(page.header.table))
+            headerCache.set(
+              page.header.table,
+              tableHeaderHTML(v, page.frame?.layout || layout, page.header),
+            );
+          return headerCache.get(page.header.table)!;
+        });
+        setFlowHeaders((old) =>
+          old.length === headers.length &&
+          old.every((value, index) => value === headers[index])
+            ? old
+            : headers,
+        );
         setFlowPages((old) =>
           JSON.stringify(old) === JSON.stringify(pages) ? old : pages,
         );
         latest.current.onPages?.(pages);
         if (latest.current.capturePages)
           latest.current.onPageSnapshots?.(
-            pageSnapshots(v.dom, layout, pages.length, v),
+            pageSnapshots(
+              v.dom,
+              layout,
+              pages,
+              v,
+              undefined,
+              undefined,
+              headers,
+            ),
           );
-        lastPageMeasurement.current = { doc: v.state.doc, key };
+        lastPageMeasurement.current = {
+          doc: v.state.doc,
+          key,
+          flowKey,
+          layout: JSON.stringify([
+            layout,
+            settings.fontFamily,
+            settings.fontSize,
+            settings.styles,
+          ]),
+        };
       });
     };
     measure();
@@ -1467,84 +2282,77 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         if (previous !== undefined && Math.abs(width - previous) > 0.5)
           changed = true;
       }
-      if (changed) measure(true);
+      if (changed) measure();
     });
     observer.observe(v.dom);
     const viewport = v.dom.closest(".editor-scroll");
     if (viewport) observer.observe(viewport);
     const assetsChanged = () => measure(true);
+    const fontsChanged = () => {
+      setPageFontVersion((version) => version + 1);
+      measure(true);
+    };
     v.dom.addEventListener("load", assetsChanged, true);
-    document.fonts.addEventListener("loadingdone", assetsChanged);
-    window.addEventListener("alder-fonts-changed", assetsChanged);
+    document.fonts.addEventListener("loadingdone", fontsChanged);
+    window.addEventListener("alder-fonts-changed", fontsChanged);
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
       v.dom.removeEventListener("load", assetsChanged, true);
-      document.fonts.removeEventListener("loadingdone", assetsChanged);
-      window.removeEventListener("alder-fonts-changed", assetsChanged);
+      document.fonts.removeEventListener("loadingdone", fontsChanged);
+      window.removeEventListener("alder-fonts-changed", fontsChanged);
     };
   }, [
     documentVersion,
+    canvasWidth,
     props.identity,
     props.document,
     props.pageLayout?.width,
     props.pageLayout?.height,
     props.pageLayout?.margin,
+    props.pageLayout?.margins?.top,
+    props.pageLayout?.margins?.right,
+    props.pageLayout?.margins?.bottom,
+    props.pageLayout?.margins?.left,
     props.pageLayout?.lineHeight,
     props.pageLayout?.zoom,
+    props.pageLayout?.header,
+    props.pageLayout?.footer,
+    props.pageLayout?.firstPageNumber,
+    pageDisplayScale,
     props.layoutVisible,
     props.capturePages,
     props.styles,
     props.fontSize,
     props.fontFamily,
   ]);
-  const mark = (name: string) =>
-    view.current
-      ? Boolean(
-          schema.marks[name].isInSet(
-            view.current.state.storedMarks ||
-              view.current.state.selection.$from.marks(),
-          ),
-        )
-      : false;
+  const mark = (name: string) => formatting?.marks[name] || false;
   const setFont = (name: string, value: any) => {
     const v = editableView();
     if (!v) return;
-    const previous = selectedTextStyle(v.state);
-    const m = schema.marks.text_style.create({ ...previous, [name]: value });
-    const tr = v.state.tr;
-    if (v.state.selection.empty) tr.addStoredMark(m);
-    else tr.addMark(v.state.selection.from, v.state.selection.to, m);
-    v.dispatch(tr);
-    v.focus();
+    command(setTextStyle({ [name]: value }));
   };
   const align = (value: string) => {
     const v = editableView();
     if (!v) return;
-    const tr = v.state.tr;
-    v.state.doc.nodesBetween(
-      v.state.selection.from,
-      v.state.selection.to,
-      (n, pos) => {
-        if (n.isTextblock)
-          tr.setNodeMarkup(pos, undefined, { ...n.attrs, align: value });
-      },
-    );
-    v.dispatch(tr);
-    v.focus();
+    command(setParagraph({ align: value }));
   };
-  const table = () => {
+  const table = (rows: number, columns: number) => {
     const v = editableView();
     if (!v) return;
     const cell = () =>
       schema.nodes.table_cell.create(null, schema.nodes.paragraph.create());
     const row = () =>
-      schema.nodes.table_row.create(null, [cell(), cell(), cell()]);
+      schema.nodes.table_row.create(
+        null,
+        Array.from({ length: columns }, cell),
+      );
     v.dispatch(
       v.state.tr.replaceSelectionWith(
-        schema.nodes.table.create(null, [row(), row(), row()]),
+        schema.nodes.table.create(null, Array.from({ length: rows }, row)),
       ),
     );
+    setTableDialog(false);
     v.focus();
   };
   return (
@@ -1558,6 +2366,191 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       data-alder-editor={editorScope}
     >
       <style>{namedStyles.css}</style>
+      {colourDialog && (
+        <TextColourDialog
+          onApply={(colour) => {
+            command(setTextStyle({ color: colour }));
+            setColourDialog(false);
+          }}
+          onClose={() => {
+            setColourDialog(false);
+            view.current?.focus();
+          }}
+        />
+      )}
+      {tableDialog && (
+        <InsertTableDialog
+          onInsert={table}
+          onClose={() => {
+            setTableDialog(false);
+            view.current?.focus();
+          }}
+        />
+      )}
+      {tableProperties && (
+        <TableDialog
+          initial={tableProperties.initial}
+          onClose={() => {
+            setTablePropertiesDialog(null);
+            view.current?.focus();
+          }}
+          onApply={(values) => {
+            const v = editableView();
+            const applied =
+              v &&
+              v.state.doc === tableProperties.doc &&
+              v.state.selection.eq(tableProperties.selection) &&
+              setTableProperties(tableProperties.initial.identity, values)(
+                v.state,
+                v.dispatch,
+              );
+            if (!applied)
+              setRangeWarning(
+                "The selected table changed. Select it again to edit its properties.",
+              );
+            setTablePropertiesDialog(null);
+            v?.focus();
+          }}
+        />
+      )}
+      {imageDialog && (
+        <ImageDialog
+          initial={imageDialog}
+          assets={props.assets}
+          onClose={() => {
+            setImageDialog(null);
+            view.current?.focus();
+          }}
+          onApply={(values) => {
+            const v = editableView();
+            const asset = values.assetId
+              ? latest.current.assets.find(
+                  (asset) => asset.id === values.assetId,
+                )
+              : null;
+            if (values.assetId && !asset) {
+              setRangeWarning("That image is no longer available.");
+              return;
+            }
+            const applied =
+              v &&
+              setImageProperties(imageDialog.blockId, {
+                ...values,
+                ...(asset
+                  ? {
+                      src: `/api/projects/${latest.current.projectId}/assets/${asset.id}`,
+                    }
+                  : {}),
+              })(v.state, v.dispatch);
+            setImageDialog(null);
+            if (!applied)
+              setRangeWarning(
+                "The selected image changed. Select it again to edit its properties.",
+              );
+            v?.focus();
+          }}
+        />
+      )}
+      {listDialog && (
+        <ListDialog
+          ordered={listDialog.ordered}
+          initial={listDialog}
+          onClose={() => {
+            setListDialog(null);
+            view.current?.focus();
+          }}
+          onApply={(marker, order, fromItem) => {
+            command(setListFormatting(marker, order, fromItem));
+            setListDialog(null);
+          }}
+        />
+      )}
+      {sectionDialog && (
+        <SectionDialog
+          initial={sectionDialog.initial}
+          editing={sectionDialog.pos !== null}
+          onRemove={() => {
+            const v = editableView();
+            if (
+              v &&
+              v.state.doc === sectionDialog.doc &&
+              sectionDialog.pos !== null
+            ) {
+              const pos = sectionDialog.pos;
+              const tr = v.state.tr.delete(
+                pos,
+                pos + v.state.doc.nodeAt(pos)!.nodeSize,
+              );
+              tr.setSelection(
+                TextSelection.near(
+                  tr.doc.resolve(Math.min(pos, tr.doc.content.size)),
+                ),
+              );
+              v.dispatch(closeHistory(tr).scrollIntoView());
+              v.dispatch(closeHistory(v.state.tr));
+            } else
+              setRangeWarning(
+                "The document changed. Open section settings again.",
+              );
+            setSectionDialog(null);
+            requestAnimationFrame(() => view.current?.focus());
+          }}
+          onClose={() => {
+            setSectionDialog(null);
+            requestAnimationFrame(() => view.current?.focus());
+          }}
+          onApply={(value) => {
+            const v = editableView();
+            if (v && v.state.doc === sectionDialog.doc) {
+              const tr = v.state.tr.setSelection(sectionDialog.selection);
+              if (sectionDialog.pos === null) {
+                const boundary = schema.nodes.section_break.create(value);
+                tr.replaceSelectionWith(boundary);
+                if (tr.doc.lastChild?.type.name === "section_break")
+                  tr.insert(
+                    tr.doc.content.size,
+                    schema.nodes.paragraph.create(),
+                  );
+                tr.doc.forEach((node, pos) => {
+                  if (node === boundary) {
+                    const next = TextSelection.findFrom(
+                      tr.doc.resolve(pos + node.nodeSize),
+                      1,
+                      true,
+                    );
+                    if (next) tr.setSelection(next);
+                  }
+                });
+              } else
+                tr.setNodeMarkup(sectionDialog.pos, undefined, {
+                  ...v.state.doc.nodeAt(sectionDialog.pos)!.attrs,
+                  ...value,
+                });
+              v.dispatch(closeHistory(tr).scrollIntoView());
+              v.dispatch(closeHistory(v.state.tr));
+              v.focus();
+            } else
+              setRangeWarning(
+                "The document changed. Open section settings again.",
+              );
+            setSectionDialog(null);
+            requestAnimationFrame(() => view.current?.focus());
+          }}
+        />
+      )}
+      {paragraphDialog && (
+        <ParagraphDialog
+          initial={paragraphDialog}
+          onClose={() => {
+            setParagraphDialog(null);
+            view.current?.focus();
+          }}
+          onApply={(values) => {
+            command(setParagraph(values));
+            setParagraphDialog(null);
+          }}
+        />
+      )}
       {(parseError || namedStyles.error || rangeWarning) && (
         <div
           className="editor-source-warning"
@@ -1584,24 +2577,47 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           <>
             <select
               aria-label="Paragraph type"
-              defaultValue="paragraph"
+              value={
+                formatting?.styleId
+                  ? `style:${formatting.styleId}`
+                  : formatting?.block || ""
+              }
               onChange={(e) =>
-                command(
-                  setBlockType(
-                    e.target.value === "paragraph"
-                      ? schema.nodes.paragraph
-                      : schema.nodes.heading,
-                    e.target.value === "paragraph"
-                      ? null
-                      : { level: Number(e.target.value) },
-                  ),
-                )
+                e.target.value.startsWith("style:")
+                  ? command((state, dispatch) => {
+                      dispatch?.(
+                        namedStyleTransaction(state, e.target.value.slice(6)),
+                      );
+                      return true;
+                    })
+                  : runFormat(
+                      e.target.value === "paragraph"
+                        ? "body"
+                        : `heading${e.target.value}`,
+                    )
               }
             >
+              <option value="" disabled>
+                Mixed
+              </option>
               <option value="paragraph">Body</option>
-              <option value="1">Heading 1</option>
-              <option value="2">Heading 2</option>
-              <option value="3">Heading 3</option>
+              {[1, 2, 3, 4, 5, 6].map((level) => (
+                <option key={level} value={level}>
+                  Heading {level}
+                </option>
+              ))}
+              {(props.styles || [])
+                .filter((style) => style.kind !== "character")
+                .map((style) => (
+                  <option key={style.id} value={`style:${style.id}`}>
+                    {style.name}
+                  </option>
+                ))}
+              {formatting?.block === "code_block" && (
+                <option value="code_block" disabled>
+                  Code
+                </option>
+              )}
             </select>
             <select
               aria-label="Font family"
@@ -1613,6 +2629,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               value={currentFont}
               onChange={(e) => setFont("fontFamily", e.target.value)}
             >
+              {!currentFont && (
+                <option value="" disabled>
+                  Mixed
+                </option>
+              )}
               {installedFonts.map((f) => (
                 <option key={f} value={f}>
                   {f}
@@ -1622,39 +2643,39 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                 </option>
               ))}
             </select>
-            <select
-              aria-label="Font size"
-              defaultValue="12"
-              onChange={(e) => setFont("fontSize", Number(e.target.value))}
-            >
-              {[9, 10, 11, 12, 14, 16, 18, 24, 32].map((f) => (
-                <option key={f}>{f}</option>
-              ))}
-            </select>
+            <FontSizeField
+              value={
+                formatting?.fontSize ?? String(editorFontPoints(props.fontSize))
+              }
+              onApply={(size) => setFont("fontSize", size)}
+            />
             <button
               data-help-label={shortcutLabel("Bold (Ctrl+B)")}
               aria-label="Bold"
+              aria-pressed={mark("strong")}
               className={mark("strong") ? "active" : ""}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => command(toggleMark(schema.marks.strong))}
+              onClick={() => runFormat("strong")}
             >
               <Bold />
             </button>
             <button
               data-help-label={shortcutLabel("Italic (Ctrl+I)")}
               aria-label="Italic"
+              aria-pressed={mark("em")}
               className={mark("em") ? "active" : ""}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => command(toggleMark(schema.marks.em))}
+              onClick={() => runFormat("em")}
             >
               <Italic />
             </button>
             <button
               data-help-label={shortcutLabel("Underline (Ctrl+U)")}
               aria-label="Underline"
+              aria-pressed={mark("underline")}
               className={mark("underline") ? "active" : ""}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => command(toggleMark(schema.marks.underline))}
+              onClick={() => runFormat("underline")}
             >
               <Underline />
             </button>
@@ -1662,6 +2683,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <button
               data-help-label="Align left"
               aria-label="Align left"
+              data-overflow
+              aria-pressed={formatting?.align === "left"}
               onClick={() => align("left")}
             >
               <AlignLeft />
@@ -1669,6 +2692,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <button
               data-help-label="Align centre"
               aria-label="Align centre"
+              data-overflow
+              aria-pressed={formatting?.align === "center"}
               onClick={() => align("center")}
             >
               <AlignCenter />
@@ -1676,6 +2701,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <button
               data-help-label="Align right"
               aria-label="Align right"
+              data-overflow
+              aria-pressed={formatting?.align === "right"}
               onClick={() => align("right")}
             >
               <AlignRight />
@@ -1683,6 +2710,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <button
               data-help-label="Justify"
               aria-label="Justify"
+              data-overflow
+              aria-pressed={formatting?.align === "justify"}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => align("justify")}
             >
@@ -1691,20 +2720,23 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <button
               data-help-label="Bullet list"
               aria-label="Bullet list"
-              onClick={() => command(wrapInList(schema.nodes.bullet_list))}
+              data-overflow
+              onClick={() => runFormat("bullets")}
             >
               <List />
             </button>
             <button
               data-help-label="Numbered list"
               aria-label="Numbered list"
-              onClick={() => command(wrapInList(schema.nodes.ordered_list))}
+              data-overflow
+              onClick={() => runFormat("numbers")}
             >
               <ListOrdered />
             </button>
             <button
               data-help-label="Block quote"
               aria-label="Block quote"
+              data-overflow
               onClick={() => command(wrapIn(schema.nodes.blockquote))}
             >
               <Quote />
@@ -1713,6 +2745,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <button
               data-help-label="Insert image"
               aria-label="Insert image"
+              data-overflow
               onClick={props.onImage}
             >
               <ImagePlus />
@@ -1720,34 +2753,34 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <button
               data-help-label="Insert table"
               aria-label="Insert table"
-              onClick={table}
+              data-overflow
+              onClick={() => setTableDialog(true)}
             >
               <Table2 />
             </button>
             <button
-              data-help-label="Add table row"
-              aria-label="Add table row"
-              onClick={() => command(addRowAfter)}
+              aria-label="More formatting"
+              aria-haspopup="menu"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                openContextMenu(
+                  {
+                    clientX: rect.left,
+                    clientY: rect.bottom,
+                    preventDefault() {},
+                  },
+                  formatActions(),
+                  { label: "Formatting" },
+                );
+              }}
             >
-              +row
-            </button>
-            <button
-              data-help-label="Add table column"
-              aria-label="Add table column"
-              onClick={() => command(addColumnAfter)}
-            >
-              +col
-            </button>
-            <button
-              data-help-label="Delete table"
-              aria-label="Delete table"
-              onClick={() => command(deleteTable)}
-            >
-              &minus;table
+              <MoreHorizontal />
             </button>
             <button
               data-help-label="Insert link"
               aria-label="Insert link"
+              data-overflow
               onClick={props.onLink}
             >
               <Link />
@@ -1755,6 +2788,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <button
               data-help-label="Insert page break"
               aria-label="Insert page break"
+              data-overflow
               onClick={() => {
                 const v = editableView();
                 if (v)
@@ -1878,50 +2912,97 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         }
         onScroll={(e) => {
           if (!props.pageLayout) return;
-          const pitch =
-            (props.pageLayout.height + PAGE_GAP) * props.pageLayout.zoom;
+
           const page = Math.max(
             0,
             Math.min(
               flowPages.length - 1,
-              Math.floor((e.currentTarget.scrollTop + 24) / pitch),
+              pageAtY(
+                flowPages,
+                (e.currentTarget.scrollTop + 24) / props.pageLayout.zoom,
+                props.pageLayout,
+              ),
             ),
           );
           props.onVisiblePage?.(page);
         }}
         style={{
           fontFamily: props.fontFamily || DOCUMENT_FONT,
-          fontSize: `${props.fontSize || 15}px`,
+          fontSize: `${props.fontSize || 16}px`,
         }}
       >
         {props.pageLayout ? (
           <div
-            className="flow-canvas"
-            style={
-              {
-                "--page-width": `${props.pageLayout.width}px`,
-                "--page-height": `${props.pageLayout.height}px`,
-                "--page-margin": `${props.pageLayout.margin}px`,
-                "--page-gap": `${PAGE_GAP}px`,
-                "--page-leading": props.pageLayout.lineHeight,
-                width: props.pageLayout.width,
-                minHeight:
-                  Math.max(1, flowPages.length) *
-                    (props.pageLayout.height + PAGE_GAP) -
-                  PAGE_GAP,
-                zoom: props.pageLayout.zoom,
-                marginInline: pageInset,
-              } as React.CSSProperties
-            }
+            className="flow-display"
+            style={{
+              width: canvasWidth * props.pageLayout.zoom,
+              height:
+                pageCanvasHeight(flowPages, props.pageLayout) *
+                props.pageLayout.zoom,
+              marginInline: pageInset,
+            }}
           >
-            <div className="page-sheets" aria-hidden="true">
-              {Array.from({ length: Math.max(1, flowPages.length) }, (_, i) => (
-                <div className="page-sheet" key={i}>
-                  <span>{i + 1}</span>
-                </div>
-              ))}
+            <div
+              className="flow-canvas"
+              style={
+                {
+                  "--page-width": `${props.pageLayout.width}px`,
+                  "--page-height": `${props.pageLayout.height}px`,
+                  "--page-margin": `${props.pageLayout.margin}px`,
+                  ...pageGeometryCSS(props.pageLayout),
+                  "--page-gap": `${PAGE_GAP}px`,
+                  "--page-leading": props.pageLayout.lineHeight,
+                  width: canvasWidth,
+                  minHeight: pageCanvasHeight(flowPages, props.pageLayout),
+                  zoom: 1 / pageDisplayScale,
+                  transform: `scale(${props.pageLayout.zoom * pageDisplayScale})`,
+                  transformOrigin: "top left",
+                } as React.CSSProperties
+              }
+            >
+              <div className="page-sheets" aria-hidden="true">
+                {Array.from(
+                  { length: Math.max(1, flowPages.length) },
+                  (_, i) => (
+                    <div
+                      className="page-sheet"
+                      key={i}
+                      style={{
+                        position: "absolute",
+                        top: pageFrame(flowPages, i, props.pageLayout!).top,
+                        left: pageFrame(flowPages, i, props.pageLayout!).left,
+                        width: pageFrame(flowPages, i, props.pageLayout!).layout
+                          .width,
+                        height: pageFrame(flowPages, i, props.pageLayout!)
+                          .layout.height,
+                      }}
+                    >
+                      {flowHeaders[i] && (
+                        <div
+                          dangerouslySetInnerHTML={{ __html: flowHeaders[i] }}
+                        />
+                      )}
+                      {flowPages[i]?.from !== flowPages[i]?.to && (
+                        <PageFurniture
+                          layout={
+                            pageFrame(flowPages, i, props.pageLayout!).layout
+                          }
+                          page={i}
+                          fontVersion={pageFontVersion}
+                        />
+                      )}
+                    </div>
+                  ),
+                )}
+              </div>
+              <div
+                className="page-flow"
+                ref={host}
+                style={{
+                  paddingLeft: `calc(var(--page-margin-left) + ${(canvasWidth - props.pageLayout.width) / 2}px)`,
+                }}
+              />
             </div>
-            <div className="page-flow" ref={host} />
           </div>
         ) : (
           <div ref={host} />

@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
-from common import SetupError, read_json, write_json, inventory, verify_inventory, remove_owned, inside, unlink_file, remove_empty_directory
+from common import SetupError, read_json, write_json, inventory, verify_inventory, remove_owned, inside, unlink_file, remove_empty_directory, data_upgrade_allowed
 
 
 def default_install():
@@ -128,7 +128,7 @@ def activate(root,built,target,version,fingerprint,source):
     retained=read_json(root/'previous.json') if (root/'previous.json').exists() else None
     metadata=read_json(Path(source)/'package.json')['alderSetup']
     compatibility=metadata['dataCompatibility']
-    if previous and previous.get('dataCompatibility')!=compatibility:
+    if previous and not data_upgrade_allowed(previous.get('dataCompatibility'), metadata):
         raise SetupError('ALDER_MIGRATION','This update changes the data compatibility level. A maintainer-supplied migration is required; the current installation and user data remain unchanged.')
     name=f'{version}-{fingerprint[:12]}-{time.time_ns()}'
     stage=root/'versions'/name

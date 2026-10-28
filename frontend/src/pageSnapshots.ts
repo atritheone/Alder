@@ -1,4 +1,7 @@
-import { PAGE_GAP, type PageLayout } from "./pageFlow";
+import { documentCanvasWidth, pageAtY, pageFrame } from "./sectionLayout";
+import type { PageLayout, FlowPage } from "./pageFlow";
+import { pageInsets, pageGeometryCSS } from "./pageGeometry";
+import { pageFurnitureDOM } from "./pageFurniture";
 import type { EditorView } from "prosemirror-view";
 import { documentUnits, type ArrangementUnit } from "./arrangementUnits";
 
@@ -9,14 +12,16 @@ import { documentUnits, type ArrangementUnit } from "./arrangementUnits";
 export function pageSnapshots(
   root: HTMLElement,
   layout: PageLayout,
-  count: number,
+  pages: FlowPage[],
   view?: EditorView,
   gap?: ArrangementUnit,
   originalUnits?: ArrangementUnit[],
+  headers?: string[],
 ): string[] {
+  const count = pages.length;
   const canvas = root.closest<HTMLElement>(".flow-canvas")!;
   const origin = canvas.getBoundingClientRect();
-  const scale = origin.width / layout.width;
+  const scale = origin.width / documentCanvasWidth(view?.state.doc, layout);
   const scope = root.closest<HTMLElement>("[data-alder-editor]")!.dataset
     .alderEditor!;
   const typography = getComputedStyle(root);
@@ -131,12 +136,45 @@ export function pageSnapshots(
         return { unit, rects };
       })
     : [];
+  // Index outlines by the pages they intersect. Constructing and serialising a
+  // layer for every unit on every page made a sentence drop quadratic, even
+  // though nearly all those layers were then discarded as off-page.
+  const unitsByPage = Array.from(
+    { length: count },
+    () => new Map<(typeof units)[number], DOMRect[]>(),
+  );
+  for (const entry of units) {
+    for (const rect of entry.rects) {
+      const top = (rect.top - origin.top) / scale;
+      const bottom = (rect.bottom - origin.top) / scale;
+      const first = Math.max(0, pageAtY(pages, top, layout));
+      const last = Math.min(count - 1, pageAtY(pages, bottom, layout));
+      for (let page = first; page <= last; page++) {
+        const frame = pageFrame(pages, page, layout),
+          margins = pageInsets(frame.layout);
+        const start = Math.max(margins.top - 2, top - frame.top);
+        const end = Math.min(
+          frame.layout.height - margins.bottom + 2,
+          bottom - frame.top,
+        );
+        if (end <= start) continue;
+        const visible = unitsByPage[page].get(entry) || [];
+        visible.push(rect);
+        unitsByPage[page].set(entry, visible);
+      }
+    }
+  }
   return Array.from({ length: count }, (_, page) => {
-    const top = page * (layout.height + PAGE_GAP);
+    const frame = pageFrame(pages, page, layout),
+      current = frame.layout,
+      top = frame.top,
+      margins = pageInsets(current);
     const wrapper = document.createElement("div");
     wrapper.className = "page-flow page-snapshot";
     wrapper.dataset.alderEditor = scope;
-    wrapper.style.cssText = `width:${layout.width}px;height:${layout.height}px;--page-width:${layout.width}px;--page-height:${layout.height}px;--page-margin:${layout.margin}px;--page-leading:${layout.lineHeight};`;
+    wrapper.style.cssText = `width:${current.width}px;height:${current.height}px;--page-width:${current.width}px;--page-height:${current.height}px;--page-margin:${current.margin}px;--page-leading:${current.lineHeight};`;
+    for (const [key, value] of Object.entries(pageGeometryCSS(current)))
+      wrapper.style.setProperty(key, value);
     const documentCopy = document.createElement("div");
     documentCopy.className = "ProseMirror";
     documentCopy.style.cssText =
@@ -159,9 +197,9 @@ export function pageSnapshots(
       );
     // Keep the unitless leading: headings and large text inherit the multiplier,
     // not the normal paragraph's computed pixel line height.
-    documentCopy.style.lineHeight = String(layout.lineHeight);
+    documentCopy.style.lineHeight = String(current.lineHeight);
     for (const block of blocks) {
-      if (block.bottom <= top || block.top >= top + layout.height) continue;
+      if (block.bottom <= top || block.top >= top + current.height) continue;
       const copy = block.element.cloneNode(true) as HTMLElement;
       if (view) {
         // Retain document positions on snapshot text, so a sentence preview
@@ -207,7 +245,7 @@ export function pageSnapshots(
       }
       copy.style.setProperty("position", "absolute");
       copy.style.setProperty("top", `${block.top - top}px`);
-      copy.style.setProperty("left", `${block.left}px`);
+      copy.style.setProperty("left", `${block.left - frame.left}px`);
       copy.style.setProperty("width", `${block.width}px`);
       copy.style.setProperty("height", `${block.height}px`);
       copy.style.setProperty("margin", "0");
@@ -237,7 +275,14 @@ export function pageSnapshots(
       documentCopy.append(copy);
     }
     wrapper.append(documentCopy);
-    for (const { unit, rects } of units) {
+    if (pages[page].from !== pages[page].to)
+      wrapper.append(pageFurnitureDOM(current, page));
+    if (headers?.[page]) {
+      const header = document.createElement("div");
+      header.innerHTML = headers[page];
+      wrapper.append(header);
+    }
+    for (const [{ unit }, rects] of unitsByPage[page]) {
       const sameGap =
         gap?.kind === unit.kind && gap.from === unit.from && gap.to === unit.to;
       const layer = document.createElement("div");
@@ -253,14 +298,14 @@ export function pageSnapshots(
         const verticalInset = unit.kind === "paragraph" ? 3 : 1;
         const y = (rect.top - origin.top) / scale - top;
         const bottom = Math.min(
-          layout.height - layout.margin + 2,
+          current.height - margins.bottom + 2,
           (rect.bottom - origin.top) / scale - top,
         );
-        const start = Math.max(layout.margin - 2, y);
+        const start = Math.max(margins.top - 2, y);
         if (bottom <= start) continue;
         const box = document.createElement("span");
         box.className = "unit-outline";
-        box.style.cssText = `left:${(rect.left - origin.left) / scale - inset}px;top:${start - verticalInset}px;width:${rect.width / scale + inset * 2}px;height:${bottom - start + verticalInset * 2}px;`;
+        box.style.cssText = `left:${(rect.left - origin.left) / scale - frame.left - inset}px;top:${start - verticalInset}px;width:${rect.width / scale + inset * 2}px;height:${bottom - start + verticalInset * 2}px;`;
         layer.append(box);
       }
       if (layer.childElementCount) wrapper.append(layer);

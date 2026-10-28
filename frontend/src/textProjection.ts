@@ -40,6 +40,7 @@ const silent = new Set([
   "horizontal_rule",
   "horizontalRule",
   "page_break",
+  "section_break",
   "pageBreak",
 ]);
 

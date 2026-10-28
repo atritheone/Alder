@@ -218,6 +218,14 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     def history(project_id: str):
         return store.history_status(project_id)
 
+    @app.get("/api/projects/{project_id}/versions")
+    def versions(project_id: str):
+        return store.versions(project_id)
+
+    @app.post("/api/projects/{project_id}/versions/{sequence}/recover")
+    def recover_version(project_id: str, sequence: int):
+        return store.recover_version(project_id, sequence)
+
     @app.post("/api/projects/{project_id}/undo")
     def undo(project_id: str):
         return store.history_step(project_id, -1)
@@ -299,14 +307,16 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         return await run_in_threadpool(language.transform, data.get("text", ""), data.get("type", ""), data.get("settings"))
 
     @app.post("/api/projects/{project_id}/assets")
-    async def upload_asset(project_id: str, file: UploadFile = File(...)):
+    async def upload_asset(project_id: str, file: UploadFile = File(...), register: bool = True):
         p = store.get(project_id)
         data = await uploaded(file)
-        asset = await run_in_threadpool(store.store_asset, project_id, file.filename or "asset", data, file.content_type)
-        p["assets"].append(asset)
-        updated = await run_in_threadpool(store.update, project_id, p, p["revision"])
+        mime = file.content_type if file.content_type != 'application/octet-stream' else None
+        asset = await run_in_threadpool(store.store_asset, project_id, file.filename or "asset", data, mime)
+        if register:
+            p["assets"].append(asset)
+            updated = await run_in_threadpool(store.update, project_id, p, p["revision"])
+            asset["projectRevision"] = updated["revision"]
         asset["url"] = f"/api/projects/{project_id}/assets/{asset['id']}"
-        asset["projectRevision"] = updated["revision"]
         return asset
 
     @app.get("/api/projects/{project_id}/assets/{asset_id}")
@@ -350,7 +360,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         section = p["sections"][-1]
         p["placements"].append({"id": uid("placement_"), "clipId": clip_id, "sectionId": section["id"],
                                 "order": max((x["order"] for x in p["placements"] if x["sectionId"] == section["id"]), default=-1) + 1})
-        p["lastImport"] = {"name": file.filename, "warnings": imported.get("warnings", []), "clipId": clip_id, "createdAt": now()}
+        p["lastImport"] = {"name": file.filename, "warnings": imported.get("warnings", []), "clipId": clip_id, "createdAt": now(), **({"pageSettings": imported["settings"]} if imported.get("settings") else {})}
         if p.get("book"):
             p["book"]["chapters"].append({"id": uid("chapter_"), "title": imported.get("title") or Path(file.filename).stem,
                 "document": p["clips"][-1]["document"], "text": "", "include": True, "role": "chapter", "voiceId": None, **({"rawSource":imported["rawSource"], "rawFormat":imported["rawFormat"]} if imported.get("rawSource") else {})})

@@ -12,6 +12,7 @@ import math
 import re
 from typing import Any
 from uuid import uuid4
+from .page_geometry import validate_page_settings
 
 
 class ValidationError(ValueError):
@@ -42,7 +43,7 @@ def document_text(document: dict) -> str:
         return "\n"
     if kind == "image":
         return ""
-    if kind in ("horizontalRule", "horizontal_rule", "pageBreak", "page_break"):
+    if kind in ("horizontalRule", "horizontal_rule", "pageBreak", "page_break", "section_break"):
         return ""
     parts = [document_text(child) for child in document.get("content", [])]
     if kind in ("tableRow", "table_row"):
@@ -58,7 +59,7 @@ NODE_TYPES = {
     "codeBlock", "code_block", "bulletList", "bullet_list", "orderedList", "ordered_list",
     "listItem", "list_item", "horizontalRule", "horizontal_rule", "image", "table",
     "tableRow", "table_row", "tableCell", "table_cell", "tableHeader", "table_header",
-    "pageBreak", "page_break", "footnote", "footnoteReference", "crossReference",
+    "pageBreak", "page_break", "section_break", "footnote", "footnoteReference", "crossReference",
 }
 MARK_TYPES = {"bold", "strong", "italic", "em", "underline", "strike", "s", "code", "link",
               "textStyle", "text_style", "highlight", "subscript", "superscript", "color", "fontFamily", "fontSize"}
@@ -84,6 +85,42 @@ def validate_document(document: Any) -> dict:
         attrs = node.get("attrs", {}) or {}
         if not isinstance(attrs, dict):
             raise ValidationError("Node attributes must be an object.")
+        if node['type'] == 'section_break':
+            from .sections import validate_section
+            if depth != 1 or children:
+                raise ValidationError('Section breaks belong between top-level body blocks.')
+            try:
+                validate_section(attrs)
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
+        if node['type'] == 'image':
+            if attrs.get('align') not in (None, 'left', 'center', 'right'):
+                raise ValidationError('Unsupported image alignment.')
+            if attrs.get('width') is not None:
+                try:
+                    width = float(attrs['width'])
+                except (ValueError, TypeError):
+                    raise ValidationError('Image width must be a number.')
+                if isinstance(attrs['width'], bool) or not math.isfinite(width) or not 1 <= width <= 10000:
+                    raise ValidationError('Image width must be between 1 and 10000 pixels.')
+            for key in ('alt', 'title'):
+                if attrs.get(key) is not None and not isinstance(attrs[key], str):
+                    raise ValidationError('Image alternative text and title must be text.')
+        if node['type'] in ('table', 'table_row', 'table_cell', 'table_header', 'tableRow', 'tableCell', 'tableHeader'):
+            from .table_formatting import validate_table_attributes
+            try:
+                validate_table_attributes({'tableRow': 'table_row', 'tableCell': 'table_cell', 'tableHeader': 'table_header'}.get(node['type'], node['type']), attrs)
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
+        for key in ("keepWithNext", "keepTogether", "widowOrphan", "pageBreakBefore"):
+            if attrs.get(key) is not None and type(attrs[key]) is not bool:
+                raise ValidationError(f"{key} must be true, false or inherited.")
+        if attrs.get('lineSpacingMode') not in (None, 'multiple', 'exact', 'atLeast'):
+            raise ValidationError("Unsupported paragraph line spacing mode.")
+        if attrs.get('lineSpacing') is not None and (type(attrs['lineSpacing']) not in (int, float) or not 1 <= attrs['lineSpacing'] <= 144):
+            raise ValidationError("Paragraph line spacing must be between 1 and 144 points.")
+        if attrs.get('listStyle') not in (None, 'decimal', 'lower-alpha', 'upper-alpha', 'lower-roman', 'upper-roman', 'disc', 'circle', 'square'):
+            raise ValidationError('Unsupported list marker style.')
         for key in ("src", "href"):
             value = attrs.get(key)
             if value and (not isinstance(value, str) or re.match(r"\s*(?:javascript|vbscript|data|file):", value, re.I)):
@@ -123,11 +160,10 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         raise ValidationError("Project exceeds the 40 MB structured-text limit.")
     p = deepcopy(raw)
     _identity(p.get("id"), "project")
-    if p.get("schemaVersion", 1) != 1:
+    if type(p.get("schemaVersion", 1)) is not int or p.get("schemaVersion", 1) not in (1, 2):
         raise ValidationError("This project uses an unsupported schema version. Its source has been preserved.")
-    p["schemaVersion"] = 1
     if not isinstance(p.get("name"), str) or not p["name"].strip() or len(p["name"]) > 300:
-        raise ValidationError("Project name must contain 1â€“300 characters.")
+        raise ValidationError("Project name must contain 1–300 characters.")
     p["language"] = p.get("language") or "en"
     if not isinstance(p["language"], str) or len(p["language"]) > 40:
         raise ValidationError("Invalid language tag.")
@@ -279,6 +315,10 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         value = p["settings"][prop]
         if not isinstance(value, (int, float)) or not low <= value <= high:
             raise ValidationError(f"Invalid document setting: {prop}.")
+    try:
+        validate_page_settings(p["settings"])
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     for field in ("rules", "customRules", "ignoredRules", "ignoredRuleIds", "disabledPronunciationDictionaries"):
         if not isinstance(p["settings"].get(field, []), list):
             raise ValidationError(f"{field} must be an array.")
@@ -333,7 +373,7 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         for chapter in chapters:
             register(chapter, "chapter")
             if not isinstance(chapter.get("title"), str) or not chapter["title"].strip() or len(chapter["title"]) > 300:
-                raise ValidationError("A chapter requires a title of 1â€“300 characters.")
+                raise ValidationError("A chapter requires a title of 1–300 characters.")
             if "rawSource" in chapter:
                 source = chapter["rawSource"]
                 if not isinstance(source, dict) or source.get("format") not in {"markdown", "html"} or not isinstance(source.get("text"), str):
@@ -351,7 +391,11 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
             verify_assets(chapter["document"])
     p.setdefault("createdAt", now())
     p.setdefault("updatedAt", p["createdAt"])
-    return p
+    from .document_schema import migrate_project
+    try:
+        return migrate_project(p)
+    except ValueError as error:
+        raise ValidationError(str(error)) from error
 
 
 def create_project(name: str | None = None, template: str = "demo") -> dict:
@@ -378,7 +422,7 @@ def create_project(name: str | None = None, template: str = "demo") -> dict:
 
     placements = []
     if template == "demo":
-        add(0, 0, "I Â· a prime idea", "I")
+        add(0, 0, "I · a prime idea", "I")
         add(0, 1, "A place to begin", "Every thought begins somewhere. A word becomes a phrase; a phrase becomes a world.")
         first = add(1, 0, "The shape of a thought", "I keep a small collection of beginnings. A sentence overheard on the train. A name without a character. The colour of the sky before rain.\nHere, language is material: something to gather, arrange, listen to, and shape.")
         first["variants"] = [{"id": uid("variant_"), "name": "A quieter opening", "document": text_document("I collect beginnings. A voice on the train, a name without a story, the sky before rain.\nLanguage takes shape when we give it room."), "createdAt": now()}]
@@ -392,10 +436,13 @@ def create_project(name: str | None = None, template: str = "demo") -> dict:
     else:
         first = add(1, 0, "First passage", "")
         placements = [{"id": uid("placement_"), "clipId": first["id"], "sectionId": sections[0]["id"], "order": 0}]
-    return validate_project({"id": project_id, "name": name or {"demo": "Alder Â· First Light", "blank": "Untitled", "essay": "New essay", "book": "New book"}[template],
+    body_style = uid('style_')
+    return validate_project({"id": project_id, "name": name or {"demo": "Alder · First Light", "blank": "Untitled", "essay": "New essay", "book": "New book"}[template],
                              "revision": 1, "schemaVersion": 1, "createdAt": now(), "updatedAt": now(), "language": "en",
                              "tracks": tracks, "clips": clips, "placements": placements, "sections": sections,
                              "ideas": [], "dictionary": [], "pronunciation": [], "assets": [],
-                             "styles": [{"id": uid("style_"), "name": "Body", "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "spaceAfter": 8},
-                                        {"id": uid("style_"), "name": "Heading", "fontFamily": "Cambria", "fontSize": 24, "lineHeight": 1.2, "spaceAfter": 14}],
+                             "styles": [{"id": body_style, "kind": "paragraph", "name": "Body", "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "spaceAfter": 8},
+                                        {"id": uid("style_"), "kind": "paragraph", "name": "Heading", "fontFamily": "Cambria", "fontSize": 24, "lineHeight": 1.2, "spaceAfter": 14, "nextStyle": body_style, "keepWithNext": True},
+                                        {"id": uid("style_"), "kind": "paragraph", "name": "Title", "basedOn": body_style, "nextStyle": body_style, "fontSize": 28, "lineHeight": 1.2, "spaceAfter": 12, "keepWithNext": True},
+                                        {"id": uid("style_"), "kind": "paragraph", "name": "Subtitle", "basedOn": body_style, "nextStyle": body_style, "fontSize": 14, "lineHeight": 1.2, "spaceAfter": 12, "color": "#666666", "keepWithNext": True}],
                              "settings": {"description": "A language workstation for ideas, drafts, and finished work."}})

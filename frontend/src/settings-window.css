@@ -220,3 +220,19 @@
   left: 8px;
   z-index: 10;
 }
+.typing-replacement {
+  display: flex;
+  align-items: end;
+  gap: 0.5rem;
+  margin-block: 0.6rem;
+}
+.typing-replacement label {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 0.25rem;
+}
+.typing-replacement input {
+  width: 100%;
+  min-width: 0;
+}

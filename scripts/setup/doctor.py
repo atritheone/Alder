@@ -55,8 +55,12 @@ def validate_metadata(source):
             raise SetupError('ALDER_METADATA','Missing or incorrect platform description: '+platform_name)
     if not isinstance(package['author'],dict) or not package['author'].get('email'):
         raise SetupError('ALDER_METADATA','Missing author email.')
-    if not isinstance(package.get('alderSetup',{}).get('dataCompatibility'),int):
+    compatibility = package.get('alderSetup',{}).get('dataCompatibility')
+    if type(compatibility) is not int or compatibility < 1:
         raise SetupError('ALDER_METADATA','Missing user-data compatibility declaration.')
+    upgrades = package['alderSetup'].get('upgradeFromDataCompatibility', [])
+    if not isinstance(upgrades, list) or any(type(value) is not int or not 1 <= value < compatibility for value in upgrades) or len(set(upgrades)) != len(upgrades):
+        raise SetupError('ALDER_METADATA','Invalid forward user-data migration declaration.')
     if not build.get('appId') or not build.get('linux',{}).get('maintainer'):
         raise SetupError('ALDER_METADATA','Missing application ID/Linux maintainer.')
     if build['mac'].get('identity') != '-' or build['mac'].get('notarize') is not False:

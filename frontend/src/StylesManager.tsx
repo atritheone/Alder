@@ -3,7 +3,11 @@ import { useState, type CSSProperties } from "react";
 import { Plus, Trash2, Edit3, Copy } from "lucide-react";
 import type { NamedStyle, Project, StyleKind, StyleProperties } from "./types";
 import { uid } from "./api";
-import { resolveStyles, styleUsageCount } from "./styleResolution";
+import {
+  resolveStyles,
+  styleUsageCount,
+  replaceProjectStyle,
+} from "./styleResolution";
 import "./styles-manager.css";
 
 type Props = {
@@ -11,6 +15,7 @@ type Props = {
   onChange: (fn: (project: Project) => void) => void;
   onApply: (id: string, kind: StyleKind) => void;
   onError: (message: string) => void;
+  onCapture?: () => StyleProperties | null;
 };
 const fields: {
   key: keyof StyleProperties;
@@ -22,10 +27,18 @@ const fields: {
 }[] = [
   { key: "fontSize", label: "Font size (pt)", min: 6, max: 72, step: 0.5 },
   {
+    key: "lineSpacing",
+    label: "Line spacing (pt)",
+    min: 1,
+    max: 144,
+    step: 0.5,
+    paragraph: true,
+  },
+  {
     key: "lineHeight",
     label: "Line height (multiple)",
-    min: 1,
-    max: 3,
+    min: 0.8,
+    max: 4,
     step: 0.1,
     paragraph: true,
   },
@@ -33,6 +46,22 @@ const fields: {
     key: "spaceAfter",
     label: "Space after (pt)",
     min: 0,
+    max: 144,
+    step: 1,
+    paragraph: true,
+  },
+  {
+    key: "spaceBefore",
+    label: "Space before (pt)",
+    min: 0,
+    max: 144,
+    step: 1,
+    paragraph: true,
+  },
+  {
+    key: "rightIndent",
+    label: "Right indent (pt)",
+    min: -144,
     max: 144,
     step: 1,
     paragraph: true,
@@ -60,8 +89,11 @@ export default function StylesManager({
   onChange,
   onApply,
   onError,
+  onCapture,
 }: Props) {
   const [editing, setEditing] = useState<NamedStyle | null>(null);
+  const [replacing, setReplacing] = useState<NamedStyle | null>(null);
+  const [replacementId, setReplacementId] = useState("");
   const catalogue = useFontCatalogue(
     editing?.fontFamily || project.settings.fontFamily,
   );
@@ -84,12 +116,13 @@ export default function StylesManager({
     }
   };
   const remove = (style: NamedStyle) => {
-    const dependents = styles.filter((item) => item.basedOn === style.id),
+    const dependents = styles.filter(
+        (item) => item.basedOn === style.id || item.nextStyle === style.id,
+      ),
       uses = styleUsageCount(project, style.id);
     if (dependents.length || uses) {
-      onError(
-        `“${style.name}” is used by ${uses} text ${uses === 1 ? "range" : "ranges"} and ${dependents.length} inherited ${dependents.length === 1 ? "style" : "styles"}. Apply another style to that text and change those base styles before deleting it.`,
-      );
+      setReplacing(style);
+      setReplacementId("");
       return;
     }
     onChange((p) => {
@@ -119,10 +152,21 @@ export default function StylesManager({
   const preview: CSSProperties = {
     fontFamily: resolved?.fontFamily || project.settings.fontFamily,
     fontSize: resolved?.fontSize ? `${resolved.fontSize}pt` : undefined,
-    lineHeight: resolved?.lineHeight || undefined,
+    lineHeight:
+      resolved?.lineSpacingMode === "exact" && resolved.lineSpacing
+        ? `${resolved.lineSpacing}pt`
+        : resolved?.lineSpacingMode === "atLeast" && resolved.lineSpacing
+          ? `max(1.2em,${resolved.lineSpacing}pt)`
+          : resolved?.lineHeight || undefined,
     color: resolved?.color || undefined,
     textAlign: resolved?.align || undefined,
     marginLeft: resolved?.leftIndent ? `${resolved.leftIndent}pt` : undefined,
+    marginRight:
+      resolved?.rightIndent != null ? `${resolved.rightIndent}pt` : undefined,
+    marginTop:
+      resolved?.spaceBefore != null ? `${resolved.spaceBefore}pt` : undefined,
+    marginBottom:
+      resolved?.spaceAfter != null ? `${resolved.spaceAfter}pt` : undefined,
     textIndent: resolved?.firstLineIndent
       ? `${resolved.firstLineIndent}pt`
       : undefined,
@@ -138,6 +182,22 @@ export default function StylesManager({
         </p>
       )}
       <div className="manager-actions">
+        {onCapture && (
+          <button
+            onClick={() => {
+              const values = onCapture();
+              if (values)
+                setEditing({
+                  ...values,
+                  id: uid(),
+                  name: "New style",
+                  kind: "paragraph",
+                });
+            }}
+          >
+            Create from selection
+          </button>
+        )}
         <button
           className="accent"
           onClick={() =>
@@ -193,6 +253,17 @@ export default function StylesManager({
             >
               <Edit3 size={13} />
             </button>
+            {onCapture && (
+              <button
+                aria-label={`Update ${style.name} from selection`}
+                onClick={() => {
+                  const values = onCapture();
+                  if (values) setEditing({ ...style, ...values });
+                }}
+              >
+                Update from selection
+              </button>
+            )}
             <button
               data-help-label={`Duplicate ${style.name}`}
               aria-label={`Duplicate ${style.name}`}
@@ -220,6 +291,57 @@ export default function StylesManager({
           Clear character style
         </button>
       </div>
+      {replacing && (
+        <section className="style-editor" aria-label="Replace used style">
+          <strong>Replace {replacing.name}</strong>
+          <p>
+            Choose the style to use for its text and dependent styles. Direct
+            formatting is retained.
+          </p>
+          <label>
+            Replacement style
+            <select
+              aria-label="Replacement style"
+              value={replacementId}
+              onChange={(event) => setReplacementId(event.target.value)}
+            >
+              <option value="">Choose a style</option>
+              {styles
+                .filter(
+                  (style) =>
+                    style.id !== replacing.id &&
+                    (style.kind || "paragraph") ===
+                      (replacing.kind || "paragraph"),
+                )
+                .map((style) => (
+                  <option value={style.id} key={style.id}>
+                    {style.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <footer>
+            <button onClick={() => setReplacing(null)}>Cancel</button>
+            <button
+              className="accent"
+              disabled={!replacementId}
+              onClick={() => {
+                try {
+                  onChange((p) =>
+                    replaceProjectStyle(p, replacing.id, replacementId),
+                  );
+                  if (editing?.id === replacing.id) setEditing(null);
+                  setReplacing(null);
+                } catch (error) {
+                  onError((error as Error).message);
+                }
+              }}
+            >
+              Replace and delete style
+            </button>
+          </footer>
+        </section>
+      )}
       {editing && (
         <section className="style-editor" aria-label="Style settings">
           <strong>
@@ -314,7 +436,93 @@ export default function StylesManager({
                 </small>
               )}
             </label>
+            {(editing.kind || "paragraph") === "paragraph" && (
+              <label>
+                Next paragraph style
+                <select
+                  aria-label="Next paragraph style"
+                  value={editing.nextStyle || ""}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      nextStyle: event.target.value || null,
+                    })
+                  }
+                >
+                  <option value="">Same style</option>
+                  {styles
+                    .filter((style) => style.kind !== "character")
+                    .map((style) => (
+                      <option key={style.id} value={style.id}>
+                        {style.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
+            {(editing.kind || "paragraph") === "paragraph" && (
+              <>
+                <label>
+                  Line spacing mode
+                  <select
+                    aria-label="Style line spacing mode"
+                    value={editing.lineSpacingMode || ""}
+                    onChange={(event) =>
+                      setEditing({
+                        ...editing,
+                        lineSpacingMode: (event.target.value ||
+                          null) as NamedStyle["lineSpacingMode"],
+                      })
+                    }
+                  >
+                    <option value="">Inherit</option>
+                    <option value="multiple">Multiple</option>
+                    <option value="exact">Exactly</option>
+                    <option value="atLeast">At least</option>
+                  </select>
+                </label>
+                {(
+                  [
+                    ["keepWithNext", "Keep with next paragraph"],
+                    ["keepTogether", "Keep lines together"],
+                    ["widowOrphan", "Widow and orphan control"],
+                    ["pageBreakBefore", "Page break before"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <select
+                      aria-label={`Style ${label}`}
+                      value={editing[key] == null ? "" : String(editing[key])}
+                      onChange={(event) =>
+                        setEditing({
+                          ...editing,
+                          [key]:
+                            event.target.value === ""
+                              ? null
+                              : event.target.value === "true",
+                        })
+                      }
+                    >
+                      <option value="">Inherit</option>
+                      <option value="true">On</option>
+                      <option value="false">Off</option>
+                    </select>
+                  </label>
+                ))}
+              </>
+            )}
             {fields
+              .filter((field) =>
+                field.key === "lineSpacing"
+                  ? ["exact", "atLeast"].includes(
+                      resolved?.lineSpacingMode || "",
+                    )
+                  : field.key !== "lineHeight" ||
+                    !["exact", "atLeast"].includes(
+                      resolved?.lineSpacingMode || "",
+                    ),
+              )
               .filter(
                 (field) =>
                   !field.paragraph ||
@@ -329,7 +537,11 @@ export default function StylesManager({
                     min={field.min}
                     max={field.max}
                     step={field.step}
-                    value={editing[field.key] ?? ""}
+                    value={
+                      editing[field.key] == null
+                        ? ""
+                        : String(editing[field.key])
+                    }
                     placeholder={
                       resolved?.[field.key] === undefined
                         ? "Inherit"
