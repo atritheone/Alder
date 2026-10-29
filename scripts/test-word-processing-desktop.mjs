@@ -485,7 +485,11 @@ try {
   checks.push(
     "contextual list markers/start/restart at item; single-step undo",
   );
-  await editor.fill("Typing preferences persisted.");
+  // Exercise the editor's select-all command after list undo. Direct DOM fill
+  // can race the browser's selectionchange and append to the last list item.
+  await editor.press("ControlOrMeta+a");
+  await editor.pressSequentially("Typing preferences persisted.");
+  await expect(editor).toHaveText("Typing preferences persisted.");
   await expect(page.locator(".save-status")).toHaveText("Saved");
   const workspaceName = await page.evaluate(
     async () =>

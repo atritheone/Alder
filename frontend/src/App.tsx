@@ -1,4 +1,16 @@
 import { useTypingPointer } from "./useTypingPointer";
+import RunningMatterDialog from "./RunningMatterDialog";
+import { isLayoutField } from "./documentFields";
+import { isHeadingField } from "./runningHeadings";
+import {
+  defaultRunningMatter,
+  resolveRunningMatter,
+  assertProjectRunningMatterFits,
+  runningMatterSignature,
+  type RunningMatter,
+  type StoryPart,
+} from "./runningMatter";
+import { useRuler } from "./ParagraphRuler";
 import DocumentReader from "./DocumentReader";
 import { useSpeechTransport } from "./useSpeechTransport";
 import { useSpeechJob } from "./useSpeechJob";
@@ -80,11 +92,12 @@ import { useProject } from "./useProject";
 import Browser, { deviceCatalog } from "./Browser";
 import BookWorkspace from "./BookWorkspace";
 import { bookText, newChapter } from "./book";
-import Editor, { type EditorHandle } from "./Editor";
+import Editor, { schema as editorSchema, type EditorHandle } from "./Editor";
 import DefinitionStudio from "./DefinitionStudio";
 import NarrationReview from "./NarrationReview";
 import StylesManager from "./StylesManager";
 import DocumentVersions from "./DocumentVersions";
+import DocumentTemplates from "./DocumentTemplates";
 import { DEFAULT_SPEECH_OPTIONS } from "./SpeechOptions";
 
 import DocumentTabs from "./DocumentTabs";
@@ -93,6 +106,25 @@ import { openDocuments, rememberDocumentFile } from "./openDocuments";
 import FindPanel from "./FindPanel";
 import { replaceBookMatches } from "./bookFind";
 import DocumentOutline from "./OutlinePanel";
+import LinkDialog from "./LinkDialog";
+import { bookmarkTargets, bookBookmarkTargets } from "./bookmarkTargets";
+import ReferenceDialog from "./ReferenceDialog";
+import FieldDialog from "./FieldDialog";
+import ContentsDialog from "./ContentsDialog";
+import {
+  hasPageReferences,
+  updatePageReferences,
+  type PageReferenceValues,
+} from "./pageReferences";
+import { refreshedContents } from "./documentContents";
+import { commentSummary } from "./documentComments";
+import { revisionCount } from "./trackedReview";
+import {
+  projectReferenceIndex,
+  projectContentsIndex,
+  updateProjectReferences,
+  type ReferenceIndex,
+} from "./documentReferences";
 import { helpFor } from "./contextHelp";
 import { useNarrationGain } from "./audioPlayback";
 import PlaybackSpeed from "./PlaybackSpeed";
@@ -232,6 +264,7 @@ function savedNumber(key: string, fallback: number, min: number, max: number) {
     : fallback;
 }
 export default function App() {
+  const [ruler, toggleRuler] = useRuler();
   useTypingPointer();
   const {
     project,
@@ -253,6 +286,10 @@ export default function App() {
     void window.alder?.setWindowLayout(workspaceOpen ? "workspace" : "start");
   }, [workspaceOpen]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsEditor = useRef<{
+    origin: EditorHandle;
+    identity: string;
+  } | null>(null);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] =
     useState<SettingsCategory>("Appearance");
@@ -304,6 +341,13 @@ export default function App() {
     book: boolean;
   } | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [linkDialog, setLinkDialog] = useState<{
+    origin: EditorHandle;
+    identity: string;
+    text: string;
+    source: string;
+    targets: { id: string; name: string; label: string }[];
+  } | null>(null);
   useEffect(() => setOutlineOpen(false), [project?.id]);
   const [voiceTestPlaying, setVoiceTestPlaying] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(
@@ -458,8 +502,223 @@ export default function App() {
     project?.book?.chapters.find((c) => c.id === chapterId) ||
     project?.book?.chapters[0];
   const activeContent = writingFocus && chapter ? chapter : content;
+  const [referenceDialog, setReferenceDialog] = useState<{
+    origin: EditorHandle;
+    identity: string;
+    source: string;
+    index: ReferenceIndex;
+  } | null>(null);
+  const [fieldDialog, setFieldDialog] = useState<{
+    origin: EditorHandle;
+    identity: string;
+    source: string;
+  } | null>(null);
+  const fieldRefresh = useRef(0);
+  const [runningDialog, setRunningDialog] = useState<{
+    projectId: string;
+    sectionId?: string;
+    initial: RunningMatter;
+    previous: RunningMatter;
+    part: StoryPart;
+    source: string;
+  } | null>(null);
+  const openRunningMatter = (
+    sectionId?: string,
+    part: StoryPart = "header",
+  ) => {
+    if (!project) return;
+    const base = defaultRunningMatter(project.settings),
+      source = runningMatterSignature(project);
+    if (!sectionId) {
+      setRunningDialog({
+        projectId: project.id,
+        initial: structuredClone(project.settings.runningMatter || base),
+        previous: base,
+        part,
+        source,
+      });
+      return;
+    }
+    let previous = base,
+      found: DocNode | undefined;
+    for (const chapter of project.book?.chapters || []) {
+      if (chapter.include === false) continue;
+      for (const node of chapter.document.content || []) {
+        if (node.type !== "section_break") continue;
+        if (node.attrs?.blockId === sectionId) {
+          found = node;
+          break;
+        }
+        previous = resolveRunningMatter(previous, node.attrs?.runningMatter);
+      }
+      if (found) break;
+    }
+    if (found)
+      setRunningDialog({
+        projectId: project.id,
+        sectionId,
+        initial: structuredClone(found.attrs?.runningMatter || {}),
+        previous,
+        part,
+        source,
+      });
+  };
+  const fieldInsertRequest = useRef(0);
+  const contentsRequest = useRef(0);
+  const [contentsDialog, setContentsDialog] = useState<{
+    origin: EditorHandle;
+    identity: string;
+    source: string;
+    node?: DocNode;
+    index: ReferenceIndex;
+  } | null>(null);
   const targetEditor = () =>
     writingFocus ? bookEditor.current : editor.current;
+  const openLink = (inWrite: boolean) => {
+    const origin = inWrite ? bookEditor.current : editor.current;
+    if (!origin || !project) return;
+    const targets = bookBookmarkTargets(project);
+    const local =
+      !inWrite && content
+        ? bookmarkTargets(content.document).map((item) => ({
+            ...item,
+            label: `${item.name} · Sandbox`,
+          }))
+        : [];
+    setLinkDialog({
+      origin,
+      identity: origin.getIdentity(),
+      source: origin.getText(),
+      text: origin.getSelection() || word,
+      targets: [...local, ...targets],
+    });
+  };
+  useEffect(() => {
+    const openContents = (event: Event) => {
+      if (!project) return;
+      const { identity, node } = (
+        event as CustomEvent<{ identity: string; node?: DocNode }>
+      ).detail;
+      const origin = bookEditor.current;
+      if (origin?.getIdentity() === identity)
+        setContentsDialog({
+          origin,
+          identity,
+          node,
+          source: origin.getText(),
+          index: projectContentsIndex(project),
+        });
+    };
+    const openField = (event: Event) => {
+      if (!project) return;
+      const identity = (event as CustomEvent<{ identity: string }>).detail
+        .identity;
+      const origin = [bookEditor.current, editor.current].find(
+        (value) => value?.getIdentity() === identity,
+      );
+      if (origin)
+        setFieldDialog({ origin, identity, source: origin.getText() });
+    };
+    const open = (event: Event) => {
+      if (!project) return;
+      const identity = (event as CustomEvent<{ identity: string }>).detail
+        .identity;
+      const origin = [bookEditor.current, editor.current].find(
+        (value) => value?.getIdentity() === identity,
+      );
+      if (!origin) return;
+      setReferenceDialog({
+        origin,
+        identity,
+        source: origin.getText(),
+        index: projectReferenceIndex(
+          project,
+          origin === editor.current ? content?.document : undefined,
+        ),
+      });
+    };
+    const update = () => {
+      const request = ++fieldRefresh.current;
+      void (async () => {
+        let snapshot: Project | undefined;
+        change((draft) => {
+          snapshot = structuredClone(draft);
+        });
+        if (!snapshot) return;
+        const signature = (p: Project) =>
+          JSON.stringify([p.id, p.name, p.book, p.clips, p.styles, p.settings]);
+        const before = signature(snapshot);
+        updateProjectReferences(snapshot);
+        let pages: PageReferenceValues | undefined;
+        if (hasPageReferences(snapshot)) {
+          setHint("Updating page references…");
+          pages = await api<PageReferenceValues>(
+            `/api/projects/${snapshot.id}/layout-fields`,
+            "POST",
+            { project: snapshot },
+          );
+        }
+        if (request !== fieldRefresh.current) return;
+        let applied = false;
+        change((draft) => {
+          if (signature(draft) !== before) return;
+          updateProjectReferences(draft);
+          if (pages) {
+            updatePageReferences(draft, pages);
+            updateProjectReferences(draft);
+          }
+          applied = true;
+        });
+        setHint(
+          applied
+            ? "Fields updated. Unavailable references and empty document properties are marked in the document."
+            : "The document changed while fields were updating. Update fields again.",
+        );
+      })().catch((error) => setError(String(error.message || error)));
+    };
+    const navigate = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ projectId: string; target: string }>
+      ).detail;
+      if (!project || project.id !== detail.projectId) return;
+      const item = projectReferenceIndex(
+        project,
+        content?.document,
+      ).targets.get(detail.target);
+      if (!item?.valid) {
+        setHint("This reference target is no longer available.");
+        return;
+      }
+      const jump = (origin: EditorHandle) => origin.navigateReference(item.id);
+      if (item.chapter) withOutlineEditor(item.chapter, jump);
+      else if (editor.current) jump(editor.current);
+    };
+    const openRunning = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          projectId: string;
+          sectionId?: string;
+          part?: StoryPart;
+        }>
+      ).detail;
+      if (detail.projectId === project?.id)
+        openRunningMatter(detail.sectionId, detail.part);
+    };
+    window.addEventListener("alder-running-matter", openRunning);
+    window.addEventListener("alder-reference-dialog", open);
+    window.addEventListener("alder-field-dialog", openField);
+    window.addEventListener("alder-contents-dialog", openContents);
+    window.addEventListener("alder-update-references", update);
+    window.addEventListener("alder-reference-navigate", navigate);
+    return () => {
+      window.removeEventListener("alder-reference-dialog", open);
+      window.removeEventListener("alder-running-matter", openRunning);
+      window.removeEventListener("alder-field-dialog", openField);
+      window.removeEventListener("alder-contents-dialog", openContents);
+      window.removeEventListener("alder-update-references", update);
+      window.removeEventListener("alder-reference-navigate", navigate);
+    };
+  }, [project, content, change]);
   const proofreading = useProofreading(
     activeContent?.text,
     `${project?.id || ""}:${writingFocus ? "chapter:" + chapter?.id : "clip:" + clip?.id + ":" + clip?.activeVariantId}`,
@@ -839,6 +1098,11 @@ export default function App() {
     setHint(`Project saved to ${result.path}`);
   };
   const openSettings = (category?: SettingsCategory) => {
+    const origin = targetEditor();
+    settingsEditor.current =
+      origin && document.activeElement?.closest('[contenteditable="true"]')
+        ? { origin, identity: origin.getIdentity() }
+        : null;
     if (category) setSettingsCategory(category);
     setMenu(null);
     setPanel(null);
@@ -846,6 +1110,13 @@ export default function App() {
   };
   const closeSettings = () => {
     setSettingsOpen(false);
+    const target = settingsEditor.current;
+    settingsEditor.current = null;
+    if (target)
+      requestAnimationFrame(() => {
+        if (target.origin.getIdentity() === target.identity)
+          target.origin.focus();
+      });
     void run(flush);
   };
   const openPanel = (name: string) => {
@@ -1093,6 +1364,88 @@ export default function App() {
       );
     });
   useEffect(() => {
+    const navigate = (event: Event) => {
+      const { projectId, target } = (
+        event as CustomEvent<{ projectId: string; target: string }>
+      ).detail;
+      if (!project || project.id !== projectId) return;
+      const targets = bookBookmarkTargets(project);
+      const item =
+        targets.find((item) => item.id === target) ||
+        targets.find((item) => item.name === target);
+      if (item)
+        withOutlineEditor(item.chapter, (editor) =>
+          editor.navigateBookmark(item.id),
+        );
+      else setHint("This bookmark is no longer in the document.");
+    };
+    window.addEventListener("alder-bookmark-navigate", navigate);
+    return () =>
+      window.removeEventListener("alder-bookmark-navigate", navigate);
+  }, [project]);
+  const historyInteraction = useRef(0);
+  useEffect(() => {
+    const changed = () => {
+      historyInteraction.current++;
+    };
+    window.addEventListener("pointerdown", changed, true);
+    window.addEventListener("keydown", changed, true);
+    return () => {
+      window.removeEventListener("pointerdown", changed, true);
+      window.removeEventListener("keydown", changed, true);
+    };
+  }, []);
+  useEffect(() => {
+    const restore = (event: Event) => {
+      const interaction = historyInteraction.current;
+      const { projectId, identity } = (
+        event as CustomEvent<{ projectId: string; identity: string }>
+      ).detail;
+      if (!project || project.id !== projectId) return;
+      const source = identity.slice(projectId.length + 1).split(":")[0];
+      const book = !!project.book?.chapters.some((c) => c.id === source);
+      if (book) {
+        setChapterId(source);
+        setWritingFocus(true);
+        setView("Write");
+        setWritePreview(false);
+      } else if (project.clips.some((c) => c.id === source)) {
+        setSelected(source);
+        setWritingFocus(false);
+        setDetailOpen(true);
+      } else return;
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (
+            interaction !== historyInteraction.current ||
+            !(book ? bookEditor : editor).current
+              ?.getIdentity()
+              .startsWith(projectId + ":" + source + ":")
+          )
+            return;
+          if (book)
+            window.dispatchEvent(
+              new Event(
+                identity.endsWith(":raw")
+                  ? "alder-show-raw-document"
+                  : "alder-show-formatted-document",
+              ),
+            );
+          requestAnimationFrame(() => {
+            const target = (book ? bookEditor : editor).current;
+            if (
+              interaction === historyInteraction.current &&
+              target?.getIdentity() === identity
+            )
+              target.focus();
+          });
+        }),
+      );
+    };
+    window.addEventListener("alder-history-source", restore);
+    return () => window.removeEventListener("alder-history-source", restore);
+  }, [project]);
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === ",") {
         e.preventDefault();
@@ -1216,7 +1569,16 @@ export default function App() {
       await flush();
       const result = await api(`/api/projects/${project.id}/export`, "POST", {
         format,
-        options: { includeGlossary: Boolean(project.settings.includeGlossary) },
+        options: {
+          includeGlossary: Boolean(project.settings.includeGlossary),
+          includeReviewComments:
+            project.settings.includeReviewComments !== false,
+          reviewView: ["html", "epub", "docx"].includes(format)
+            ? project.settings.exportReviewView || "markup"
+            : project.settings.exportReviewView === "original"
+              ? "original"
+              : "final",
+        },
       });
       setExportResult(result);
       setHint(`${format.toUpperCase()} export ready`);
@@ -1337,6 +1699,10 @@ export default function App() {
         closeSettings();
         openPanel(name);
       }}
+      onRunningMatter={() => {
+        closeSettings();
+        openRunningMatter();
+      }}
     />
   );
   if (!project)
@@ -1344,7 +1710,7 @@ export default function App() {
       <>
         <StartScreen
           onOpen={load}
-          onCreate={(p) => load(p, true)}
+          onCreate={(p, fromTemplate) => load(p, !fromTemplate)}
           onOpenFiles={openFiles}
         />
         {settingsWindow}
@@ -1368,8 +1734,8 @@ export default function App() {
         )}
         {newOpen && (
           <NewDocument
-            onCreate={(p) => {
-              void load(p, true);
+            onCreate={async (p, fromTemplate) => {
+              await load(p, !fromTemplate);
               setNewOpen(false);
             }}
             onClose={() => setNewOpen(false)}
@@ -1527,18 +1893,14 @@ export default function App() {
         </>
       )}
       {browserCategory === "Templates" && (
-        <>
-          <button
-            className="accent"
-            data-help="Create a plain text document, a Word document, or a book with its own page and chapter settings."
-            onClick={() => {
-              setPanel(null);
-              newProject();
-            }}
-          >
-            Create from template…
-          </button>
-        </>
+        <DocumentTemplates
+          project={project}
+          flush={flush}
+          onNew={() => {
+            setPanel(null);
+            newProject();
+          }}
+        />
       )}
     </>
   );
@@ -1590,14 +1952,19 @@ export default function App() {
     Edit: [
       { label: "Paste From Clipboard", action: pasteClipboard },
       {
-        label: "Undo project change",
+        label: "Undo document change",
         action: () => void run(() => history("undo")),
       },
       {
-        label: "Redo project change",
+        label: "Redo document change",
         action: () => void run(() => history("redo")),
       },
       { label: "Find and replace…", action: findReplace },
+      {
+        label: "Update fields",
+        action: () =>
+          window.dispatchEvent(new Event("alder-update-references")),
+      },
       {
         label: "Format",
         submenu: [
@@ -1671,6 +2038,7 @@ export default function App() {
       },
     ],
     View: [
+      { label: ruler ? "Hide ruler" : "Show ruler", action: toggleRuler },
       {
         label: outlineOpen ? "Hide outline" : "Show outline",
         action: () => {
@@ -1801,15 +2169,15 @@ export default function App() {
           </div>
           <div className="project-actions">
             <button
-              data-help-label="Undo project change"
-              aria-label="Undo project change"
+              data-help-label="Undo document change"
+              aria-label="Undo document change"
               onClick={() => void run(() => history("undo"))}
             >
               <Undo2 size={13} />
             </button>
             <button
-              data-help-label="Redo project change"
-              aria-label="Redo project change"
+              data-help-label="Redo document change"
+              aria-label="Redo document change"
               onClick={() => void run(() => history("redo"))}
             >
               <Redo2 size={13} />
@@ -1938,30 +2306,7 @@ export default function App() {
                 .catch((e) => setError(e.message))
             }
             onImage={() => chooseImage(true)}
-            onLink={() =>
-              setForm({
-                title: "Insert link",
-                fields: [
-                  {
-                    name: "url",
-                    label: "URL",
-                    value: "https://",
-                    required: true,
-                  },
-                  {
-                    name: "label",
-                    label: "Link text",
-                    value: selection || word,
-                  },
-                ],
-                submit: "Insert",
-                action: (v) => {
-                  if (!/^https?:\/\//i.test(v.url))
-                    throw new Error("Use an http or https link.");
-                  bookEditor.current?.link(v.label, v.url);
-                },
-              })
-            }
+            onLink={() => openLink(true)}
             onRead={(c) =>
               void run(() => startSpeech(undefined, "selection", c.text))
             }
@@ -1987,6 +2332,16 @@ export default function App() {
           {outlineOpen && (
             <DocumentOutline
               chapters={project.book?.chapters || []}
+              onBookmark={(chapter, bookmark) =>
+                withOutlineEditor(chapter, (editor) =>
+                  editor.navigateBookmark(bookmark),
+                )
+              }
+              onComment={(chapter, comment) =>
+                withOutlineEditor(chapter, (editor) =>
+                  editor.openComment(comment),
+                )
+              }
               onSelect={(chapter, heading) =>
                 withOutlineEditor(chapter, (editor) =>
                   editor.navigateHeading(heading),
@@ -2059,7 +2414,7 @@ export default function App() {
                         });
                         await flush();
                         setHint(
-                          `Replaced ${groups.reduce((total, group) => total + group.matches.length, 0)} matches across ${groups.length} chapters. Undo project change restores them together.`,
+                          `Replaced ${groups.reduce((total, group) => total + group.matches.length, 0)} matches across ${groups.length} chapters. Undo document change restores them together.`,
                         );
                       }
                     : undefined
@@ -2267,6 +2622,19 @@ export default function App() {
                   </aside>
                   <Editor
                     key={project.id}
+                    review={{
+                      tracking: project.settings.trackChanges === true,
+                      author:
+                        project.settings.reviewAuthor ||
+                        project.settings.author ||
+                        "",
+                    }}
+                    onReviewPreferences={(value) =>
+                      change((project) => {
+                        project.settings.trackChanges = value.tracking;
+                        project.settings.reviewAuthor = value.author;
+                      })
+                    }
                     ref={editor}
                     caseScope="document"
                     readingRange={sandboxRange}
@@ -2343,30 +2711,7 @@ export default function App() {
                         .then((r) => setCompletion(r.suggestions))
                         .catch((e) => setError(e.message));
                     }}
-                    onLink={() =>
-                      setForm({
-                        title: "Insert link",
-                        fields: [
-                          {
-                            name: "url",
-                            label: "URL",
-                            value: "https://",
-                            required: true,
-                          },
-                          {
-                            name: "label",
-                            label: "Link text",
-                            value: selection || word,
-                          },
-                        ],
-                        submit: "Insert",
-                        action: (v) => {
-                          if (!/^https?:\/\//i.test(v.url))
-                            throw new Error("Use an http or https link.");
-                          targetEditor()?.link(v.label, v.url);
-                        },
-                      })
-                    }
+                    onLink={() => openLink(false)}
                     styles={project.styles}
                     fontFamily={project.settings.fontFamily}
                   />
@@ -3098,8 +3443,8 @@ export default function App() {
       />
       {newOpen && (
         <NewDocument
-          onCreate={(p) => {
-            void load(p, true);
+          onCreate={async (p, fromTemplate) => {
+            await load(p, !fromTemplate);
             setNewOpen(false);
             setView("Write");
             setDetailOpen(false);
@@ -3219,6 +3564,242 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      {linkDialog && (
+        <LinkDialog
+          text={linkDialog.text}
+          targets={linkDialog.targets}
+          onClose={() => {
+            const origin = linkDialog.origin;
+            setLinkDialog(null);
+            requestAnimationFrame(() => {
+              if (origin.getIdentity() === linkDialog.identity) origin.focus();
+            });
+          }}
+          onInsert={(text, href) => {
+            if (
+              linkDialog.origin.getIdentity() !== linkDialog.identity ||
+              linkDialog.origin.getText() !== linkDialog.source
+            )
+              throw new Error("The document changed. Select the text again.");
+            linkDialog.origin.link(text, href);
+          }}
+        />
+      )}
+      {contentsDialog && project && (
+        <ContentsDialog
+          initial={
+            contentsDialog.node?.attrs as
+              | import("./documentContents").ContentsOptions
+              | undefined
+          }
+          styles={project.styles}
+          onClose={() => {
+            const { origin, identity } = contentsDialog;
+            contentsRequest.current++;
+            setContentsDialog(null);
+            requestAnimationFrame(() => {
+              if (origin.getIdentity() === identity) origin.focus();
+            });
+          }}
+          onApply={async (options) => {
+            const { origin, identity, source, node, index } = contentsDialog;
+            if (
+              origin.getIdentity() !== identity ||
+              origin.getText() !== source
+            ) {
+              throw new Error(
+                "The source changed. Open Table of contents again.",
+              );
+            }
+            const request = ++contentsRequest.current;
+            let generated = refreshedContents(
+              {
+                type: "table_of_contents",
+                attrs: {
+                  ...node?.attrs,
+                  blockId:
+                    node?.attrs?.blockId || `block_${crypto.randomUUID()}`,
+                  ...options,
+                },
+                content: node?.content,
+              },
+              index,
+            );
+            const prepared = origin.prepareContents(generated);
+            if (!prepared) throw new Error("The document is unavailable.");
+            if (options.pageNumbers !== false) {
+              let snapshot: Project | undefined;
+              change((draft) => {
+                snapshot = structuredClone(draft);
+              });
+              const current = snapshot?.book?.chapters.find(
+                (c) => identity === `${snapshot!.id}:${c.id}:formatted`,
+              );
+              if (!snapshot || !current)
+                throw new Error(
+                  "The chapter changed. Open Table of contents again.",
+                );
+              const signature = (p: Project) =>
+                JSON.stringify([p.id, p.book, p.styles, p.settings]);
+              const before = signature(snapshot);
+              current.document = prepared.document;
+              const values = await api<PageReferenceValues>(
+                `/api/projects/${snapshot.id}/layout-fields`,
+                "POST",
+                { project: snapshot },
+              );
+              let unchanged = false;
+              change((draft) => {
+                unchanged = signature(draft) === before;
+              });
+              if (!unchanged)
+                throw new Error(
+                  "The document layout changed. Insert the contents again.",
+                );
+              updatePageReferences(snapshot, values);
+              updateProjectReferences(snapshot);
+              const find = (doc: DocNode): DocNode | undefined =>
+                doc.attrs?.blockId === generated.attrs?.blockId
+                  ? doc
+                  : doc.content?.map(find).find(Boolean);
+              generated = find(current.document)!;
+            }
+            if (request !== contentsRequest.current) return;
+            if (!prepared.apply(generated))
+              throw new Error(
+                "The document or insertion point changed. Open Table of contents again.",
+              );
+          }}
+        />
+      )}
+      {runningDialog && project && project.id === runningDialog.projectId && (
+        <RunningMatterDialog
+          project={project}
+          initial={runningDialog.initial}
+          previous={runningDialog.previous}
+          section={!!runningDialog.sectionId}
+          initialPart={runningDialog.part}
+          onClose={() => {
+            setRunningDialog(null);
+            requestAnimationFrame(() => bookEditor.current?.focus());
+          }}
+          onApply={(value) => {
+            if (runningMatterSignature(project) !== runningDialog.source)
+              throw new Error(
+                "The page settings or sections changed. Close this window and reopen it before applying.",
+              );
+            const apply = (draft: Project) => {
+              if (draft.id !== runningDialog.projectId) return;
+              if (!runningDialog.sectionId)
+                draft.settings.runningMatter = value;
+              else
+                for (const chapter of draft.book?.chapters || [])
+                  for (const node of chapter.document.content || [])
+                    if (
+                      node.type === "section_break" &&
+                      node.attrs?.blockId === runningDialog.sectionId
+                    )
+                      node.attrs.runningMatter = value;
+            };
+            const candidate = structuredClone(project);
+            apply(candidate);
+            assertProjectRunningMatterFits(candidate, editorSchema);
+            change(apply);
+            setRunningDialog(null);
+            requestAnimationFrame(() => bookEditor.current?.focus());
+          }}
+        />
+      )}
+      {fieldDialog && project && (
+        <FieldDialog
+          project={project}
+          allowPageFields={fieldDialog.origin === bookEditor.current}
+          onClose={() => {
+            const { origin, identity } = fieldDialog;
+            fieldInsertRequest.current++;
+            setFieldDialog(null);
+            requestAnimationFrame(() => {
+              if (origin.getIdentity() === identity) origin.focus();
+            });
+          }}
+          onInsert={async (kind, text) => {
+            if (
+              fieldDialog.origin.getIdentity() !== fieldDialog.identity ||
+              fieldDialog.origin.getText() !== fieldDialog.source
+            ) {
+              throw new Error("The source changed. Open Insert field again.");
+            }
+            if (isLayoutField(kind)) {
+              const { origin, identity } = fieldDialog,
+                request = ++fieldInsertRequest.current;
+              const prepared = origin.prepareField(kind, text);
+              if (!prepared) throw new Error("The document is unavailable.");
+              let snapshot: Project | undefined;
+              change((draft) => {
+                snapshot = structuredClone(draft);
+              });
+              const current = snapshot?.book?.chapters.find(
+                (c) => identity === `${snapshot!.id}:${c.id}:formatted`,
+              );
+              if (!snapshot || !current)
+                throw new Error(
+                  "Page fields need a document with a page layout.",
+                );
+              const signature = (p: Project) =>
+                  JSON.stringify([p.id, p.name, p.book, p.styles, p.settings]),
+                before = signature(snapshot);
+              current.document = prepared.document;
+              const values = await api<PageReferenceValues>(
+                `/api/projects/${snapshot.id}/layout-fields`,
+                "POST",
+                { project: snapshot },
+              );
+              if (request !== fieldInsertRequest.current) return;
+              let unchanged = false;
+              change((draft) => {
+                unchanged = signature(draft) === before;
+              });
+              const value = values.fields?.[prepared.fieldId];
+              if (value == null)
+                throw new Error(
+                  isHeadingField(kind) ? "No matching heading was found. Add a heading at this level and include its chapter before inserting this field." : "This field is outside the included publication. Include its chapter before inserting it.",
+                );
+              if (!unchanged || !prepared.apply(value))
+                throw new Error(
+                  "The document changed. Insert the field again.",
+                );
+              return;
+            }
+            fieldDialog.origin.field(kind, text);
+          }}
+        />
+      )}
+      {referenceDialog && (
+        <ReferenceDialog
+          index={referenceDialog.index}
+          onClose={() => {
+            const origin = referenceDialog.origin;
+            setReferenceDialog(null);
+            requestAnimationFrame(() => {
+              if (origin.getIdentity() === referenceDialog.identity)
+                origin.focus();
+            });
+          }}
+          onInsert={(id, text, format) => {
+            if (
+              referenceDialog.origin.getIdentity() !==
+                referenceDialog.identity ||
+              referenceDialog.origin.getText() !== referenceDialog.source
+            ) {
+              setError(
+                "The source changed. Open Insert cross-reference again.",
+              );
+              return;
+            }
+            referenceDialog.origin.reference(id, text, format);
+          }}
+        />
+      )}
       {form && (
         <FormDialog
           key={form.title}
@@ -3362,6 +3943,66 @@ export default function App() {
                     Append the project's authored definitions as a glossary
                   </label>
                   <div className="export-formats">
+                    <div className="export-review-summary">
+                      <p>
+                        {(project.book?.chapters || [])
+                          .filter((chapter) => chapter.include)
+                          .reduce(
+                            (count, chapter) =>
+                              count + commentSummary(chapter.document).open,
+                            0,
+                          )}{" "}
+                        unresolved comment threads in the included chapters.
+                      </p>
+                      <p>
+                        {(project.book?.chapters || [])
+                          .filter((chapter) => chapter.include)
+                          .reduce(
+                            (count, chapter) =>
+                              count + revisionCount(chapter.document),
+                            0,
+                          )}{" "}
+                        pending changes in the included chapters.
+                      </p>
+                      <label>
+                        Changes in exported copy{" "}
+                        <select
+                          aria-label="Changes in exported copy"
+                          value={project.settings.exportReviewView || "markup"}
+                          onChange={(event) =>
+                            change((project) => {
+                              project.settings.exportReviewView =
+                                event.target.value;
+                            })
+                          }
+                        >
+                          <option value="markup">Retain revisions</option>
+                          <option value="final">Final wording</option>
+                          <option value="original">Original wording</option>
+                        </select>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={
+                            project.settings.includeReviewComments !== false
+                          }
+                          onChange={(event) =>
+                            change((p) => {
+                              p.settings.includeReviewComments =
+                                event.target.checked;
+                            })
+                          }
+                        />
+                        Include review comments in Word, HTML and EPUB
+                      </label>
+                      <small>
+                        Clear this to export a copy without comments. Your Alder
+                        document keeps its review history. Plain text, Markdown
+                        and PDF omit comments and use final wording unless
+                        Original wording is selected.
+                      </small>
+                    </div>
                     {[
                       {
                         format: "txt",

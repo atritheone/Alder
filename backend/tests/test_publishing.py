@@ -252,7 +252,8 @@ def test_import_images_and_alignment_match_editor_schema(tmp_path):
     path.write_text('<p style="text-align:center">Before<img src="data:image/png;base64,' + base64.b64encode(image.getvalue()).decode() + '" alt="Art"/>After</p><!-- private comment -->', "utf-8")
     imported = import_document(path)
     nodes = imported["document"]["content"]
-    assert [n["type"] for n in nodes] == ["paragraph", "image", "paragraph"]
+    assert [n["type"] for n in nodes] == ["paragraph"]
+    assert [n["type"] for n in nodes[0]["content"]] == ["text", "inline_image", "text"]
     assert nodes[0]["attrs"]["align"] == "center"
     assert "private comment" not in imported["text"]
 

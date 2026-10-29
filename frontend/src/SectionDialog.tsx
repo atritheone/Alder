@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { pageGeometry } from "./pageGeometry";
 import type { SectionSettings } from "./sectionLayout";
+import { pageNumberFormats, type PageNumberFormat } from "./pageNumbering";
 import "./word-processing.css";
 
 export default function SectionDialog({
@@ -63,8 +64,63 @@ export default function SectionDialog({
               }
             >
               <option value="nextPage">Next page</option>
+              <option value="continuous">Continuous</option>
               <option value="oddPage">Next odd page</option>
               <option value="evenPage">Next even page</option>
+            </select>
+          </label>
+          <label>
+            Page numbering
+            <select
+              aria-label="Section page numbering"
+              value={value.numberingStart == null ? "continue" : "restart"}
+              onChange={(e) =>
+                setValue({
+                  ...value,
+                  numberingStart: e.target.value === "continue" ? null : 1,
+                })
+              }
+            >
+              <option value="continue">Continue from previous</option>
+              <option value="restart">Restart</option>
+            </select>
+          </label>
+          {value.numberingStart != null && (
+            <label>
+              Start at
+              <input
+                aria-label="Section starting page number"
+                type="number"
+                min={1}
+                max={9999}
+                step={1}
+                required
+                value={value.numberingStart}
+                onChange={(e) =>
+                  setValue({ ...value, numberingStart: Number(e.target.value) })
+                }
+              />
+            </label>
+          )}
+          <label>
+            Number format
+            <select
+              aria-label="Section number format"
+              value={value.numberingFormat ?? ""}
+              onChange={(e) =>
+                setValue({
+                  ...value,
+                  numberingFormat: (e.target.value ||
+                    null) as PageNumberFormat | null,
+                })
+              }
+            >
+              <option value="">Same as previous</option>
+              {Object.entries(pageNumberFormats).map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
             </select>
           </label>
           <label>

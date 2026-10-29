@@ -433,10 +433,83 @@ try {
   expect(moved.content.find((n) => n.type === "section_break")).toEqual(
     reorderBefore.content.find((n) => n.type === "section_break"),
   );
-  await page.getByRole("button", { name: "Undo typing", exact: true }).click();
+  await page.getByRole("button", { name: "Undo last change", exact: true }).click();
   await ready();
   expect(await page.evaluate(() => window.__layoutProbe.doc())).toEqual(
     reorderBefore,
+  );
+  // Explicit restarts use logical parity and remain anchored when earlier text
+  // gains pages. Reused suffix frames must never keep an obsolete offset.
+  await page.evaluate((para) => {
+    const p = window.__layoutProbe;
+    p.scale(1);
+    p.zoom(1);
+    p.pageSize({
+      width: 794,
+      height: 1123,
+      margin: 76,
+      footer: true,
+      firstPageNumber: 28,
+      pageNumberFormat: "upperLetter",
+    });
+    p.document({
+      type: "doc",
+      content: [
+        para,
+        {
+          type: "section_break",
+          attrs: {
+            kind: "oddPage",
+            page: {},
+            numberingStart: 2,
+            numberingFormat: "lowerRoman",
+          },
+        },
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "RESTART_MARKER" }],
+        },
+        { type: "section_break", attrs: { kind: "nextPage", page: {} } },
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "CONTINUE_MARKER" }],
+        },
+      ],
+    });
+  }, para("BEFORE_NUMBER_RESTART"));
+  expect(await ready()).toHaveLength(3);
+  const labels = () =>
+    page.locator(".page-sheet .page-furniture").allTextContents();
+  await expect.poll(labels).toEqual(["BB", "iii", "iv"]);
+  const copiedNumbering = await page.evaluate(() =>
+    window.__layoutProbe
+      .clipboardRoundTrip(window.__layoutProbe.doc())
+      .filter((node) => node.type === "section_break")
+      .map((node) => node.attrs),
+  );
+  expect(copiedNumbering[0].numberingStart).toBe(2);
+  expect(copiedNumbering[0].numberingFormat).toBe("lowerRoman");
+  expect(copiedNumbering[1].numberingStart).toBeNull();
+  expect(copiedNumbering[1].numberingFormat).toBeNull();
+  await page.evaluate(() =>
+    window.__layoutProbe.edit(
+      0,
+      0,
+      "Earlier text grows into several pages. ".repeat(800),
+    ),
+  );
+  const incremented = await ready(5);
+  const marker = incremented.findIndex((p) =>
+    p.text.includes("RESTART_MARKER"),
+  );
+  expect(marker + incremented[marker].frame.layout.pageNumberOffset).toBe(3);
+  await expect
+    .poll(async () => (await labels()).slice(-2))
+    .toEqual(["iii", "iv"]);
+  await page.evaluate(() => window.__layoutProbe.fullLayout());
+  expect(await ready(5)).toEqual(incremented);
+  report.checks.push(
+    "Roman and alphabetic labels, parity restarts and continuation stay correct after incremental page-count changes",
   );
   // Returning to uniform pages must remove section CSS, and page spacing is
   // presentation only: no DOM mutation may feed back into authored text.

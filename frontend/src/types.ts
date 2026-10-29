@@ -108,6 +108,7 @@ export type Pronunciation = {
 };
 export type StyleKind = "paragraph" | "character";
 export type StyleProperties = {
+  headingNumbered?: boolean | null;
   fontFamily?: string | null;
   fontSize?: number | null;
   lineHeight?: number | null;
@@ -124,6 +125,11 @@ export type StyleProperties = {
   leftIndent?: number | null;
   rightIndent?: number | null;
   firstLineIndent?: number | null;
+  tabStops?: import("./tabStops").TabStop[] | null;
+  paragraphBackground?: string | null;
+  paragraphBorderColor?: string | null;
+  paragraphBorderWidth?: number | null;
+  paragraphPadding?: number | null;
 };
 export type NamedStyle = StyleProperties & {
   id: string;
@@ -174,6 +180,8 @@ export type Project = {
     lineHeight: number;
     header: string;
     footer: boolean;
+    runningMatter?: import("./runningMatter").RunningMatter;
+    pageNumberFormat?: import("./pageNumbering").PageNumberFormat;
     [key: string]: any;
   };
   assets: Asset[];

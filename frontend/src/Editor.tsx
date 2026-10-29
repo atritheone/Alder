@@ -1,3 +1,54 @@
+import { headingNumbers, splitNumberedHeading } from "./headingNumbering";
+import {
+  outlineLists,
+  outlineListLayout,
+  validListTemplate,
+  parseListTemplate,
+  selectedOutlineList,
+  applyListOptions,
+  type ListTemplate,
+} from "./outlineLists";
+import {
+  pageReferenceValues,
+  pageReferenceTransaction,
+  type PageReferenceValues,
+} from "./pageReferences";
+import {
+  contentsSpec,
+  insertContents,
+  selectedContents,
+  protectContents,
+  validContentsOptions,
+} from "./documentContents";
+import {
+  bookmarkSpec,
+  bookmarkEndSpec,
+  documentBookmarks,
+  addDocumentBookmark,
+  changeDocumentBookmark,
+  goToDocumentBookmark,
+} from "./documentBookmarks";
+import BookmarksDialog from "./BookmarksDialog";
+import CaptionDialog from "./CaptionDialog";
+import {
+  documentFieldSpec,
+  insertDocumentField,
+  type DocumentField,
+} from "./documentFields";
+import {
+  sequenceSpec,
+  captionObject,
+  splitCaption,
+  addCaption,
+  type CaptionLabel,
+} from "./documentCaptions";
+import {
+  referenceSpec,
+  insertReference,
+  referenceRefreshTransaction,
+  referenceIndex,
+  refreshedReferences,
+} from "./documentReferences";
 import SectionDialog from "./SectionDialog";
 import {
   validSection,
@@ -11,7 +62,7 @@ import {
   type SectionSettings,
 } from "./sectionLayout";
 import { speechText, type SpeechText } from "./speechText";
-import { pageGeometryCSS } from "./pageGeometry";
+import { pageGeometryCSS, pageInsets } from "./pageGeometry";
 import { tableHeaderHTML } from "./tablePageHeaders";
 import { PageFurniture } from "./pageFurniture";
 import { editorFontPoints } from "./documentFormatting";
@@ -21,12 +72,23 @@ import {
   setParagraph,
   formattingCommands,
 } from "./editorCommands";
-import { rememberEditorSession, editorSession } from "./editorSessions";
+import {
+  rememberEditorSession,
+  editorSession,
+  portableEditorState,
+  registerEditorSession,
+} from "./editorSessions";
+import {
+  breakEditorHistory,
+  projectHistoryCommand,
+} from "./projectHistoryBridge";
+import { withinEditorEdit } from "./projectTimeline";
+import { documentJSON } from "./documentJSON";
 import ParagraphDialog from "./ParagraphDialog";
 import FontSizeField from "./FontSizeField";
 import TextColourDialog from "./TextColourDialog";
 import { blockIdentities } from "./blockIdentities";
-import { clipboardSlice, type PasteMode } from "./pasteText";
+import { clipboardSlice, clipboardText, type PasteMode } from "./pasteText";
 import InsertTableDialog from "./InsertTableDialog";
 import ImageDialog from "./ImageDialog";
 import TableDialog from "./TableDialog";
@@ -46,9 +108,14 @@ import {
 import { selectedImage, setImageProperties } from "./imageFormatting";
 import { moveTableRows, splitTable, joinTable } from "./tableStructure";
 import ListDialog from "./ListDialog";
+import { imageResize } from "./imageResize";
+import { captionAnchors } from "./captionAnchors";
+import { contentColumnWidths } from "./tableAutoFit";
 import {
   selectedList,
   setListFormatting,
+  continuedLists,
+  normaliseListOrders,
   numberedMarkers,
   bulletMarkers,
 } from "./listFormatting";
@@ -118,7 +185,13 @@ import {
   exitCode,
   splitBlock,
 } from "prosemirror-commands";
-import { history, undo, redo, closeHistory } from "prosemirror-history";
+import {
+  history,
+  undo as localUndo,
+  redo as localRedo,
+  closeHistory,
+  undoDepth,
+} from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import {
   addListNodes,
@@ -181,17 +254,41 @@ import type {
   StyleKind,
   StyleProperties,
 } from "./types";
-import { mediaUrl } from "./api";
-import { projectText, projectedRange } from "./textProjection";
+import { imageSpec } from "./imageNodes";
+import {
+  projectText,
+  projectedRange,
+  wordAtPosition,
+  selectionOffsets,
+} from "./textProjection";
 import { styleDeclarations, styleSheet } from "./styleResolution";
 import { pageSnapshots } from "./pageSnapshots";
+import { tabLayout, layoutTabs } from "./tabLayout";
+import { exactLeading, layoutExactLeading } from "./exactLeading";
+import { parseTabStops, validTabStops } from "./tabStops";
+import ParagraphRuler, { useRuler } from "./ParagraphRuler";
 import {
   capturePagePublication,
   type PagePublication,
 } from "./pagePublication";
 import { moveArrangementUnit, type ArrangementUnit } from "./arrangementUnits";
 
+import {
+  paragraphAppearanceKeys,
+  paragraphAppearanceFromDOM,
+} from "./paragraphAppearance";
+import { layoutParagraphPaint, disposeParagraphPaint } from "./paragraphPaint";
+
 const attrs = {
+  revisionProperties: { default: null },
+  captionLabel: { default: null },
+  captionTargetId: { default: null },
+  headingNumbered: { default: null },
+  headingStart: { default: null },
+  ...Object.fromEntries(
+    paragraphAppearanceKeys.map((key) => [key, { default: null }]),
+  ),
+  tabStops: { default: null },
   align: { default: null },
   styleId: { default: null },
   fontFamily: { default: null },
@@ -216,6 +313,35 @@ const points = (value: string) =>
     ? parseFloat(value) * (value.endsWith("px") ? 0.75 : 1)
     : null;
 const blockDOMAttrs = (dom: HTMLElement) => ({
+  headingNumbered: dom.hasAttribute("data-heading-numbered")
+    ? dom.getAttribute("data-heading-numbered") === "true"
+    : null,
+  headingStart: dom.hasAttribute("data-heading-start")
+    ? Number(dom.getAttribute("data-heading-start"))
+    : null,
+  revisionProperties: parseParagraphFormat(
+    dom.getAttribute("data-revision-paragraph"),
+  ),
+  captionLabel: ["Figure", "Table"].includes(
+    dom.getAttribute("data-caption-label") || "",
+  )
+    ? dom.getAttribute("data-caption-label")
+    : null,
+  captionTargetId: /^[A-Za-z0-9_.-]{1,128}$/.test(
+    dom.getAttribute("data-caption-target") || "",
+  )
+    ? dom.getAttribute("data-caption-target")
+    : null,
+  blockId: /^[A-Za-z0-9_.-]{1,128}$/.test(
+    dom.getAttribute("data-reference-target") ||
+      dom.getAttribute("data-block-id") ||
+      "",
+  )
+    ? dom.getAttribute("data-reference-target") ||
+      dom.getAttribute("data-block-id")
+    : null,
+  ...paragraphAppearanceFromDOM(dom),
+  tabStops: parseTabStops(dom.getAttribute("data-tab-stops")),
   styleId: dom.getAttribute("data-style"),
   align: dom.style.textAlign || null,
   fontFamily: dom.style.fontFamily || null,
@@ -247,6 +373,19 @@ const blockDOMAttrs = (dom: HTMLElement) => ({
   widowOrphan: dom.style.widows ? Number(dom.style.widows) > 1 : null,
 });
 const blockDOM = (attributes: Record<string, any>) => ({
+  "data-heading-numbered":
+    attributes.headingNumbered == null
+      ? null
+      : String(attributes.headingNumbered),
+  "data-heading-start": attributes.headingStart,
+  "data-revision-paragraph": attributes.revisionProperties
+    ? JSON.stringify(attributes.revisionProperties)
+    : null,
+  "data-caption-label": attributes.captionLabel,
+  "data-caption-target": attributes.captionTargetId,
+  "data-reference-target": attributes.blockId,
+  "data-tab-stops":
+    attributes.tabStops == null ? null : JSON.stringify(attributes.tabStops),
   "data-style": attributes.styleId,
   "data-line-spacing-mode": attributes.lineSpacingMode,
   "data-line-spacing": attributes.lineSpacing,
@@ -268,6 +407,14 @@ const baseSchema = new Schema({
       toDOM: (n) => ["p", blockDOM(n.attrs), 0],
     },
     text: { group: "inline" },
+    bookmark: bookmarkSpec,
+    comment_anchor: commentAnchorSpec,
+    revision_break: revisionBreakSpec,
+    bookmark_end: bookmarkEndSpec,
+    cross_reference: referenceSpec,
+    document_field: documentFieldSpec,
+    table_of_contents: contentsSpec,
+    sequence: sequenceSpec,
     heading: {
       attrs: { ...attrs, level: { default: 1 } },
       content: "inline*",
@@ -320,64 +467,8 @@ const baseSchema = new Schema({
       ],
       parseDOM: [{ tag: "div.page-break" }],
     },
-    image: {
-      inline: false,
-      group: "block",
-      draggable: true,
-      attrs: {
-        src: { default: "" },
-        assetId: { default: null },
-        alt: { default: "" },
-        title: { default: null },
-        width: { default: null },
-        align: { default: "left" },
-      },
-      parseDOM: [
-        {
-          tag: "img[src]",
-          getAttrs: (dom) => ({
-            src: dom.getAttribute("src"),
-            alt: dom.getAttribute("alt") || "",
-            title: dom.getAttribute("title"),
-            width: dom.getAttribute("width"),
-            align:
-              dom.getAttribute("data-image-align") ||
-              (dom.parentElement?.tagName === "FIGURE"
-                ? dom.parentElement.style.textAlign
-                : "") ||
-              "left",
-            assetId: dom.getAttribute("data-asset-id"),
-          }),
-        },
-      ],
-      toDOM: (n) => [
-        "figure",
-        {
-          style:
-            "text-align:" +
-            (["left", "center", "right"].includes(n.attrs.align)
-              ? n.attrs.align
-              : "left"),
-        },
-        [
-          "img",
-          {
-            src: n.attrs.src?.startsWith("/api/")
-              ? mediaUrl(n.attrs.src)
-              : n.attrs.src,
-            alt: n.attrs.alt,
-            title: n.attrs.title,
-            width: n.attrs.width,
-            style:
-              n.attrs.width && Number.isFinite(Number(n.attrs.width))
-                ? `width:${Number(n.attrs.width)}px`
-                : null,
-            "data-asset-id": n.attrs.assetId,
-            "data-image-align": n.attrs.align,
-          },
-        ],
-      ],
-    },
+    image: imageSpec(false),
+    inline_image: imageSpec(true),
   },
   marks: {
     strong: {
@@ -460,12 +551,26 @@ for (const name of ["ordered_list", "bullet_list"]) {
       : null;
   nodes = nodes.update(name, {
     ...spec,
-    attrs: { ...spec.attrs, listStyle: { default: null } },
+    attrs: {
+      ...spec.attrs,
+      listStyle: { default: null },
+      listTemplate: { default: null },
+      ...(ordered ? { continuePrevious: { default: false } } : {}),
+    },
     parseDOM: [
       {
         tag,
         getAttrs: (dom) => ({
-          ...(ordered ? { order: Number(dom.getAttribute("start") || 1) } : {}),
+          listTemplate: parseListTemplate(
+            dom.getAttribute("data-list-template"),
+          ),
+          ...(ordered
+            ? {
+                order: Number(dom.getAttribute("start") || 1),
+                continuePrevious:
+                  dom.getAttribute("data-continue-list") === "true",
+              }
+            : {}),
           listStyle: valid(
             dom.style.listStyleType ||
               (
@@ -485,7 +590,15 @@ for (const name of ["ordered_list", "bullet_list"]) {
     toDOM: (node) => [
       tag,
       {
-        ...(ordered ? { start: node.attrs.order } : {}),
+        "data-list-template": node.attrs.listTemplate
+          ? JSON.stringify(node.attrs.listTemplate)
+          : null,
+        ...(ordered
+          ? {
+              start: node.attrs.order,
+              "data-continue-list": node.attrs.continuePrevious ? "true" : null,
+            }
+          : {}),
         style: valid(node.attrs.listStyle)
           ? `list-style-type:${node.attrs.listStyle}`
           : null,
@@ -497,6 +610,9 @@ for (const name of ["ordered_list", "bullet_list"]) {
 export const schema = new Schema({
   nodes,
   marks: baseSchema.spec.marks!.append({
+    revision_insertion: revisionMarkSpec("insertion"),
+    revision_deletion: revisionMarkSpec("deletion"),
+    revision_format: revisionFormatSpec,
     strike: {
       parseDOM: [{ tag: "s" }, { tag: "del" }, { tag: "strike" }],
       toDOM: () => ["s", 0],
@@ -562,16 +678,69 @@ export function parseEditorDocument(input: DocNode): {
     const normalised = normaliseDoc(input);
     const validateAttributes = (node: DocNode) => {
       if (
+        node.type === "table_of_contents" &&
+        !validContentsOptions(
+          node.attrs as import("./documentContents").ContentsOptions,
+        )
+      )
+        throw new Error("Invalid table of contents settings.");
+      if (node.attrs?.revisionProperties) {
+        if (!validParagraphFormatLog(node.attrs.revisionProperties))
+          throw new Error("Invalid paragraph revision.");
+        const log = node.attrs.revisionProperties as ParagraphFormatLog;
+        [log.base, ...log.records.flatMap((r) => [r.before, r.after])].forEach(
+          (p) => validateAttributes(p),
+        );
+      }
+      if (node.type === "revision_break") {
+        if (!validRevisionBreak(node.attrs))
+          throw new Error("Invalid paragraph revision.");
+        if (node.attrs?.kind === "deletion")
+          validateAttributes({
+            type: node.attrs.rightType as string,
+            attrs: node.attrs.rightAttrs as Record<string, any>,
+          });
+      }
+      if (node.attrs?.tabStops != null && !validTabStops(node.attrs.tabStops))
+        throw new Error("Invalid paragraph tab stops.");
+      if (
+        node.attrs?.listTemplate != null &&
+        !validListTemplate(node.attrs.listTemplate)
+      )
+        throw new Error("Invalid list template.");
+      if (
         node.type === "section_break" &&
         !validSection({ kind: "nextPage", page: {}, ...node.attrs })
       )
         throw new Error("Invalid section settings.");
       const supported = schema.nodes[node.type]?.spec.attrs || {};
+      if (
+        node.attrs?.headingNumbered != null &&
+        typeof node.attrs.headingNumbered !== "boolean"
+      )
+        throw new Error("Invalid heading numbering.");
+      if (
+        node.attrs?.headingStart != null &&
+        (!Number.isInteger(node.attrs.headingStart) ||
+          node.attrs.headingStart < 1 ||
+          node.attrs.headingStart > 100000)
+      )
+        throw new Error("Invalid heading restart.");
+      if (
+        node.type === "table_row" &&
+        node.attrs?.allowSplit != null &&
+        typeof node.attrs.allowSplit !== "boolean"
+      )
+        throw new Error("Invalid row break setting.");
       for (const key of Object.keys(node.attrs || {})) {
         if (!(key in supported))
           throw new Error(`Unsupported ${node.type} attribute: ${key}`);
       }
       for (const mark of node.marks || []) {
+        if (isRevisionMark(mark.type) && !validRevisionStamp(mark.attrs))
+          throw new Error("Invalid revision.");
+        if (mark.type === "revision_format" && !validFormatLog(mark.attrs))
+          throw new Error("Invalid formatting revision.");
         const supportedMark = schema.marks[mark.type]?.spec.attrs || {};
         for (const key of Object.keys(mark.attrs || {})) {
           if (!(key in supportedMark))
@@ -581,8 +750,10 @@ export function parseEditorDocument(input: DocNode): {
       node.content?.forEach(validateAttributes);
     };
     validateAttributes(normalised);
-    const document = schema.nodeFromJSON(normalised);
+    const document = normaliseListOrders(schema.nodeFromJSON(normalised));
     document.check();
+    if (outlineListLayout(document).tooDeep)
+      throw new Error("Outline lists support up to nine levels.");
     return { document, error: null };
   } catch {
     return {
@@ -639,6 +810,9 @@ export type EditorHandle = {
   getPagePublication: () => PagePublication;
   getIdentity: () => string;
   navigateHeading: (id: string) => void;
+  navigateBookmark: (id: string) => void;
+  openComment: (id: string) => void;
+  navigateReference: (id: string) => void;
   moveHeading: (source: string, target: string, after: boolean) => void;
   getFormatting: () => StyleProperties | null;
   format: (name: string) => void;
@@ -674,12 +848,34 @@ export type EditorHandle = {
   applyProofreading: (edits: ProofreadingEdit[], expectedText: string) => void;
   selectRange: (start: number, end: number) => void;
   image: (src: string, assetId: string, alt: string) => void;
+  field: (kind: DocumentField, text: string) => void;
+  prepareField: (
+    kind: DocumentField,
+    text: string,
+  ) => {
+    document: DocNode;
+    fieldId: string;
+    apply: (text: string) => boolean;
+  } | null;
+  contents: (document: DocNode) => void;
+  prepareContents: (
+    document: DocNode,
+  ) => { document: DocNode; apply: (node: DocNode) => boolean } | null;
+  resolvePageReferences: () => PageReferenceValues & { changed: boolean };
   link: (text: string, url: string) => void;
+  reference: (
+    targetId: string,
+    text: string,
+    format?: import("./documentReferences").ReferenceFormat,
+  ) => void;
   style: (id: string, kind?: StyleKind) => void;
   focus: () => void;
   getSelection: () => string;
 };
 type Props = {
+  review?: ReviewPreferences;
+  onReviewPreferences?: (preferences: ReviewPreferences) => void;
+  captionStarts?: Record<CaptionLabel, number>;
   label?: string;
   toolbarContent?: ReactNode;
   onToggleSpeech?: () => void;
@@ -699,6 +895,7 @@ type Props = {
   identity: string;
   projectId: string;
   assets: Project["assets"];
+  headingStarts?: number[];
   onChange: (document: DocNode, text: string) => void;
   onSelection: (
     word: string,
@@ -721,7 +918,7 @@ type Props = {
 };
 /** Decoration refreshes must not overwrite a native cursor move that arrived
  * before ProseMirror's asynchronous selectionchange observer. */
-function refreshEditorDecorations(v: EditorView) {
+function refreshEditorDecorations(v: EditorView, redraw = true) {
   const live = v.dom.ownerDocument.getSelection();
   if (
     v.hasFocus() &&
@@ -744,16 +941,68 @@ function refreshEditorDecorations(v: EditorView) {
       /* A pending DOM edit is reconciled by ProseMirror's observer. */
     }
   }
-  v.updateState(v.state);
+  if (redraw) v.updateState(v.state);
 }
 
 export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
+  const undo: import("prosemirror-state").Command = (state, dispatch) =>
+    projectHistoryCommand(props.projectId, "undo", !!dispatch) ??
+    localUndo(state, dispatch);
+  const redo: import("prosemirror-state").Command = (state, dispatch) =>
+    projectHistoryCommand(props.projectId, "redo", !!dispatch) ??
+    localRedo(state, dispatch);
   const editorScope = useId();
+  const [reviewDialog, setReviewDialog] = useState<{
+    doc: PMNode;
+    identity: string;
+    selection: { from: number; to: number };
+  } | null>(null);
+  const reviewGroup = useRef<{
+    stamp: import("./trackedChanges").RevisionStamp;
+    at: number;
+    doc: PMNode;
+    head: number;
+    kind: string;
+  } | null>(null);
+  const showReview = () => {
+    const v = editableView();
+    if (v)
+      setReviewDialog({
+        doc: v.state.doc,
+        identity: latest.current.identity,
+        selection: { from: v.state.selection.from, to: v.state.selection.to },
+      });
+  };
+  const [commentsDialog, setCommentsDialog] = useState<{
+    doc: PMNode;
+    identity: string;
+    initial?: string;
+  } | null>(null);
+  const showComments = (initial?: string) => {
+    const v = editableView();
+    if (v)
+      setCommentsDialog({
+        doc: v.state.doc,
+        identity: latest.current.identity,
+        initial,
+      });
+  };
+  const [ruler] = useRuler();
   const [paragraphDialog, setParagraphDialog] = useState<Record<
     string,
     unknown
   > | null>(null);
   const [tableDialog, setTableDialog] = useState(false);
+  const [captionDialog, setCaptionDialog] = useState<{
+    id: string;
+    label: CaptionLabel;
+    identity: string;
+  } | null>(null);
+  const [bookmarkDialog, setBookmarkDialog] = useState<{
+    doc: PMNode;
+    identity: string | undefined;
+    items: ReturnType<typeof documentBookmarks>;
+  } | null>(null);
   const [imageDialog, setImageDialog] = useState<Record<string, any> | null>(
     null,
   );
@@ -764,9 +1013,16 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   } | null>(null);
   const [listDialog, setListDialog] = useState<{
     ordered: boolean;
+    continuePrevious: boolean;
+    document: PMNode;
+    identity: string;
     order: number;
     listStyle: string;
     index: number;
+    template: ListTemplate | null;
+    outlineLevel: number;
+    outlineOrder: number;
+    outlineContinuation: boolean;
   } | null>(null);
   const [colourDialog, setColourDialog] = useState(false);
   const directReadingRange = useRef<
@@ -924,32 +1180,89 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     if (!v || latest.current.rawMode) return [];
     const commands = formattingCommands(v.state);
     return [
+      ...(captionObject(v.state)
+        ? [
+            {
+              label: "Insert caption…",
+              run: () => {
+                const target = captionObject(v.state)!;
+                setCaptionDialog({
+                  id: target.id,
+                  label: target.label,
+                  identity: latest.current.identity,
+                });
+              },
+            },
+          ]
+        : []),
       ...(selectedImage(v.state)
         ? [
             {
               label: "Image properties…",
               run: () =>
-                setImageDialog({ ...selectedImage(v.state)!.node.attrs }),
+                setImageDialog({
+                  ...selectedImage(v.state)!.node.attrs,
+                  placement: selectedImage(v.state)!.node.isInline
+                    ? "inline"
+                    : "block",
+                }),
             },
           ]
         : []),
       { label: "Paragraph…", run: showParagraph },
+      { label: "Comments…", run: () => showComments() },
+      { label: "Review changes…", run: showReview },
+      ...(latest.current.label === "Chapter text editor"
+        ? [
+            {
+              label: selectedContents(v.state)
+                ? "Table of contents…"
+                : "Insert table of contents…",
+              run: () =>
+                window.dispatchEvent(
+                  new CustomEvent("alder-contents-dialog", {
+                    detail: {
+                      identity: latest.current.identity,
+                      node: selectedContents(v.state)?.toJSON(),
+                    },
+                  }),
+                ),
+            },
+          ]
+        : []),
+      {
+        label: "Insert field…",
+        run: () =>
+          window.dispatchEvent(
+            new CustomEvent("alder-field-dialog", {
+              detail: { identity: latest.current.identity },
+            }),
+          ),
+      },
       ...(selectedList(v.state)
         ? [
             {
               label: "List…",
               run: () => {
                 const current = selectedList(v.state);
+                const outline = selectedOutlineList(v.state);
                 if (current)
                   setListDialog({
                     ordered: current.node.type.name === "ordered_list",
                     order: current.node.attrs.order || 1,
+                    continuePrevious: !!current.node.attrs.continuePrevious,
+                    document: v.state.doc,
+                    identity: latest.current.identity,
                     listStyle:
                       current.node.attrs.listStyle ||
                       (current.node.type.name === "ordered_list"
                         ? "decimal"
                         : "disc"),
                     index: current.index,
+                    template: outline?.node.attrs.listTemplate || null,
+                    outlineLevel: outline?.level || 0,
+                    outlineOrder: outline?.node.attrs.order || 1,
+                    outlineContinuation: !!outline?.node.attrs.continuePrevious,
                   });
               },
             },
@@ -997,6 +1310,28 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
       { label: "Insert table…", run: () => setTableDialog(true) },
       {
+        label: "Insert cross-reference…",
+        run: () =>
+          window.dispatchEvent(
+            new CustomEvent("alder-reference-dialog", {
+              detail: { identity: latest.current.identity },
+            }),
+          ),
+      },
+      {
+        label: "Update fields",
+        run: () => window.dispatchEvent(new Event("alder-update-references")),
+      },
+      {
+        label: "Bookmarks…",
+        run: () =>
+          setBookmarkDialog({
+            doc: v.state.doc,
+            identity: latest.current.identity,
+            items: documentBookmarks(v.state.doc),
+          }),
+      },
+      {
         label: "Convert tab-separated text to table",
         disabled: !textToTable()(v.state),
         run: () => command(textToTable()),
@@ -1015,6 +1350,29 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             return true;
           }),
       },
+      ...(latest.current.pageLayout
+        ? [
+            {
+              label: "Headers and footers…",
+              run: () => {
+                let sectionId: string | undefined =
+                  latest.current.pageLayout?.runningSectionId;
+                v.state.doc.forEach((node, pos) => {
+                  if (
+                    pos <= v.state.selection.from &&
+                    node.type.name === "section_break"
+                  )
+                    sectionId = node.attrs.blockId;
+                });
+                window.dispatchEvent(
+                  new CustomEvent("alder-running-matter", {
+                    detail: { projectId: latest.current.projectId, sectionId },
+                  }),
+                );
+              },
+            },
+          ]
+        : []),
       ...(latest.current.pageLayout
         ? [
             {
@@ -1112,6 +1470,17 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               },
             },
             {
+              label: "Fit columns to content",
+              run: () => {
+                const widths = contentColumnWidths(v);
+                if (widths) command(sizeTableColumns(widths));
+                else
+                  setRangeWarning(
+                    "This table cannot fit at the minimum column width. Use a wider page or fewer columns.",
+                  );
+              },
+            },
+            {
               label: "Distribute columns evenly",
               run: () => {
                 const context = tableContext(v.state);
@@ -1174,8 +1543,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         ),
       );
       v.dispatch(
-        closeHistory(v.state.tr).replaceSelection(slice).scrollIntoView(),
+        closeHistory(v.state.tr)
+          .replaceSelection(slice)
+          .setMeta("uiEvent", "paste")
+          .scrollIntoView(),
       );
+      v.dispatch(closeHistory(v.state.tr));
       if (notice) setRangeWarning(notice);
       v.focus();
     } catch (error) {
@@ -1231,6 +1604,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               latest.current.fontFamily,
               latest.current.fontSize,
               latest.current.styles,
+              latest.current.headingStarts,
             ]) ||
           document.fonts.status !== "loaded"
         )
@@ -1243,6 +1617,139 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         );
       },
       getIdentity: () => latest.current.identity,
+      resolvePageReferences() {
+        const v = editableView(),
+          layout = latest.current.pageLayout;
+        if (!v || !layout || lastPageMeasurement.current?.doc !== v.state.doc)
+          throw new Error("Wait for the current document layout to finish.");
+        const values = pageReferenceValues(
+          v.state.doc,
+          measuredPages.current,
+          layout,
+        );
+        const tr = pageReferenceTransaction(v.state, values);
+        if (tr) v.dispatch(tr);
+        const document = v.state.doc.toJSON(),
+          index = referenceIndex([{ document }], latest.current.styles);
+        const refreshed = refreshedReferences(document, index);
+        const derived = referenceRefreshTransaction(
+          v.state,
+          v.state.schema.nodeFromJSON(refreshed),
+        );
+        if (derived)
+          v.dispatch(
+            derived
+              .setMeta("addToHistory", false)
+              .setMeta("referenceRefresh", true),
+          );
+        return { ...values, changed: !!tr || !!derived };
+      },
+      contents(document) {
+        const v = editableView();
+        if (!v) return;
+        v.dispatch(
+          insertContents(v.state, document).setMeta("contentsUpdate", true),
+        );
+        v.dispatch(closeHistory(v.state.tr));
+        v.focus();
+      },
+      prepareContents(document) {
+        const v = editableView();
+        if (!v) return null;
+        const before = v.state,
+          identity = latest.current.identity;
+        return {
+          document: insertContents(before, document).doc.toJSON(),
+          apply(node) {
+            if (
+              view.current !== v ||
+              latest.current.identity !== identity ||
+              !v.state.doc.eq(before.doc) ||
+              !v.state.selection.eq(before.selection)
+            )
+              return false;
+            v.dispatch(
+              insertContents(v.state, node).setMeta("contentsUpdate", true),
+            );
+            v.dispatch(closeHistory(v.state.tr));
+            v.focus();
+            return true;
+          },
+        };
+      },
+      field(kind, text) {
+        const v = editableView();
+        if (!v) return;
+        v.dispatch(insertDocumentField(v.state, kind, text));
+        v.dispatch(closeHistory(v.state.tr));
+        v.focus();
+      },
+      prepareField(kind, text) {
+        const v = editableView();
+        if (!v) return null;
+        const before = v.state,
+          identity = latest.current.identity,
+          fieldId = `block_${crypto.randomUUID()}`;
+        return {
+          document: insertDocumentField(
+            before,
+            kind,
+            text,
+            fieldId,
+          ).doc.toJSON(),
+          fieldId,
+          apply(value) {
+            if (
+              view.current !== v ||
+              latest.current.identity !== identity ||
+              !v.state.doc.eq(before.doc) ||
+              !v.state.selection.eq(before.selection)
+            )
+              return false;
+            v.dispatch(insertDocumentField(v.state, kind, value, fieldId));
+            v.dispatch(closeHistory(v.state.tr));
+            v.focus();
+            return true;
+          },
+        };
+      },
+      reference(targetId, text, format) {
+        const v = editableView();
+        if (!v) return;
+        v.dispatch(insertReference(v.state, targetId, text, format));
+        v.dispatch(closeHistory(v.state.tr));
+        v.focus();
+      },
+      navigateBookmark(id) {
+        const v = editableView();
+        if (v && goToDocumentBookmark(id)(v.state, v.dispatch)) v.focus();
+      },
+      openComment(id) {
+        const v = editableView();
+        if (v && goToDocumentComment(id)(v.state, v.dispatch)) {
+          v.focus();
+          showComments(id);
+        }
+      },
+      navigateReference(id) {
+        const v = editableView();
+        if (!v) return;
+        if (!goToDocumentBookmark(id)(v.state, v.dispatch)) {
+          let position: number | null = null;
+          v.state.doc.descendants((node, pos) => {
+            if (node.attrs.blockId === id) position = pos;
+          });
+          if (position != null)
+            v.dispatch(
+              v.state.tr
+                .setSelection(
+                  TextSelection.near(v.state.doc.resolve(position + 1)),
+                )
+                .scrollIntoView(),
+            );
+        }
+        v.focus();
+      },
       navigateHeading(id) {
         const v = editableView();
         if (!v) return;
@@ -1530,7 +2037,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         const selected = selectedImage(v.state);
         v.dispatch(
           closeHistory(v.state.tr).replaceSelectionWith(
-            schema.nodes.image.create({
+            (
+              selected?.node.type ||
+              (v.state.selection.$from.parent.type.contentMatch.matchType(
+                schema.nodes.inline_image,
+              )
+                ? schema.nodes.inline_image
+                : schema.nodes.image)
+            ).create({
               ...(selected?.node.attrs || {}),
               src,
               assetId,
@@ -1538,6 +2052,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             }),
           ),
         );
+        v.dispatch(closeHistory(v.state.tr));
         v.focus();
       },
       link(text, url) {
@@ -1546,12 +2061,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         const span = selectionRange(v);
         if (!span) return;
         v.dispatch(
-          v.state.tr.replaceWith(
+          closeHistory(v.state.tr).replaceWith(
             span.from,
             span.to,
             schema.text(text, [schema.marks.link.create({ href: url })]),
           ),
         );
+        v.dispatch(closeHistory(v.state.tr));
         v.focus();
       },
       style(id, kind) {
@@ -1578,13 +2094,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
       getSelection() {
         const v = editableView();
-        return v
-          ? v.state.doc.textBetween(
-              v.state.selection.from,
-              v.state.selection.to,
-              "\n",
-            )
-          : "";
+        if (!v) return "";
+        const range = selectionOffsets(
+          v.state.doc,
+          v.state.selection.from,
+          v.state.selection.to,
+        );
+        return projectText(v.state.doc).text.slice(range.start, range.end);
       },
     }),
     [],
@@ -1613,6 +2129,17 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       state: EditorState.create({
         doc,
         plugins: [
+          protectContents(),
+          headingNumbers(() => ({
+            styles: latest.current.styles || [],
+            initial: latest.current.headingStarts || [0, 0, 0, 0, 0, 0],
+            enabled: !latest.current.rawMode,
+          })),
+          exactLeading(
+            () => latest.current.styles || [],
+            () => !latest.current.rawMode,
+          ),
+          tabLayout(() => !latest.current.rawMode),
           typingAssistance(() =>
             !latest.current.rawMode && inputCase.current === "free"
               ? typingPreferencesRef.current
@@ -1631,7 +2158,32 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             : []),
           history(),
           blockIdentities(),
+          captionAnchors(),
+          commentDecorations(),
+          continuedLists(),
+          outlineLists(),
+          imageResize(),
           keymap({
+            "Mod-Alt-m": () => {
+              showComments();
+              return true;
+            },
+            "Mod-Home": (state, dispatch) => {
+              dispatch?.(
+                state.tr
+                  .setSelection(TextSelection.atStart(state.doc))
+                  .scrollIntoView(),
+              );
+              return true;
+            },
+            "Mod-End": (state, dispatch) => {
+              dispatch?.(
+                state.tr
+                  .setSelection(TextSelection.atEnd(state.doc))
+                  .scrollIntoView(),
+              );
+              return true;
+            },
             "Mod-Enter": () => {
               if (!latest.current.onToggleSpeech) return false;
               latest.current.onToggleSpeech();
@@ -1665,6 +2217,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                   "Mod-u": () => true,
                 }),
             Enter: chainCommands(
+              splitCaption,
               splitListItem(schema.nodes.list_item),
               (state, dispatch) => {
                 const { $from, empty } = state.selection;
@@ -1691,6 +2244,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                     }),
                 );
               },
+              splitNumberedHeading,
             ),
             Tab: props.rawMode
               ? (state, dispatch) => {
@@ -1736,6 +2290,15 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           new Plugin({
             props: {
               handleClick(_view, _position, event) {
+                const comment = (event.target as HTMLElement)?.closest(
+                  "[data-comment-thread]",
+                );
+                if (comment) {
+                  showComments(
+                    comment.getAttribute("data-comment-thread") || undefined,
+                  );
+                  return true;
+                }
                 const target = (event.target as HTMLElement)?.closest(
                   "[data-proofreading-id]",
                 );
@@ -1827,8 +2390,65 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         "aria-multiline": "true",
         spellcheck: "false",
       },
+      clipboardTextSerializer: (slice) => clipboardText(schema, slice),
       dispatchTransaction(tr) {
         if (blocked.current && tr.docChanged) return;
+        const previous = v.state;
+        if (
+          !latest.current.rawMode &&
+          tr.docChanged &&
+          !tr.getMeta("reviewDecision") &&
+          !tr.getMeta("reviewAnnotation") &&
+          tr.getMeta("addToHistory") !== false &&
+          !isHistoryTransaction(tr)
+        ) {
+          try {
+            const settings = latest.current.review;
+            if (settings?.tracking) {
+              const step = tr.steps[0] as any,
+                kind = step?.mark
+                  ? "format"
+                  : step?.slice?.size
+                    ? "insert"
+                    : "delete";
+              const old = reviewGroup.current,
+                now = performance.now();
+              const stamp =
+                old &&
+                old.doc === previous.doc &&
+                old.head === previous.selection.head &&
+                old.kind === kind &&
+                old.stamp.author === settings.author &&
+                now - old.at < 1200
+                  ? old.stamp
+                  : {
+                      id: `change_${crypto.randomUUID()}`,
+                      author: settings.author,
+                      date: new Date().toISOString(),
+                    };
+              tr = trackReviewTransaction(previous, tr, stamp);
+              reviewGroup.current = {
+                stamp,
+                at: now,
+                doc: tr.doc,
+                head: tr.selection.head,
+                kind,
+              };
+            } else if (hasReviewChanges(previous.doc))
+              tr = editReviewedDocument(previous, tr);
+          } catch (cause) {
+            reviewGroup.current = null;
+            setRangeWarning((cause as Error).message);
+            // Reconcile a DOM-input mutation rejected before state application.
+            v.updateState(previous);
+            return;
+          }
+        }
+        if (
+          tr.docChanged &&
+          breakEditorHistory(latest.current.projectId, latest.current.identity)
+        )
+          tr = closeHistory(tr);
         const applied = v.state.applyTransaction(tr);
         const next = applied.state;
         const docChanged = applied.transactions.some(
@@ -1844,32 +2464,35 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           }
         }
         v.updateState(next);
+        if (reviewGroup.current?.doc === tr.doc)
+          reviewGroup.current.doc = next.doc;
         if (docChanged) {
           documentTick((n) => n + 1);
           setRangeWarning("");
-          const json = next.doc.toJSON();
+          const json = documentJSON(next.doc);
           lastJSON.current = JSON.stringify(json);
-          latest.current.onChange(json, projectText(next.doc).text);
+          withinEditorEdit(
+            {
+              projectId: latest.current.projectId,
+              identity: latest.current.identity,
+              before: portableEditorState(previous),
+              after: portableEditorState(next),
+              joined: undoDepth(previous) === undoDepth(next),
+            },
+            () => latest.current.onChange(json, projectText(next.doc).text),
+          );
         }
         const s = next.selection;
-        const selected = next.doc.textBetween(s.from, s.to, "\n");
+        const projectedSelection = selectionOffsets(next.doc, s.from, s.to);
+        const selected = projectText(next.doc).text.slice(
+          projectedSelection.start,
+          projectedSelection.end,
+        );
         let word = selected.trim();
         selection.current = null;
         if (s.empty && s.$from.parent.isTextblock) {
-          const start = s.$from.start(),
-            parent = s.$from.parent.textContent,
-            at = s.from - start;
-          const left =
-              parent.slice(0, at).match(/[\p{L}\p{N}\u2019'-]+$/u)?.[0] || "",
-            right =
-              parent.slice(at).match(/^[\p{L}\p{N}\u2019'-]+/u)?.[0] || "";
-          word = left + right;
-          if (word)
-            selection.current = {
-              from: s.from - left.length,
-              to: s.from + right.length,
-              text: word,
-            };
+          selection.current = wordAtPosition(next.doc, s.from);
+          word = selection.current?.text || "";
         } else if (!s.empty)
           selection.current = { from: s.from, to: s.to, text: selected };
         latest.current.onSelection(word, selected, { from: s.from, to: s.to });
@@ -1910,8 +2533,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             ),
           );
           v.dispatch(
-            closeHistory(v.state.tr).replaceSelection(slice).scrollIntoView(),
+            closeHistory(v.state.tr)
+              .replaceSelection(slice)
+              .setMeta("uiEvent", "paste")
+              .scrollIntoView(),
           );
+          v.dispatch(closeHistory(v.state.tr));
           if (notice) setRangeWarning(notice);
         } catch (error) {
           setRangeWarning((error as Error).message);
@@ -1919,7 +2546,51 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         return true;
       },
       handleDOMEvents: {
+        click(v, event) {
+          const reference = (event.target as HTMLElement)?.closest<HTMLElement>(
+            "[data-cross-reference]",
+          );
+          if (reference && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            window.dispatchEvent(
+              new CustomEvent("alder-reference-navigate", {
+                detail: {
+                  projectId: latest.current.projectId,
+                  target: reference.dataset.crossReference,
+                },
+              }),
+            );
+            return true;
+          }
+          const anchor = (
+            event.target as HTMLElement
+          )?.closest<HTMLAnchorElement>("a[href^='#']");
+          if (!anchor) return false;
+          event.preventDefault();
+          if (!(event.ctrlKey || event.metaKey)) return false;
+          const target = anchor.getAttribute("href")!.slice(1);
+          const local = documentBookmarks(v.state.doc).find(
+            (item) => item.id === target || item.name === target,
+          );
+          if (local) {
+            goToDocumentBookmark(local.id)(v.state, v.dispatch);
+            v.focus();
+          } else
+            window.dispatchEvent(
+              new CustomEvent("alder-bookmark-navigate", {
+                detail: { projectId: latest.current.projectId, target },
+              }),
+            );
+          return true;
+        },
         keydown(_view, event) {
+          // Enter/list commands must use a just-moved native caret even when
+          // selectionchange has not reached ProseMirror yet.
+          if (
+            !_view.composing &&
+            _view.state.selection instanceof TextSelection
+          )
+            refreshEditorDecorations(_view, false);
           // AltGr produces Ctrl+Alt on several layouts. Leave its character
           // input to the browser instead of interpreting it as format paste.
           return (
@@ -1934,14 +2605,18 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             !(event.target instanceof HTMLImageElement)
           )
             return false;
-          const figure = event.target.closest("figure");
-          if (!figure) return false;
-          const pos = v.posAtDOM(figure, 0);
-          if (v.state.doc.nodeAt(pos)?.type.name !== "image") return false;
+          const target = event.target.closest("figure") || event.target;
+          const pos = v.posAtDOM(target, 0);
+          const node = v.state.doc.nodeAt(pos);
+          if (!node || !["image", "inline_image"].includes(node.type.name))
+            return false;
           v.dispatch(
             v.state.tr.setSelection(NodeSelection.create(v.state.doc, pos)),
           );
-          setImageDialog({ ...v.state.doc.nodeAt(pos)!.attrs });
+          setImageDialog({
+            ...node.attrs,
+            placement: node.isInline ? "inline" : "block",
+          });
           event.preventDefault();
           return true;
         },
@@ -2077,12 +2752,19 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
     });
     view.current = v;
+    const unregisterSession = registerEditorSession(
+      props.projectId,
+      props.identity,
+      () => v.state,
+    );
     const cached = editorSession(props.identity);
     if (!blocked.current && cached?.doc.eq(doc))
       v.updateState(cached.reconfigure({ plugins: v.state.plugins }));
     tick((n) => n + 1);
     return () => {
+      unregisterSession();
       if (!blocked.current) rememberEditorSession(props.identity, v.state);
+      disposeParagraphPaint(v);
       disposePageLayout(v);
       v.destroy();
       view.current = null;
@@ -2101,6 +2783,22 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         lastJSON.current = json;
         return;
       }
+      const referenceUpdate =
+        parsed.document && !blocked.current
+          ? referenceRefreshTransaction(v.state, parsed.document)
+          : null;
+      if (referenceUpdate) {
+        lastJSON.current = json;
+        pageDecorations.current = pageDecorations.current.map(
+          referenceUpdate.mapping,
+          referenceUpdate.doc,
+        );
+        selection.current = null;
+        annotationSource.current = null;
+        v.updateState(v.state.apply(referenceUpdate));
+        documentTick((version) => version + 1);
+        return;
+      }
       blocked.current = !parsed.document;
       setParseError(parsed.error);
       setRangeWarning("");
@@ -2110,8 +2808,18 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       const doc =
         parsed.document || schema.node("doc", null, [schema.node("paragraph")]);
       pageDecorations.current = DecorationSet.empty;
-      v.updateState(EditorState.create({ doc, plugins: v.state.plugins }));
+      const cached = editorSession(props.identity);
+      v.updateState(
+        cached?.doc.eq(doc)
+          ? cached.reconfigure({ plugins: v.state.plugins })
+          : EditorState.create({ doc, plugins: v.state.plugins }),
+      );
+      v.dispatch(v.state.tr.setSelection(v.state.selection));
       lastJSON.current = json;
+      // Commit the new section canvas width before measuring snapshots. A
+      // prop-driven document replacement otherwise measures against the old
+      // canvas and offsets mixed-size Arrangement pages incorrectly.
+      documentTick((version) => version + 1);
     }
   }, [props.document]);
   useLayoutEffect(() => {
@@ -2126,7 +2834,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   }, [visibleAnnotations, props.annotationText]);
   useLayoutEffect(() => {
     if (view.current) refreshEditorDecorations(view.current);
-  }, [props.showStructure]);
+  }, [props.showStructure, props.styles, props.headingStarts]);
   useLayoutEffect(() => {
     const v = view.current;
     if (!v) return;
@@ -2175,6 +2883,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         if (!view.current || !v.dom.getBoundingClientRect().width) return;
         const settings = latest.current;
         const flowKey = JSON.stringify([
+          pageDisplayScale,
           settings.pageLayout?.width,
           settings.pageLayout?.height,
           settings.pageLayout?.margin,
@@ -2183,12 +2892,17 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           settings.fontFamily,
           settings.fontSize,
           namedStyles.css,
+          settings.styles,
+          settings.headingStarts,
           v.dom.offsetWidth,
         ]);
         const key = JSON.stringify([
+          pageDisplayScale,
           settings.pageLayout,
           settings.capturePages,
           settings.layoutVisible,
+          settings.styles,
+          settings.headingStarts,
           settings.fontFamily,
           settings.fontSize,
           namedStyles.css,
@@ -2222,6 +2936,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           viewport.scrollTop = scrollTop;
           viewport.scrollLeft = scrollLeft;
         }
+        layoutParagraphPaint(v, layout, pages, latest.current.styles);
         measuredPages.current = pages;
         const headerCache = new Map<number, string>();
         const headers = pages.map((page) => {
@@ -2264,6 +2979,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             settings.fontFamily,
             settings.fontSize,
             settings.styles,
+            settings.headingStarts,
           ]),
         };
       });
@@ -2318,15 +3034,42 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     props.pageLayout?.zoom,
     props.pageLayout?.header,
     props.pageLayout?.footer,
+    props.pageLayout?.runningMatter,
+    props.pageLayout?.runningSectionId,
     props.pageLayout?.firstPageNumber,
+    props.pageLayout?.pageNumberFormat,
     pageDisplayScale,
     props.layoutVisible,
     props.capturePages,
     props.styles,
+    props.headingStarts,
     props.fontSize,
     props.fontFamily,
   ]);
   const mark = (name: string) => formatting?.marks[name] || false;
+  useLayoutEffect(() => {
+    const v = view.current;
+    if (!v || props.pageLayout) return;
+    const measure = () => {
+      layoutExactLeading(v, true);
+      layoutTabs(v, true);
+    };
+    const frame = requestAnimationFrame(measure);
+    const observer = new ResizeObserver(measure);
+    observer.observe(v.dom);
+    document.fonts.addEventListener("loadingdone", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      document.fonts.removeEventListener("loadingdone", measure);
+    };
+  }, [
+    props.pageLayout,
+    props.fontSize,
+    props.fontFamily,
+    namedStyles.css,
+    props.identity,
+  ]);
   const setFont = (name: string, value: any) => {
     const v = editableView();
     if (!v) return;
@@ -2366,6 +3109,121 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       data-alder-editor={editorScope}
     >
       <style>{namedStyles.css}</style>
+      {reviewDialog && (
+        <ReviewDialog
+          doc={reviewDialog.doc}
+          selection={reviewDialog.selection}
+          preferences={props.review || { tracking: false, author: "" }}
+          onPreferences={(value) => props.onReviewPreferences?.(value)}
+          onClose={() => {
+            setReviewDialog(null);
+            requestAnimationFrame(() => view.current?.focus());
+          }}
+          onResolve={(ids, decision) => {
+            const v = editableView();
+            if (
+              !v ||
+              latest.current.identity !== reviewDialog.identity ||
+              v.state.doc !== reviewDialog.doc
+            )
+              throw new Error(
+                "The document changed. Open Review again before applying this decision.",
+              );
+            v.dispatch(resolveReviewChanges(v.state, ids, decision));
+            v.dispatch(closeHistory(v.state.tr));
+            reviewGroup.current = null;
+            setReviewDialog({ ...reviewDialog, doc: v.state.doc });
+          }}
+          onGo={(from, to) => {
+            const v = editableView();
+            if (v && latest.current.identity === reviewDialog.identity) {
+              setReviewDialog(null);
+              const select = () => {
+                if (view.current === v) {
+                  v.dispatch(
+                    v.state.tr
+                      .setSelection(TextSelection.create(v.state.doc, from, to))
+                      .scrollIntoView(),
+                  );
+                  v.focus();
+                }
+              };
+              select();
+              requestAnimationFrame(select);
+            }
+          }}
+        />
+      )}
+      {commentsDialog && (
+        <CommentsDialog
+          items={documentComments(commentsDialog.doc)}
+          initial={commentsDialog.initial}
+          onClose={() => {
+            setCommentsDialog(null);
+            requestAnimationFrame(() => view.current?.focus());
+          }}
+          onAdd={(thread) => {
+            const v = editableView();
+            if (
+              !v ||
+              latest.current.identity !== commentsDialog.identity ||
+              v.state.doc !== commentsDialog.doc
+            )
+              return false;
+            return addDocumentComment(thread)(v.state, (tr) => {
+              v.dispatch(tr);
+              v.dispatch(closeHistory(v.state.tr));
+            });
+          }}
+          onChange={(id, thread) => {
+            const v = editableView();
+            if (
+              !v ||
+              latest.current.identity !== commentsDialog.identity ||
+              v.state.doc !== commentsDialog.doc
+            )
+              return false;
+            const ok = changeDocumentComment(id, thread)(v.state, (tr) => {
+              v.dispatch(tr);
+              v.dispatch(closeHistory(v.state.tr));
+            });
+            if (ok) setCommentsDialog({ ...commentsDialog, doc: v.state.doc });
+            return ok;
+          }}
+          onReanchor={(id) => {
+            const v = editableView(),
+              item = documentComments(commentsDialog.doc).find(
+                (c) => c.id === id,
+              );
+            if (
+              !v ||
+              !item ||
+              latest.current.identity !== commentsDialog.identity ||
+              v.state.doc !== commentsDialog.doc
+            )
+              return false;
+            const ok = addDocumentComment(item.thread, id)(v.state, (tr) => {
+              v.dispatch(tr);
+              v.dispatch(closeHistory(v.state.tr));
+            });
+            if (ok) setCommentsDialog({ ...commentsDialog, doc: v.state.doc });
+            return ok;
+          }}
+          onGo={(id) => {
+            const v = editableView();
+            if (v && latest.current.identity === commentsDialog.identity)
+              goToDocumentComment(id)(v.state, (tr) => v.dispatch(tr));
+            setCommentsDialog(null);
+            v?.focus();
+            requestAnimationFrame(() => {
+              if (v && view.current === v) {
+                goToDocumentComment(id)(v.state, (tr) => v.dispatch(tr));
+                v.focus();
+              }
+            });
+          }}
+        />
+      )}
       {colourDialog && (
         <TextColourDialog
           onApply={(colour) => {
@@ -2375,6 +3233,81 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           onClose={() => {
             setColourDialog(false);
             view.current?.focus();
+          }}
+        />
+      )}
+      {bookmarkDialog && (
+        <BookmarksDialog
+          items={bookmarkDialog.items}
+          onClose={() => {
+            const origin = view.current;
+            setBookmarkDialog(null);
+            origin?.focus();
+            requestAnimationFrame(() => {
+              if (origin && view.current === origin) origin.focus();
+            });
+          }}
+          onAdd={(name) => {
+            const v = editableView();
+            return (
+              !!v &&
+              v.state.doc === bookmarkDialog.doc &&
+              latest.current.identity === bookmarkDialog.identity &&
+              addDocumentBookmark(name)(v.state, (tr) => {
+                v.dispatch(tr);
+                v.dispatch(closeHistory(v.state.tr));
+              })
+            );
+          }}
+          onChange={(id, name) => {
+            const v = editableView();
+            return (
+              !!v &&
+              v.state.doc === bookmarkDialog.doc &&
+              latest.current.identity === bookmarkDialog.identity &&
+              changeDocumentBookmark(id, name)(v.state, (tr) => {
+                v.dispatch(tr);
+                v.dispatch(closeHistory(v.state.tr));
+              })
+            );
+          }}
+          onGo={(id) => {
+            const v = editableView();
+            if (v && latest.current.identity === bookmarkDialog.identity) {
+              goToDocumentBookmark(id)(v.state, (tr) => v.dispatch(tr));
+              setBookmarkDialog(null);
+              v.focus();
+              requestAnimationFrame(() => {
+                if (view.current === v) v.focus();
+              });
+            }
+          }}
+        />
+      )}
+      {captionDialog && (
+        <CaptionDialog
+          label={captionDialog.label}
+          onClose={() => {
+            setCaptionDialog(null);
+            requestAnimationFrame(() => view.current?.focus());
+          }}
+          onApply={(label, title, position) => {
+            const v = editableView();
+            if (
+              v &&
+              latest.current.identity === captionDialog.identity &&
+              !addCaption(
+                captionDialog.id,
+                label,
+                title,
+                position,
+                latest.current.captionStarts,
+              )(v.state, v.dispatch)
+            )
+              setRangeWarning(
+                "This object already has a caption or is no longer available.",
+              );
+            else if (v) v.dispatch(closeHistory(v.state.tr));
           }}
         />
       )}
@@ -2443,6 +3376,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                   : {}),
               })(v.state, v.dispatch);
             setImageDialog(null);
+            if (applied && v) v.dispatch(closeHistory(v.state.tr));
             if (!applied)
               setRangeWarning(
                 "The selected image changed. Select it again to edit its properties.",
@@ -2459,9 +3393,28 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             setListDialog(null);
             view.current?.focus();
           }}
-          onApply={(marker, order, fromItem) => {
-            command(setListFormatting(marker, order, fromItem));
+          onApply={(marker, order, fromItem, continuation, template) => {
+            const v = editableView();
+            if (
+              v &&
+              v.state.doc === listDialog.document &&
+              latest.current.identity === listDialog.identity
+            )
+              command(
+                applyListOptions(
+                  marker,
+                  order,
+                  fromItem,
+                  continuation,
+                  template,
+                ),
+              );
+            else
+              setRangeWarning(
+                "The selected list changed. Select it again to edit its properties.",
+              );
             setListDialog(null);
+            requestAnimationFrame(() => view.current?.focus());
           }}
         />
       )}
@@ -2546,8 +3499,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             view.current?.focus();
           }}
           onApply={(values) => {
+            const origin = view.current;
             command(setParagraph(values));
             setParagraphDialog(null);
+            requestAnimationFrame(() => {
+              if (origin && view.current === origin) origin.focus();
+            });
           }}
         />
       )}
@@ -2777,6 +3734,17 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             >
               <MoreHorizontal />
             </button>
+            {(props.review?.tracking ||
+              (view.current && hasReviewChanges(view.current.state.doc))) && (
+              <button
+                type="button"
+                className="review-indicator"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={showReview}
+              >
+                {props.review?.tracking ? "Tracking" : "Review"}
+              </button>
+            )}
             <button
               data-help-label="Insert link"
               aria-label="Insert link"
@@ -2891,21 +3859,40 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         )}
         <span className="toolbar-spacer" />
         <button
-          data-help-label="Undo typing"
-          aria-label="Undo typing"
+          data-help-label="Undo last change"
+          aria-label="Undo last change"
           onClick={() => command(undo)}
         >
           <Undo2 />
         </button>
         <button
-          data-help-label="Redo typing"
-          aria-label="Redo typing"
+          data-help-label="Redo last change"
+          aria-label="Redo last change"
           onClick={() => command(redo)}
         >
           <Redo2 />
         </button>
         {props.toolbarContent}
       </div>
+      {ruler && !props.rawMode && (
+        <ParagraphRuler
+          view={() => view.current}
+          stops={
+            (formatting?.paragraph
+              .tabStops as import("./tabStops").TabStop[]) || []
+          }
+          version={[formatting, documentVersion, props.pageLayout?.zoom]}
+          paragraph={formatting?.paragraph || {}}
+          onFormat={(attributes) => {
+            const v = editableView();
+            if (v) setParagraph(attributes)(v.state, v.dispatch);
+          }}
+          onChange={(tabStops) => {
+            const v = editableView();
+            if (v) setParagraph({ tabStops })(v.state, v.dispatch);
+          }}
+        />
+      )}
       <div
         className={
           "editor-scroll" + (props.showStructure ? " show-structure" : "")
@@ -2944,6 +3931,41 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           >
             <div
               className="flow-canvas"
+              onDoubleClick={(event) => {
+                if (!flowPages.length) return;
+                const rect = event.currentTarget.getBoundingClientRect(),
+                  scale = rect.width / canvasWidth;
+                const y = (event.clientY - rect.top) / scale,
+                  index = pageAtY(flowPages, y, props.pageLayout!),
+                  frame = pageFrame(flowPages, index, props.pageLayout!),
+                  insets = pageInsets(frame.layout),
+                  local = y - frame.top;
+                const part =
+                  local < insets.top
+                    ? "header"
+                    : local > frame.layout.height - insets.bottom &&
+                        local < frame.layout.height
+                      ? "footer"
+                      : null;
+                const v = view.current;
+                if (!part || !v) return;
+                event.preventDefault();
+                event.stopPropagation();
+                let sectionId: string | undefined =
+                  props.pageLayout?.runningSectionId;
+                v.state.doc.forEach((node, pos) => {
+                  if (
+                    pos <= flowPages[index].from &&
+                    node.type.name === "section_break"
+                  )
+                    sectionId = node.attrs.blockId;
+                });
+                window.dispatchEvent(
+                  new CustomEvent("alder-running-matter", {
+                    detail: { projectId: props.projectId, sectionId, part },
+                  }),
+                );
+              }}
               style={
                 {
                   "--page-width": `${props.pageLayout.width}px`,
@@ -2988,6 +4010,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                             pageFrame(flowPages, i, props.pageLayout!).layout
                           }
                           page={i}
+                          pageCount={flowPages.length}
+                          schema={schema}
                           fontVersion={pageFontVersion}
                         />
                       )}
@@ -3011,3 +4035,32 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     </div>
   );
 });
+import CommentsDialog from "./CommentsDialog";
+import ReviewDialog, { type ReviewPreferences } from "./ReviewDialog";
+import {
+  parseParagraphFormat,
+  validParagraphFormatLog,
+  type ParagraphFormatLog,
+} from "./trackedParagraphFormatting";
+import {
+  trackReviewTransaction,
+  resolveReviewChanges,
+  hasReviewChanges,
+  editReviewedDocument,
+} from "./trackedReview";
+import { isHistoryTransaction } from "prosemirror-history";
+import {
+  revisionMarkSpec,
+  isRevisionMark,
+  validRevisionStamp,
+} from "./trackedChanges";
+import { revisionBreakSpec, validRevisionBreak } from "./trackedParagraphs";
+import { revisionFormatSpec, validFormatLog } from "./trackedFormatting";
+import {
+  commentAnchorSpec,
+  commentDecorations,
+  documentComments,
+  addDocumentComment,
+  changeDocumentComment,
+  goToDocumentComment,
+} from "./documentComments";

@@ -27,6 +27,21 @@ export function tableRowBoundary(map: TableMap, row: number) {
   return true;
 }
 const boundary = tableRowBoundary;
+/** Cell stories currently qualified for independent page fragments. */
+export function parallelTableRows(table: PMNode): boolean {
+  return Array.from({ length: table.childCount }, (_, i) =>
+    table.child(i),
+  ).every((row) =>
+    Array.from({ length: row.childCount }, (_, i) => row.child(i)).every(
+      (cell) =>
+        Number(cell.attrs.rowspan || 1) === 1 &&
+        (cell.attrs.verticalAlign || "top") === "top" &&
+        Array.from({ length: cell.childCount }, (_, i) => cell.child(i)).every(
+          (child) => child.isTextblock,
+        ),
+    ),
+  );
+}
 export function moveTableRows(direction: -1 | 1): Command {
   return (state, dispatch) => {
     const rect = context(state);

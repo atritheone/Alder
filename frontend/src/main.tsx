@@ -4,9 +4,14 @@ import App from "./App";
 import ContextMenus from "./ContextMenu";
 import "./styles.css";
 import "./controls.css";
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-    <ContextMenus />
-  </React.StrictMode>,
-);
+if (new URLSearchParams(location.search).has("publication")) {
+  (window as any).alderPublication = import("./PublicationRenderer").then(
+    (module) => module.renderPublication,
+  );
+} else
+  createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <App />
+      <ContextMenus />
+    </React.StrictMode>,
+  );

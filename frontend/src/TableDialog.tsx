@@ -141,6 +141,28 @@ export default function TableDialog({
             </label>
           ))}
           <strong>Selected rows and columns</strong>
+          <label>
+            Row breaks
+            <select
+              aria-label="Row breaks"
+              value={
+                value("rows", "allowSplit") === undefined
+                  ? "mixed"
+                  : String(value("rows", "allowSplit"))
+              }
+              onChange={(event) =>
+                change("rows", "allowSplit", event.target.value === "true")
+              }
+            >
+              {value("rows", "allowSplit") === undefined && (
+                <option value="mixed" disabled>
+                  Mixed
+                </option>
+              )}
+              <option value="false">Keep row together</option>
+              <option value="true">Allow across pages</option>
+            </select>
+          </label>
           {number("rows", "minHeight", "Minimum row height (pt)", 1440)}
           <label>
             Column width (mm)
@@ -173,8 +195,16 @@ export default function TableDialog({
           </label>
           <small>
             Changes apply to the selected cells, rows and columns. Row height
-            grows to keep all content visible.
+            grows to keep all content visible. Rows taller than a page must
+            split.
           </small>
+          {!initial.parallelRows && (
+            <small>
+              In Write, tables with vertical merges, nested content or
+              vertically aligned cells keep rows together when they fit. The
+              row-break choice is retained for Word.
+            </small>
+          )}
         </div>
         <footer>
           <button type="button" onClick={onClose}>

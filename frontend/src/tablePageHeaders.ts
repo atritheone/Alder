@@ -1,6 +1,7 @@
 import type { EditorView } from "prosemirror-view";
 import type { PageLayout } from "./pageFlow";
 import { pageInsets } from "./pageGeometry";
+import { freezeTableLayout } from "./tableSnapshotLayout";
 
 export type FlowHeader = { table: number; rows: number; height: number };
 
@@ -105,6 +106,7 @@ export function tableHeaderHTML(
   wrapper.setAttribute("aria-hidden", "true");
   wrapper.setAttribute("inert", "");
   wrapper.style.cssText = `position:absolute;left:${(rect.left - origin.left) / scale - (canvasWidth - layout.width) / 2}px;top:${pageInsets(layout).top}px;width:${rect.width / scale}px;height:${header.height}px;pointer-events:none;user-select:none;overflow:hidden;`;
+  freezeTableLayout(table,copy,scale);
   wrapper.append(copy);
   return wrapper.outerHTML;
 }

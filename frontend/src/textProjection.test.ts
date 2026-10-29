@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { EditorState } from "prosemirror-state";
 import { schema, parseEditorDocument } from "./Editor";
-import { projectText, projectedRange } from "./textProjection";
+import { projectText, projectedRange, wordAtPosition } from "./textProjection";
 import type { DocNode } from "./types";
 
 const paragraph = (text = ""): DocNode => ({
@@ -16,6 +16,30 @@ const cell = (text = ""): DocNode => ({
 });
 
 describe("canonical document text and source boundaries", () => {
+  it("finds the caret word across silent bookmarks and hard breaks", () => {
+    const doc = document({
+      type: "paragraph",
+      content: [
+        { type: "bookmark", attrs: { name: "Start" } },
+        { type: "text", text: "first" },
+        { type: "bookmark", attrs: { name: "End" } },
+        { type: "hard_break" },
+        { type: "text", text: "second" },
+      ],
+    });
+    for (const caret of [1, 2, 4, 7, 8])
+      expect(wordAtPosition(doc, caret)).toEqual({
+        from: 2,
+        to: 7,
+        text: "first",
+      });
+    for (const caret of [9, 12, 15])
+      expect(wordAtPosition(doc, caret)).toEqual({
+        from: 9,
+        to: 15,
+        text: "second",
+      });
+  });
   it("reuses unchanged documents without serving stale positions after an edit", () => {
     const doc = document(paragraph("Read this 🌲 sentence."));
     const before = projectText(doc);

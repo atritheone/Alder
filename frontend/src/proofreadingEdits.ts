@@ -48,6 +48,18 @@ export function proofreadingTransaction(
       );
     let markup: string | undefined;
     state.doc.nodesBetween(range.from, range.to, (node) => {
+      if (node.type.name === "table_of_contents")
+        throw new Error(
+          "This text is generated contents. Edit its source heading, then update fields.",
+        );
+      if (node.marks.some((mark) => mark.type.name === "revision_deletion"))
+        throw new Error(
+          "This correction crosses a tracked deletion. Review that change before correcting the passage.",
+        );
+      if (node.isInline && !node.isText)
+        throw new Error(
+          "This correction crosses an inline object. Edit it manually to retain the object.",
+        );
       if (!node.isText) return;
       const current = JSON.stringify(node.marks.map((mark) => mark.toJSON()));
       if (markup !== undefined && markup !== current)

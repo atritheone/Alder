@@ -25,6 +25,8 @@ k.CreateJobObjectW.argtypes=[c.c_void_p,w.LPCWSTR];k.CreateJobObjectW.restype=w.
 k.SetInformationJobObject.argtypes=[w.HANDLE,c.c_int,c.c_void_p,w.DWORD]
 k.AssignProcessToJobObject.argtypes=[w.HANDLE,w.HANDLE]
 k.ResumeThread.argtypes=[w.HANDLE];k.ResumeThread.restype=w.DWORD
+timeout_seconds=int(os.environ.get('ALDER_DESKTOP_TEST_TIMEOUT_SECONDS','45'))
+if not 5 <= timeout_seconds <= 180: raise ValueError('Desktop test timeout must be between 5 and 180 seconds.')
 job=k.CreateJobObjectW(None,None)
 if not job:raise c.WinError(c.get_last_error())
 limits=EXTENDED_LIMIT();limits.basic.flags=0x2000 # Kill the isolated test tree when its job closes.
@@ -43,7 +45,7 @@ try:
   k.TerminateProcess.argtypes=[w.HANDLE,w.UINT];k.TerminateProcess(process.process,1)
   raise c.WinError(c.get_last_error())
  if k.ResumeThread(process.thread)==0xffffffff:raise c.WinError(c.get_last_error())
- if k.WaitForSingleObject(process.process,45000)!=0: raise RuntimeError('Isolated desktop test exceeded 45 seconds')
+ if k.WaitForSingleObject(process.process,timeout_seconds*1000)!=0: raise RuntimeError(f'Isolated desktop test exceeded {timeout_seconds} seconds')
  result=w.DWORD();k.GetExitCodeProcess(process.process,c.byref(result));sys.exit(result.value)
 finally:
  k.CloseHandle(job)

@@ -25,6 +25,23 @@ try {
     .getByRole("button", { name: "Word Document", exact: false })
     .click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
+  await app.evaluate(({ Menu, BrowserWindow }) => {
+    const item = Menu.getApplicationMenu()
+      .items.flatMap((menu) => menu.submenu?.items || [])
+      .find((item) => item.label === "Settings…");
+    Reflect.apply(item.click, item, [
+      { triggeredByAccelerator: false },
+      BrowserWindow.getAllWindows()[0],
+      {},
+    ]);
+  });
+  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+  await settings.getByRole("tab", { name: "Page Layout", exact: true }).click();
+  await settings.getByLabel("Page numbers in footer", { exact: true }).check();
+  await settings
+    .getByLabel("Page number format", { exact: true })
+    .selectOption("lowerRoman");
+  await settings.getByRole("button", { name: "Done", exact: true }).click();
   const editor = page.getByRole("textbox", {
     name: "Chapter text editor",
     exact: true,
@@ -45,6 +62,15 @@ try {
   await expect(
     page.getByLabel("Section top margin", { exact: true }),
   ).toHaveValue("22");
+  await page
+    .getByLabel("Section page numbering", { exact: true })
+    .selectOption("restart");
+  await page
+    .getByLabel("Section starting page number", { exact: true })
+    .fill("28");
+  await page
+    .getByLabel("Section number format", { exact: true })
+    .selectOption("upperLetter");
   await page.screenshot({ path: "work/section-dialog.png" });
   await page.getByRole("button", { name: "Insert", exact: true }).click();
   await expect(
@@ -53,6 +79,9 @@ try {
   await expect(editor).toBeFocused();
   await page.keyboard.type("Second sentence. A distant paragraph.");
   await expect(page.locator(".book-editor .page-sheet")).toHaveCount(2);
+  await expect(page.locator(".book-editor .page-sheet").nth(1)).toContainText(
+    "BB",
+  );
   await expect(page.locator(".save-status")).toHaveText("Saved");
   const saved = () =>
     page.evaluate(() =>
@@ -62,6 +91,11 @@ try {
       ),
     );
   const original = await saved();
+  const boundary = original.book.chapters[0].document.content.find(
+    (n) => n.type === "section_break",
+  );
+  expect(boundary.attrs.numberingStart).toBe(28);
+  expect(boundary.attrs.numberingFormat).toBe("upperLetter");
   expect(
     original.book.chapters[0].document.content.filter(
       (n) => n.type === "section_break",
@@ -86,7 +120,7 @@ try {
   await expect(editor).toContainText("Second sentence.");
   await page
     .locator(".book-editor")
-    .getByRole("button", { name: "Undo typing", exact: true })
+    .getByRole("button", { name: "Undo last change", exact: true })
     .click();
   await expect(page.locator(".book-editor .page-sheet")).toHaveCount(2);
   await expect(page.locator(".save-status")).toHaveText("Saved");
@@ -185,11 +219,11 @@ try {
   await page.getByRole("tab", { name: "Write", exact: true }).click();
   await page
     .locator(".book-editor")
-    .getByRole("button", { name: "Undo typing", exact: true })
+    .getByRole("button", { name: "Undo last change", exact: true })
     .click();
   await page
     .locator(".book-editor")
-    .getByRole("button", { name: "Undo typing", exact: true })
+    .getByRole("button", { name: "Undo last change", exact: true })
     .click();
   await expect(page.locator(".save-status")).toHaveText("Saved");
   expect((await saved()).book.chapters[0].document).toEqual(beforePages);

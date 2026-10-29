@@ -1,5 +1,6 @@
 import { WindowsMenu } from "./windows-menu";
 import { openPrintProof } from "./printProof";
+import { renderPublicationPdf } from "./publication";
 import {
   DocumentFiles,
   atomicDocumentWrite,
@@ -469,6 +470,51 @@ function registerIPC() {
   });
   ipcMain.handle("alder:request", async (e, method, p, body) => {
     trusted(e);
+    const fieldsOnly = /^\/api\/projects\/[^/?#]+\/layout-fields$/.test(p);
+    if (
+      method === "POST" &&
+      (fieldsOnly ||
+        (/^\/api\/projects\/[^/?#]+\/export$/.test(p) &&
+          body?.format === "pdf"))
+    ) {
+      const snapshot = await request(
+        "POST",
+        p.replace(/\/(?:export|layout-fields)$/, "/publication-layout"),
+        {
+          options: body.options,
+          ...(fieldsOnly ? { project: body.project, ephemeral: true } : {}),
+        },
+      );
+      const rendered = await renderPublicationPdf(
+        snapshot,
+        path.join(__dirname, "preload.cjs"),
+        !fieldsOnly,
+      );
+      if (fieldsOnly) return rendered.metadata.referenceValues;
+      const form = new FormData();
+      form.append(
+        "file",
+        new Blob([new Uint8Array(rendered.data!)], { type: "application/pdf" }),
+        "publication.pdf",
+      );
+      form.append("metadata", JSON.stringify(rendered.metadata));
+      const response = await fetch(
+        base + `/api/exports/${snapshot.id}/rendered-pdf`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        },
+      );
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(
+          typeof result.detail === "string"
+            ? result.detail
+            : "The generated PDF could not be verified.",
+        );
+      return result;
+    }
     const result = await request(method, p, body);
     if (
       method === "POST" &&

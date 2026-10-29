@@ -62,7 +62,7 @@ class NumberingWriter:
         props.append(numbering)
 
 
-def paragraph_attributes(paragraph):
+def paragraph_attributes(paragraph, warnings=None):
     """Resolve paragraph inheritance without inventing absent properties."""
     from docx.oxml.ns import qn
     chain, seen = [], set()
@@ -74,7 +74,7 @@ def paragraph_attributes(paragraph):
     # Word omits explicit values equal to its defaults when saving. Resolve
     # those defaults before styles so a Word round trip retains their meaning.
     result = {'keepWithNext': False, 'keepTogether': False, 'pageBreakBefore': False, 'widowOrphan': True}
-    defaults = paragraph.part.styles.element.find('.//' + qn('w:pPrDefault') + '/' + qn('w:pPr'))
+    defaults = paragraph.part.package.main_document_part.styles.element.find('.//' + qn('w:pPrDefault') + '/' + qn('w:pPr'))
     if defaults is not None:
         for tag, key in (('keepNext', 'keepWithNext'), ('keepLines', 'keepTogether'), ('pageBreakBefore', 'pageBreakBefore'), ('widowControl', 'widowOrphan')):
             prop = defaults.find(qn('w:' + tag))
@@ -95,6 +95,11 @@ def paragraph_attributes(paragraph):
                 except ValueError: pass
     for source in [*chain, paragraph]:
         props = source.paragraph_format
+        from .paragraph_appearance import read_appearance
+        result.update(read_appearance(props, warnings))
+        from .tab_stops import read_tabs
+        tabs = read_tabs(props, result.get('tabStops'))
+        if tabs is not None: result['tabStops'] = tabs
         if props.alignment is not None:
             result["align"] = {0: "left", 1: "center", 2: "right", 3: "justify"}.get(int(props.alignment), "left")
         for key, attribute in (("leftIndent", "left_indent"), ("rightIndent", "right_indent"), ("firstLineIndent", "first_line_indent"), ("spaceBefore", "space_before"), ("spaceAfter", "space_after")):
@@ -121,7 +126,34 @@ def paragraph_attributes(paragraph):
     return result
 
 
-def apply_paragraph_flow(props, attrs):
+def apply_paragraph_properties(paragraph, attrs, line_height, warnings=None):
+    """The same property writer serves current and reviewed paragraph formats."""
+    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    props = paragraph.paragraph_format
+    alignment = attrs.get('align') or attrs.get('textAlign')
+    if alignment in ('left', 'center', 'right', 'justify'):
+        paragraph.alignment = {'left': WD_ALIGN_PARAGRAPH.LEFT, 'center': WD_ALIGN_PARAGRAPH.CENTER, 'right': WD_ALIGN_PARAGRAPH.RIGHT, 'justify': WD_ALIGN_PARAGRAPH.JUSTIFY}[alignment]
+    for key, attribute in (('spaceAfter', 'space_after'), ('spaceBefore', 'space_before'), ('leftIndent', 'left_indent'), ('rightIndent', 'right_indent'), ('firstLineIndent' if attrs.get('firstLineIndent') is not None else 'indent', 'first_line_indent')):
+        if attrs.get(key) is not None:
+            minimum = -144 if key in ('indent', 'firstLineIndent', 'leftIndent', 'rightIndent') else 0
+            setattr(props, attribute, Pt(min(144, max(minimum, float(attrs[key])))))
+    if attrs.get('lineHeight'):
+        props.line_spacing = min(4, max(.8, float(attrs['lineHeight'])))
+    elif attrs.get('lineSpacingMode') == 'multiple':
+        props.line_spacing = line_height
+    apply_paragraph_flow(props, attrs, warnings)
+    if attrs.get('tabStops') is not None:
+        from .tab_stops import write_tabs
+        write_tabs(props, attrs['tabStops'], [s.position.pt for s in paragraph.style.paragraph_format.tab_stops])
+
+
+def apply_paragraph_flow(props, attrs, warnings=None):
+    from .paragraph_appearance import write_appearance
+    write_appearance(props, attrs, warnings)
+    if attrs.get('tabStops') is not None:
+        from .tab_stops import write_tabs
+        write_tabs(props, attrs['tabStops'])
     from docx.shared import Pt
     from docx.enum.text import WD_LINE_SPACING
     for key, attribute in (("keepWithNext", "keep_with_next"), ("keepTogether", "keep_together"), ("widowOrphan", "widow_control"), ("pageBreakBefore", "page_break_before")):
@@ -170,8 +202,10 @@ class NumberingReader:
             if value is not None: start = int(value.get(qn("w:val")))
         counter = self.counts.get((identifier, level), start)
         self.counts[(identifier, level)] = counter + 1
+        from .outline_lists import read_word_template
+        template = read_word_template(self, identifier)
         for key in list(self.counts):
-            if key[0] == identifier and key[1] > level: del self.counts[key]
+            if key[0] == identifier and key[1] > level and (template is None or template[key[1]]['restart']>0 and level<template[key[1]]['restart']): del self.counts[key]
         from .list_formatting import NUMBER_FORMATS, BULLETS
         bullet = fmt is not None and fmt.get(qn('w:val')) == 'bullet'
         label = spec.find(qn('w:lvlText'))
@@ -231,6 +265,8 @@ def import_table(table, container, warnings=None):
             for c in range(column, column + width): anchors[c] = node
             column += width
         row_attrs = {'minHeight': min(1440, row.height.pt)} if row.height is not None else {}
+        cant_split = row._tr.trPr.find(qn('w:cantSplit')) if row._tr.trPr is not None else None
+        row_attrs['allowSplit'] = cant_split is None or cant_split.get(qn('w:val'), '1').lower() in ('0', 'false', 'off')
         if warnings is not None:
             from docx.enum.table import WD_ROW_HEIGHT_RULE
             message = 'Fixed DOCX row heights are imported as minimum heights to keep all cell content visible.'

@@ -177,6 +177,31 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     def projects():
         return {"projects": store.list_projects()}
 
+    from .templates import Templates
+    templates = Templates(store)
+
+    @app.get('/api/document-templates')
+    def document_templates():
+        return {'templates': templates.list()}
+
+    @app.post('/api/projects/{project_id}/document-template')
+    async def save_document_template(project_id: str, request: Request):
+        data = await body(request)
+        return await run_in_threadpool(templates.save, project_id, data.get('name'), data.get('content', True))
+
+    @app.post('/api/document-templates/{identity}/create')
+    async def create_from_template(identity: str, request: Request):
+        data = await body(request)
+        return await run_in_threadpool(templates.create, identity, data.get('name'))
+
+    @app.delete('/api/document-templates/{identity}')
+    def remove_document_template(identity: str):
+        return templates.remove(identity)
+
+    @app.post('/api/document-templates/{identity}/restore')
+    def restore_document_template(identity: str):
+        return templates.remove(identity, False)
+
     @app.post("/api/projects")
     async def new_project(request: Request):
         data = await body(request)
@@ -320,9 +345,21 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         return asset
 
     @app.get("/api/projects/{project_id}/assets/{asset_id}")
-    def get_asset(project_id: str, asset_id: str):
+    def get_asset(project_id: str, asset_id: str, crop: str | None = None):
         path, asset = store.asset_path(project_id, asset_id)
         trusted_image = asset.get("mime") in {"image/png", "image/jpeg", "image/webp", "image/gif"}
+        if crop:
+            from .image_crop import cached_crop, EDGES
+            if not trusted_image:
+                raise HTTPException(422, 'Only collected raster images can be cropped.')
+            try:
+                values = crop.split(',')
+                if len(values) != 4:
+                    raise ValueError('A crop needs four percentages.')
+                cropped_path = cached_crop(path, dict(zip(EDGES, map(float, values))), store.data_dir / 'cache' / 'image-crops')
+            except (ValueError, OSError) as exc:
+                raise HTTPException(422, str(exc)) from exc
+            return FileResponse(cropped_path, media_type='image/png' if cropped_path != path else asset['mime'], headers={'Content-Security-Policy': "sandbox; default-src 'none'"})
         return FileResponse(path, media_type=asset.get("mime", "application/octet-stream"), filename=asset["name"],
                             content_disposition_type="inline" if trusted_image else "attachment",
                             headers={"Content-Security-Policy": "sandbox; default-src 'none'"})
@@ -380,6 +417,65 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             raise ValidationError("Complete the narration before exporting timed text.")
         text = subtitles(job, format)
         return Response(text, media_type="text/plain; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="narration.{format}"'})
+
+    @app.post("/api/projects/{project_id}/publication-layout")
+    async def publication_layout(project_id: str, request: Request):
+        from .publication_layout import prepare_layout
+        data = await body(request)
+        p = store.get(project_id)
+        if data.get('project') is not None:
+            from .models import validate_project
+            p = validate_project(data['project'])
+            if p['id'] != project_id: raise ValidationError('The layout snapshot belongs to another document.')
+        options = dict(data.get('options') or {})
+        options['assetRoot'] = store.asset_dir(project_id)
+        try:
+            layout = await run_in_threadpool(prepare_layout, p, options)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        if data.get('ephemeral') is True: return layout
+        export_id = uid('export_')
+        directory = store.data_dir / 'exports' / export_id
+        directory.mkdir(parents=True)
+        manifest = {key: layout[key] for key in ('name', 'projectId', 'sourceRevision', 'sourceIdentity', 'warnings')}
+        store._atomic_bytes(directory / 'layout.json', json.dumps(manifest, ensure_ascii=False).encode('utf-8'))
+        return {**layout, 'id': export_id}
+
+    @app.post("/api/exports/{export_id}/rendered-pdf")
+    async def rendered_pdf(export_id: str, file: UploadFile = File(...), metadata: str = Form(...)):
+        from .publication_layout import validate_rendered_pdf, output_name
+        if not re.fullmatch(r'export_[a-f0-9]{32}', export_id):
+            raise ValidationError('Invalid publication identity.')
+        directory = store.data_dir / 'exports' / export_id
+        if not (directory / 'layout.json').is_file(): raise KeyError('Publication snapshot does not exist.')
+        manifest = json.loads((directory / 'layout.json').read_text('utf-8'))
+        try:
+            details = json.loads(metadata)
+        except (ValueError, TypeError) as exc:
+            raise ValidationError('Invalid publication metadata.') from exc
+        if not isinstance(details, dict): raise ValidationError('Invalid publication metadata.')
+        if details.get('sourceIdentity') != manifest['sourceIdentity']:
+            raise ValidationError('The rendered document does not match its frozen publication snapshot.')
+        data = await file.read(100 * 1024 * 1024 + 1)
+        try:
+            validation = await run_in_threadpool(validate_rendered_pdf, data, details.get('pages'))
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        renderer_warnings = details.get('warnings', [])
+        if not isinstance(renderer_warnings, list) or len(renderer_warnings) > 100 or any(not isinstance(w, str) or len(w) > 1000 for w in renderer_warnings):
+            raise ValidationError('Invalid publication warnings.')
+        manifest['warnings'] = list(dict.fromkeys([*manifest['warnings'], *renderer_warnings]))
+        filename = output_name(manifest['name'])
+        path = directory / filename
+        if (directory / 'result.json').is_file():
+            if path.read_bytes() == data:
+                return json.loads((directory / 'result.json').read_text('utf-8'))
+            raise HTTPException(409, 'This publication snapshot already has a verified PDF.')
+        result = {**manifest, 'id': export_id, 'path': str(path.resolve()), 'filename': filename, 'mime': 'application/pdf',
+                  'downloadUrl': f'/api/exports/{export_id}', 'validation': validation}
+        store._atomic_bytes(path, data)
+        store._atomic_bytes(directory / 'result.json', json.dumps(result, ensure_ascii=False).encode('utf-8'))
+        return result
 
     @app.post("/api/projects/{project_id}/export")
     async def export(project_id: str, request: Request):

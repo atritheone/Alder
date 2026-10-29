@@ -2,6 +2,7 @@ import type { Node as PMNode } from "prosemirror-model";
 import type { DocNode } from "./types";
 
 export function documentText(node: DocNode): string {
+  if (node.marks?.some((mark) => mark.type === "revision_deletion")) return "";
   if (node.type === "text") return node.text || "";
   if (["hardBreak", "hard_break"].includes(node.type)) return "\n";
   if (silent.has(node.type)) return "";
@@ -21,6 +22,7 @@ export function documentText(node: DocNode): string {
  */
 export type TextProjection = { text: string; map: number[] };
 const separated = new Set([
+  "table_of_contents",
   "doc",
   "blockquote",
   "bullet_list",
@@ -36,7 +38,12 @@ const separated = new Set([
   "tableHeader",
 ]);
 const silent = new Set([
+  "revision_break",
+  "comment_anchor",
+  "bookmark",
+  "bookmark_end",
   "image",
+  "inline_image",
   "horizontal_rule",
   "horizontalRule",
   "page_break",
@@ -78,6 +85,8 @@ export function projectText(doc: PMNode): TextProjection {
     position: number,
     isRoot = false,
   ): TextProjection {
+    if (node.marks.some((mark) => mark.type.name === "revision_deletion"))
+      return { text: "", map: [position + node.nodeSize] };
     if (node.isText) {
       const text = node.text || "";
       return {
@@ -116,6 +125,21 @@ function splitsSurrogate(text: string, offset: number): boolean {
   return left >= 0xd800 && left <= 0xdbff && right >= 0xdc00 && right <= 0xdfff;
 }
 
+export function selectionOffsets(doc: PMNode, from: number, to: number) {
+  const { map } = projectText(doc);
+  const offset = (position: number) => {
+    let low = 0,
+      high = map.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (map[middle] < position) low = middle + 1;
+      else high = middle;
+    }
+    return Math.min(low, map.length - 1);
+  };
+  return { start: offset(from), end: offset(to) };
+}
+
 export function projectedRange(
   doc: PMNode,
   start: number,
@@ -141,8 +165,25 @@ export function projectedRange(
       "This text range is no longer valid. Run the check again.",
     );
   }
-  const from = projection.map[start],
-    to = projection.map[end];
+  const from = projection.map[start];
+  let to = projection.map[end];
+  // A zero-width bookmark at the end of a corrected word belongs after it,
+  // rather than inside the replacement. Empty insertions retain right affinity.
+  while (to > from) {
+    const before = doc.resolve(to).nodeBefore;
+    if (
+      !before ||
+      (!before.marks.some((mark) => mark.type.name === "revision_deletion") &&
+        ![
+          "bookmark",
+          "bookmark_end",
+          "comment_anchor",
+          "inline_image",
+        ].includes(before.type.name))
+    )
+      break;
+    to -= before.nodeSize;
+  }
   if (
     !Number.isInteger(from) ||
     !Number.isInteger(to) ||
@@ -152,4 +193,46 @@ export function projectedRange(
   )
     throw new RangeError("This text range is outside the current document.");
   return { from, to };
+}
+
+/** A caret offset counts inline atoms; visible words do not. */
+export function wordAtPosition(doc: PMNode, position: number) {
+  const resolved = doc.resolve(position);
+  if (!resolved.parent.isTextblock) return null;
+  const parent = resolved.parent,
+    start = resolved.start();
+  const projection = projectText(parent),
+    offset = position - start;
+  let low = 0,
+    high = projection.map.length - 1;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (projection.map[middle] < offset) low = middle + 1;
+    else high = middle;
+  }
+  const left =
+    projection.text.slice(0, low).match(/[\p{L}\p{N}\u2019'-]+$/u)?.[0] || "";
+  const right =
+    projection.text.slice(low).match(/^[\p{L}\p{N}\u2019'-]+/u)?.[0] || "";
+  if (!left && !right) return null;
+  // projectedRange expects a complete document. Apply the parent's mapping
+  // directly and keep a trailing point destination outside the word.
+  const from = start + projection.map[low - left.length];
+  let to = start + projection.map[low + right.length];
+  while (to > from) {
+    const before = doc.resolve(to).nodeBefore;
+    if (
+      !before ||
+      (!before.marks.some((mark) => mark.type.name === "revision_deletion") &&
+        ![
+          "bookmark",
+          "bookmark_end",
+          "comment_anchor",
+          "inline_image",
+        ].includes(before.type.name))
+    )
+      break;
+    to -= before.nodeSize;
+  }
+  return { from, to, text: left + right };
 }

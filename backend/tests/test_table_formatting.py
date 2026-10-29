@@ -46,6 +46,52 @@ def test_table_pdf_contains_all_text_and_custom_shading(tmp_path):
     assert b'.866667 .933333 1 rg' in pdf.pages[0].get_contents().get_data()
 
 
+@pytest.mark.parametrize('format', ['docx', 'html', 'epub'])
+def test_row_break_preferences_survive_exchange(tmp_path, format):
+    project, _ = fixture()
+    rows = project['book']['chapters'][0]['document']['content'][0]['content']
+    rows[0]['attrs']['allowSplit'] = True
+    rows[1]['attrs'] = {'allowSplit': False}
+    exported = build_export(project, format, tmp_path)
+    imported = import_document(Path(exported['path']))
+    table = next(n for n in imported['document']['content'] if n['type'] == 'table')
+    assert [r['attrs']['allowSplit'] for r in table['content']] == [True, False]
+    if format == 'docx':
+        doc = Document(exported['path'])
+        assert doc.tables[0].rows[0]._tr.trPr is None or doc.tables[0].rows[0]._tr.trPr.find(qn('w:cantSplit')) is None
+        assert doc.tables[0].rows[1]._tr.trPr.find(qn('w:cantSplit')) is not None
+        # Word's explicit false form has the same meaning as an absent flag.
+        doc.tables[0].rows[1]._tr.trPr.find(qn('w:cantSplit')).set(qn('w:val'), 'false')
+        doc.save(exported['path'])
+        imported = import_document(Path(exported['path']))
+        assert next(n for n in imported['document']['content'] if n['type']=='table')['content'][1]['attrs']['allowSplit'] is True
+
+
+def test_invalid_row_break_preference_rejected():
+    with pytest.raises(ValidationError):
+        validate_document({'type': 'doc', 'content': [{'type': 'table_row', 'attrs': {'allowSplit': 'false'}, 'content': []}]})
+
+
+def test_pdf_row_breaks_preserve_text_and_use_remaining_page_space(tmp_path):
+    import re
+    from pypdf import PdfReader
+    project, _ = fixture()
+    project['settings'].update(pageSize='Custom',pageWidthMm=150,pageHeightMm=100,marginMm=10,fontSize=12,lineHeight=1)
+    def paragraph(text):
+        return {'type':'paragraph','attrs':{'spaceBefore':0,'spaceAfter':0,'widowOrphan':False},'content':[{'type':'text','text':text}]}
+    for allow in (False, True):
+        content = [paragraph('INTRO'+str(i)) for i in range(10)]
+        content.append({'type':'table','content':[{'type':'table_row','attrs':{'allowSplit':allow},'content':[
+            {'type':'table_cell','content':[paragraph(prefix+str(i)) for i in range(12)]} for prefix in ('LEFT','RIGHT')]}]})
+        project['book']['chapters'][0]['document']['content'] = content
+        pdf=PdfReader(build_export(project,'pdf',tmp_path/str(allow))['path'])
+        pages=[page.extract_text() for page in pdf.pages]
+        assert ('LEFT0' in pages[0]) is allow
+        for prefix in ('LEFT','RIGHT'):
+            for i in range(12):
+                assert re.findall(r'\b(?:LEFT|RIGHT)\d+\b','\n'.join(pages)).count(prefix+str(i))==1
+
+
 def test_merged_docx_cells_style_the_continuation_rows(tmp_path):
     from alder.table_formatting import read_docx_cell
     from docx.table import _Cell

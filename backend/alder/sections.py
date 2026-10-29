@@ -1,9 +1,13 @@
 """Section boundaries are body nodes; their page settings apply after the break."""
 from .page_geometry import PAGE_FIELDS, PAGE_FORMAT, validate_page_settings, page_geometry
+from .page_numbering import validate_numbering
 
 
 def validate_section(attrs):
-    if attrs.get('kind', 'nextPage') not in ('nextPage', 'oddPage', 'evenPage'):
+    from .running_matter import validate_running_matter
+    validate_running_matter(attrs.get('runningMatter'), section=True)
+    validate_numbering(attrs.get('numberingStart'), attrs.get('numberingFormat'))
+    if attrs.get('kind', 'nextPage') not in ('nextPage', 'continuous', 'oddPage', 'evenPage'):
         raise ValueError('Unsupported section break.')
     page = attrs.get('page', {})
     if not isinstance(page, dict) or set(page) - set(PAGE_FIELDS) - {'pageSize', 'orientation', 'marginMm'}:

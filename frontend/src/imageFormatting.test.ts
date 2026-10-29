@@ -3,6 +3,11 @@ import { EditorState, NodeSelection } from "prosemirror-state";
 import { history, undo } from "prosemirror-history";
 import { schema } from "./Editor";
 import { selectedImage, setImageProperties } from "./imageFormatting";
+import { blockIdentities, identifiedDocument } from "./blockIdentities";
+import { projectText, projectedRange } from "./textProjection";
+import { proofreadingTransaction } from "./proofreadingEdits";
+import { replaceMatches } from "./findText";
+import { imageCrop, croppedImageSource } from "./imageCrop";
 
 const image = (id: string) =>
   schema.nodes.image.create({
@@ -12,6 +17,57 @@ const image = (id: string) =>
     alt: "Original",
   });
 describe("image properties", () => {
+  it("keeps crops non-destructive and independently undoable", () => {
+    const doc = schema.nodes.doc.create(null, image("one"));
+    let state = EditorState.create({ doc, plugins: [history()] });
+    const crop = { left: 25, top: 0, right: 25, bottom: 0 };
+    expect(
+      setImageProperties("one", {
+        width: 96,
+        align: "left",
+        alt: "Art",
+        title: null,
+        crop,
+      })(state, (tr) => {
+        state = state.apply(tr);
+      }),
+    ).toBe(true);
+    expect(state.doc.firstChild!.attrs).toMatchObject({
+      crop,
+      assetId: "asset",
+      src: "/api/projects/test/assets/asset",
+    });
+    expect(croppedImageSource(state.doc.firstChild!.attrs.src, crop)).toBe(
+      "/api/projects/test/assets/asset?crop=25,0,25,0",
+    );
+    expect(
+      setImageProperties("one", {
+        width: 96,
+        align: "left",
+        alt: "Art",
+        title: null,
+        crop: null,
+      })(state, (tr) => {
+        state = state.apply(tr);
+      }),
+    ).toBe(true);
+    expect(state.doc.firstChild!.attrs.crop).toBeNull();
+    undo(state, (tr) => {
+      state = state.apply(tr);
+    });
+    expect(state.doc.firstChild!.attrs.crop).toEqual(crop);
+    undo(state, (tr) => {
+      state = state.apply(tr);
+    });
+    expect(state.doc.eq(doc)).toBe(true);
+    for (const invalid of [
+      { left: 100 },
+      { top: 50, bottom: 50 },
+      { top: NaN },
+      [],
+    ])
+      expect(() => imageCrop(invalid)).toThrow();
+  });
   it("updates the identified image and preserves its asset, proportions and undo", () => {
     const doc = schema.nodes.doc.create(null, [image("one"), image("two")]);
     let state = EditorState.create({
@@ -58,4 +114,119 @@ describe("image properties", () => {
       true,
     );
   });
+});
+
+describe("inline pictures", () => {
+  const attrs = {
+    blockId: "picture",
+    src: "data:image/png;base64,placeholder",
+    alt: "Art",
+    width: 48,
+  };
+  const picture = () => schema.nodes.inline_image.create(attrs);
+  it("converts placement inside a cell without losing text, marks, identity or undo", () => {
+    const p = schema.nodes.paragraph.create({ align: "center" }, [
+      schema.text("Before", [schema.marks.strong.create()]),
+      picture(),
+      schema.text("After"),
+    ]);
+    const doc = schema.nodes.doc.create(
+      null,
+      schema.nodes.table.create(
+        null,
+        schema.nodes.table_row.create(
+          null,
+          schema.nodes.table_cell.create(null, p),
+        ),
+      ),
+    );
+    const initial = identifiedDocument(doc);
+    let state = EditorState.create({
+      doc: initial,
+      plugins: [history(), blockIdentities()],
+    });
+    const change = (placement: "inline" | "block") =>
+      setImageProperties("picture", {
+        width: 48,
+        align: "right",
+        alt: "Art",
+        title: null,
+        placement,
+      })(state, (tr) => {
+        state = state.applyTransaction(tr).state;
+      });
+    expect(change("block")).toBe(true);
+    let cell = state.doc.firstChild!.firstChild!.firstChild!;
+    expect(
+      Array.from(
+        { length: cell.childCount },
+        (_, i) => cell.child(i).type.name,
+      ),
+    ).toEqual(["paragraph", "image", "paragraph"]);
+    expect(cell.firstChild!.firstChild!.marks[0].type.name).toBe("strong");
+    expect(cell.child(2).attrs.align).toBe("center");
+    expect(state.doc.textContent).toBe("BeforeAfter");
+    expect(selectedImage(state)!.node.attrs.blockId).toBe("picture");
+    expect(change("inline")).toBe(true);
+    expect(selectedImage(state)!.node.type.name).toBe("inline_image");
+    undo(state, (tr) => {
+      state = state.apply(tr);
+    });
+    expect(selectedImage(state)!.node.type.name).toBe("image");
+    undo(state, (tr) => {
+      state = state.apply(tr);
+    });
+    expect(state.doc.eq(initial)).toBe(true);
+  });
+  it("keeps images silent and outside adjacent spelling replacements", () => {
+    const doc = schema.nodes.doc.create(
+      null,
+      schema.nodes.paragraph.create(null, [
+        schema.text("wrng"),
+        picture(),
+        schema.text(" after"),
+      ]),
+    );
+    expect(projectText(doc).text).toBe("wrng after");
+    expect(projectedRange(doc, 0, 4)).toEqual({ from: 1, to: 5 });
+    const state = EditorState.create({ doc });
+    const changed = state.apply(
+      proofreadingTransaction(state, "wrng after", [
+        { start: 0, end: 4, originalText: "wrng", replacement: "wrong" },
+      ]),
+    );
+    expect(changed.doc.firstChild!.child(1).attrs.blockId).toBe("picture");
+    expect(() =>
+      proofreadingTransaction(state, "wrng after", [
+        {
+          start: 0,
+          end: 10,
+          originalText: "wrng after",
+          replacement: "sentence",
+        },
+      ]),
+    ).toThrow(/object/);
+    expect(() =>
+      replaceMatches(state, [{ start: 0, end: 10 }], "sentence", "wrng after"),
+    ).toThrow(/image/);
+  });
+});
+
+it("retains the authored description when decorative status is toggled and undone", () => {
+  const doc = schema.nodes.doc.create(null, [image("one")]);
+  let state = EditorState.create({ doc, plugins: [history()] });
+  setImageProperties("one", {
+    width: null,
+    align: "left",
+    alt: "Original",
+    title: "Original title",
+    decorative: true,
+  })(state, (tr) => (state = state.apply(tr)));
+  expect(state.doc.firstChild!.attrs).toMatchObject({
+    decorative: true,
+    alt: "Original",
+    title: "Original title",
+  });
+  undo(state, (tr) => (state = state.apply(tr)));
+  expect(state.doc.eq(doc)).toBe(true);
 });

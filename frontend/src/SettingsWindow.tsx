@@ -17,6 +17,7 @@ import { useStoredPreference } from "./useStoredPreference";
 import "./settings-window.css";
 import TypingSettings from "./TypingSettings";
 import { pageGeometry } from "./pageGeometry";
+import { pageNumberFormats, type PageNumberFormat } from "./pageNumbering";
 
 const categories = [
   "Appearance",
@@ -36,6 +37,7 @@ type Props = {
   onScale: (scale: string) => void;
   onClose: () => void;
   onManage: (panel: string) => void;
+  onRunningMatter: () => void;
   saveState: string;
   saveError: string;
 };
@@ -468,8 +470,26 @@ export default function SettingsWindow(p: Props) {
                   )}
                 </Section>
                 <Section title="Headers & numbering">
-                  {text("header", "Running header")}
-                  {check("footer", "Page numbers in footer", true)}
+                  <button type="button" onClick={p.onRunningMatter}>Headers and footers…</button>
+                  <label className="settings-row">
+                    <span>Number format</span>
+                    <select
+                      aria-label="Page number format"
+                      value={p.project?.settings.pageNumberFormat ?? "decimal"}
+                      onChange={(e) =>
+                        p.onChange((project) => {
+                          project.settings.pageNumberFormat = e.target
+                            .value as PageNumberFormat;
+                        })
+                      }
+                    >
+                      {Object.entries(pageNumberFormats).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {number(
                     "firstPageNumber",
                     "Start page numbering at",

@@ -1,4 +1,5 @@
 import { pageFrame } from "./sectionLayout";
+import { contiguousPage } from "./pageRanges";
 import type { FlowPage } from "./pageFlow";
 import {
   useEffect,
@@ -59,7 +60,9 @@ export default function PageArrangement({
   const [drag, setDrag] = useState<Drag | null>(null);
   const units = useUnitDragging(onMoveUnit, snapshots);
   const rendered = snapshots;
+  const pagesCanMove = pages.every(contiguousPage);
   const canMovePage = (from: number, to: number) =>
+    pagesCanMove &&
     !!pages[from] &&
     !!pages[to] &&
     pages[from].to > pages[from].from &&

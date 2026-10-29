@@ -9,6 +9,7 @@ import {
   TextSelection,
 } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
+import { parallelTableRows } from "./tableStructure";
 import {
   CellSelection,
   isInTable,
@@ -103,6 +104,7 @@ export class AlderTableView extends TableView {
       align === "center" || align === "right" ? "auto" : "0";
     this.table.style.marginRight = align === "center" ? "auto" : "0";
     this.table.dataset.tableAlign = align || "left";
+    if (node.attrs.blockId) this.table.dataset.objectId = node.attrs.blockId;
   }
   update(node: PMNode) {
     const result = super.update(node);
@@ -118,6 +120,11 @@ export function tableSpec(spec: NodeSpec): NodeSpec {
       {
         tag: "table",
         getAttrs: (dom) => ({
+          blockId: /^[A-Za-z0-9_.-]{1,128}$/.test(
+            dom.getAttribute("data-object-id") || "",
+          )
+            ? dom.getAttribute("data-object-id")
+            : null,
           align:
             dom.getAttribute("data-table-align") ||
             (dom.style.marginLeft === "auto"
@@ -132,6 +139,7 @@ export function tableSpec(spec: NodeSpec): NodeSpec {
       "table",
       {
         "data-table-align": node.attrs.align,
+        "data-object-id": node.attrs.blockId,
         style: `margin-left:${node.attrs.align === "left" ? "0" : "auto"};margin-right:${node.attrs.align === "center" ? "auto" : "0"}`,
       },
       ["tbody", 0],
@@ -141,16 +149,24 @@ export function tableSpec(spec: NodeSpec): NodeSpec {
 export function rowSpec(spec: NodeSpec): NodeSpec {
   return {
     ...spec,
-    attrs: { ...spec.attrs, minHeight: { default: null } },
+    attrs: {
+      ...spec.attrs,
+      minHeight: { default: null },
+      allowSplit: { default: false },
+    },
     parseDOM: [
       {
         tag: "tr",
-        getAttrs: (dom) => ({ minHeight: points(dom.style.height) }),
+        getAttrs: (dom) => ({
+          minHeight: points(dom.style.height),
+          allowSplit: dom.getAttribute("data-allow-split") === "true",
+        }),
       },
     ],
     toDOM: (node) => [
       "tr",
       {
+        "data-allow-split": String(node.attrs.allowSplit),
         style: validNumber(node.attrs.minHeight, 1440)
           ? `height:${node.attrs.minHeight}pt`
           : null,
@@ -172,7 +188,13 @@ export type TableAppearance = {
 };
 export function selectedTableProperties(
   state: EditorState,
-): (TableAppearance & { identity: string; columns: number }) | null {
+):
+  | (TableAppearance & {
+      identity: string;
+      columns: number;
+      parallelRows: boolean;
+    })
+  | null {
   const rect = tableContext(state);
   if (!rect) return null;
   const cells = rect.map
@@ -193,6 +215,7 @@ export function selectedTableProperties(
   });
   return {
     identity: rect.table.attrs.blockId as string,
+    parallelRows: parallelTableRows(rect.table),
     table: { align: rect.table.attrs.align },
     cells: Object.fromEntries(
       Object.entries(cellDefaults).map(([key, value]) => [
@@ -201,6 +224,13 @@ export function selectedTableProperties(
       ]),
     ),
     rows: {
+      allowSplit: mixed(
+        Array.from({ length: rect.bottom - rect.top }, (_, i) =>
+          rect.table.child(i + rect.top),
+        ),
+        "allowSplit",
+        false,
+      ),
       minHeight: mixed(
         Array.from({ length: rect.bottom - rect.top }, (_, i) =>
           rect.table.child(i + rect.top),
@@ -240,6 +270,14 @@ export function setTableProperties(
     if (
       values.table.align != null &&
       !["left", "center", "right"].includes(values.table.align)
+    )
+      return false;
+    if (
+      Object.keys(values.rows).some(
+        (key) => !["minHeight", "allowSplit"].includes(key),
+      ) ||
+      (values.rows.allowSplit !== undefined &&
+        typeof values.rows.allowSplit !== "boolean")
     )
       return false;
     if (

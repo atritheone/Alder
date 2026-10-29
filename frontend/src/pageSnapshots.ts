@@ -2,6 +2,9 @@ import { documentCanvasWidth, pageAtY, pageFrame } from "./sectionLayout";
 import type { PageLayout, FlowPage } from "./pageFlow";
 import { pageInsets, pageGeometryCSS } from "./pageGeometry";
 import { pageFurnitureDOM } from "./pageFurniture";
+import { copyParagraphPaint } from "./paragraphPaint";
+import { copyExactLeading } from "./exactLeading";
+import { freezeTablesInCopy } from "./tableSnapshotLayout";
 import type { EditorView } from "prosemirror-view";
 import { documentUnits, type ArrangementUnit } from "./arrangementUnits";
 
@@ -13,7 +16,7 @@ export function pageSnapshots(
   root: HTMLElement,
   layout: PageLayout,
   pages: FlowPage[],
-  view?: EditorView,
+  view: EditorView,
   gap?: ArrangementUnit,
   originalUnits?: ArrangementUnit[],
   headers?: string[],
@@ -201,6 +204,41 @@ export function pageSnapshots(
     for (const block of blocks) {
       if (block.bottom <= top || block.top >= top + current.height) continue;
       const copy = block.element.cloneNode(true) as HTMLElement;
+      const painted = [
+        block.element,
+        ...block.element.querySelectorAll("p,h1,h2,h3,h4,h5,h6,pre,table"),
+      ];
+      [
+        copy,
+        ...copy.querySelectorAll<HTMLElement>("p,h1,h2,h3,h4,h5,h6,pre,table"),
+      ].forEach((target, index) => copyParagraphPaint(painted[index], target));
+      if (block.element.querySelector("[data-exact-run]")) {
+        const sourceInlines = [
+          block.element,
+          ...block.element.querySelectorAll("*"),
+        ];
+        [copy, ...copy.querySelectorAll<HTMLElement>("*")].forEach(
+          (element, index) => copyExactLeading(sourceInlines[index], element),
+        );
+      }
+      const sourceTabs =
+        block.element.querySelectorAll<HTMLElement>(".alder-tab");
+      copy.querySelectorAll<HTMLElement>(".alder-tab").forEach((tab, index) => {
+        const css = getComputedStyle(sourceTabs[index]);
+        for (const property of [
+          "display",
+          "width",
+          "white-space",
+          "tab-size",
+          "text-indent",
+          "background-image",
+          "background-repeat",
+          "background-position",
+          "background-size",
+          "--alder-tab-leader-y",
+        ])
+          tab.style.setProperty(property, css.getPropertyValue(property));
+      });
       if (view) {
         // Retain document positions on snapshot text, so a sentence preview
         // can reflow just its destination paragraph without rebuilding an editor.
@@ -243,6 +281,7 @@ export function pageSnapshots(
             );
         });
       }
+      freezeTablesInCopy(block.element, copy, scale);
       copy.style.setProperty("position", "absolute");
       copy.style.setProperty("top", `${block.top - top}px`);
       copy.style.setProperty("left", `${block.left - frame.left}px`);
@@ -276,7 +315,7 @@ export function pageSnapshots(
     }
     wrapper.append(documentCopy);
     if (pages[page].from !== pages[page].to)
-      wrapper.append(pageFurnitureDOM(current, page));
+      wrapper.append(pageFurnitureDOM(current, page, view.state.schema, pages.length));
     if (headers?.[page]) {
       const header = document.createElement("div");
       header.innerHTML = headers[page];

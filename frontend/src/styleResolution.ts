@@ -1,4 +1,6 @@
 import { headingFormatting } from "./documentFormatting";
+import { storyDocuments } from "./runningMatter";
+import { tabStopsCSS, validTabStops } from "./tabStops";
 import type {
   NamedStyle,
   StyleKind,
@@ -12,7 +14,15 @@ export type ResolvedStyle = StyleProperties & {
   name: string;
   kind: StyleKind;
 };
+import {
+  paragraphAppearanceKeys,
+  paragraphAppearanceCSS,
+  paragraphColour,
+} from "./paragraphAppearance";
 const propertyNames = [
+  "headingNumbered",
+  ...paragraphAppearanceKeys,
+  "tabStops",
   "fontFamily",
   "fontSize",
   "lineHeight",
@@ -31,6 +41,8 @@ const propertyNames = [
   "firstLineIndent",
 ] as const;
 const numericBounds: Record<string, [number, number]> = {
+  paragraphBorderWidth: [0, 12],
+  paragraphPadding: [0, 31],
   fontSize: [6, 72],
   lineHeight: [0.8, 4],
   lineSpacing: [1, 144],
@@ -81,6 +93,13 @@ export function resolveStyles(
     for (const key of propertyNames) {
       const value = style[key];
       if (inherited(value)) continue;
+      if (
+        (key === "paragraphBackground" || key === "paragraphBorderColor") &&
+        !paragraphColour(value)
+      )
+        throw new Error(`“${style.name}” has an invalid paragraph colour.`);
+      if (key === "tabStops" && !validTabStops(value))
+        throw new Error(`“${style.name}” has invalid tab stops.`);
       if (key in numericBounds) {
         const [low, high] = numericBounds[key];
         if (
@@ -94,6 +113,7 @@ export function resolveStyles(
           );
       } else if (
         [
+          "headingNumbered",
           "keepWithNext",
           "keepTogether",
           "widowOrphan",
@@ -188,6 +208,10 @@ export function styleDeclarations(
   )
     css.push(`color:${style.color}`);
   if (kind === "paragraph") {
+    const appearance = paragraphAppearanceCSS(style);
+    if (appearance) css.push(appearance, "--alder-paragraph-paint:1");
+    if (style.tabStops != null && validTabStops(style.tabStops))
+      css.push(`--alder-tab-stops:${tabStopsCSS(style.tabStops)}`);
     number("lineHeight", "line-height", "");
     if (
       typeof style.lineSpacing === "number" &&
@@ -262,8 +286,16 @@ export function styleUsageCount(project: Project, id: string): number {
   const count = (node: DocNode): number =>
     (node.attrs?.styleId === id ? 1 : 0) +
     (node.marks || []).filter((mark) => mark.attrs?.styleId === id).length +
+    storyDocuments(node.attrs?.runningMatter).reduce(
+      (total, child) => total + count(child),
+      0,
+    ) +
     (node.content || []).reduce((total, child) => total + count(child), 0);
   return (
+    storyDocuments(project.settings?.runningMatter).reduce(
+      (total, child) => total + count(child),
+      0,
+    ) +
     (project.book?.chapters.reduce(
       (n, chapter) => n + count(chapter.document),
       0,
@@ -314,7 +346,10 @@ export function replaceProjectStyle(
     for (const mark of node.marks || [])
       if (mark.attrs?.styleId === removedId) mark.attrs.styleId = replacementId;
     for (const child of node.content || []) visit(child);
+    for (const story of storyDocuments(node.attrs?.runningMatter)) visit(story);
   };
+  for (const story of storyDocuments(project.settings?.runningMatter))
+    visit(story);
   for (const chapter of project.book?.chapters || []) visit(chapter.document);
   for (const clip of project.clips) {
     visit(clip.document);

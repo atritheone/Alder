@@ -4,6 +4,9 @@ import { X } from "lucide-react";
 import { paragraphProperties } from "./editorCommands";
 import { styleDeclarations } from "./styleResolution";
 import type { StyleProperties } from "./types";
+import ParagraphAppearanceFields from "./ParagraphAppearanceFields";
+import TabStopsEditor from "./TabStopsEditor";
+import type { TabStop } from "./tabStops";
 import "./word-processing.css";
 
 export default function ParagraphDialog({
@@ -47,6 +50,7 @@ export default function ParagraphDialog({
             ? value
             : [
                   "keepWithNext",
+                  "headingNumbered",
                   "keepTogether",
                   "widowOrphan",
                   "pageBreakBefore",
@@ -161,6 +165,7 @@ export default function ParagraphDialog({
           {(
             [
               ["keepWithNext", "Keep with next paragraph"],
+              ["headingNumbered", "Number headings (1, 1.1, 1.1.1)"],
               ["keepTogether", "Keep lines together"],
               ["widowOrphan", "Widow and orphan control"],
               ["pageBreakBefore", "Page break before"],
@@ -180,6 +185,32 @@ export default function ParagraphDialog({
             </label>
           ))}
         </div>
+        {(changed.headingNumbered ?? initial.headingNumbered) === true && (
+          <label className="word-dialog-fields">
+            Heading restart (blank continues)
+            <input
+              aria-label="Heading restart"
+              type="number"
+              min={1}
+              max={100000}
+              step={1}
+              value={values.headingStart}
+              onChange={(e) => edit("headingStart", e.target.value)}
+            />
+          </label>
+        )}
+        <ParagraphAppearanceFields
+          value={{ ...initial, ...changed } as StyleProperties}
+          onChange={(patch) => setChanged((old) => ({ ...old, ...patch }))}
+        />
+        <TabStopsEditor
+          value={
+            (Object.hasOwn(changed, "tabStops")
+              ? changed.tabStops
+              : initial.tabStops) as TabStop[] | null
+          }
+          onChange={(tabStops) => setChanged((old) => ({ ...old, tabStops }))}
+        />
         <div className="paragraph-preview" aria-label="Paragraph preview">
           <p ref={preview}>
             A paragraph can have its own alignment, spacing and indentation.

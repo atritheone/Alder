@@ -26,7 +26,12 @@ const characterMarks = [
   "highlight",
   "code",
 ];
+import { paragraphAppearanceKeys } from "./paragraphAppearance";
 export const paragraphProperties = [
+  "headingNumbered",
+  "headingStart",
+  ...paragraphAppearanceKeys,
+  "tabStops",
   "align",
   "lineHeight",
   "lineSpacing",
@@ -80,6 +85,7 @@ export function selectionFormatting(
       ),
     );
   const paragraph = (node: PMNode) => ({
+    headingStart: node.attrs.headingStart as number | null,
     ...defaults,
     ...(node.type.name === "heading"
       ? headingFormatting(node.attrs.level)
@@ -88,7 +94,14 @@ export function selectionFormatting(
     ...present(node.attrs),
   });
   const common = (values: unknown[]) =>
-    values.length && values.every((v) => v === values[0]) ? values[0] : null;
+    values.length &&
+    values.every((v) =>
+      Array.isArray(v)
+        ? JSON.stringify(v) === JSON.stringify(values[0])
+        : v === values[0],
+    )
+      ? values[0]
+      : null;
   const textStyles = runs.map(({ marks, block }) => {
     const attrs = state.schema.marks.text_style?.isInSet(marks)?.attrs || {};
     return {

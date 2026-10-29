@@ -5,16 +5,32 @@ import { api, newClip } from "./api";
 import { DOCUMENT_FONT } from "./fontCatalogue";
 import { newChapter } from "./book";
 import type { Project } from "./types";
+import type { DocumentTemplate } from "./DocumentTemplates";
 import "./start-screen.css";
 
 export function NewDocument({
   onCreate,
   onClose,
 }: {
-  onCreate: (project: Project) => void;
+  onCreate: (project: Project, fromTemplate?: boolean) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [kind, setKind] = useState("txt");
+  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api<{ templates: DocumentTemplate[] }>("/api/document-templates")
+      .then((value) => {
+        if (active) setTemplates(value.templates);
+      })
+      .catch((e) => {
+        if (active) setError(e.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (!form.current || !document.querySelector(".start-screen")) return;
@@ -59,6 +75,17 @@ export function NewDocument({
           setBusy(true);
           setError("");
           try {
+            if (templateId) {
+              await onCreate(
+                await api<Project>(
+                  `/api/document-templates/${templateId}/create`,
+                  "POST",
+                  { name: values.name.trim() },
+                ),
+                true,
+              );
+              return;
+            }
             const project = await api<Project>("/api/projects", "POST", {
               name: values.name.trim(),
               template: "blank",
@@ -89,7 +116,7 @@ export function NewDocument({
               footer: book && values.footer === "on",
               firstPageNumber: Number(values.firstPageNumber || 1),
             });
-            onCreate(
+            await onCreate(
               await api<Project>(`/api/projects/${project.id}`, "PUT", {
                 expectedRevision: project.revision,
                 project,
@@ -129,13 +156,36 @@ export function NewDocument({
                 type="button"
                 aria-pressed={kind === value}
                 className={kind === value ? "active" : ""}
-                onClick={() => setKind(value)}
+                onClick={() => {
+                  setKind(value);
+                  setTemplateId("");
+                }}
               >
                 <strong>{label}</strong>
                 <small>{sub}</small>
               </button>
             ))}
           </div>
+          {templates.some((template) => template.kind === kind) && (
+            <label>
+              Template
+              <select
+                aria-label="Document template"
+                value={templateId}
+                disabled={busy}
+                onChange={(e) => setTemplateId(e.target.value)}
+              >
+                <option value="">Blank</option>
+                {templates
+                  .filter((template) => template.kind === kind)
+                  .map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
           <label>
             Name
             <input
@@ -146,7 +196,7 @@ export function NewDocument({
               maxLength={200}
             />
           </label>
-          {kind === "book" && (
+          {kind === "book" && !templateId && (
             <div className="new-book-fields">
               <label>
                 Author
@@ -220,9 +270,14 @@ export function NewDocument({
             </div>
           )}
           <p className="quiet">
-            {kind === "book"
-              ? "Chapters flow onto pages as you write. Adjust typography and publication settings in Edit → Settings."
-              : `Write in a blank document and save a ${kind === "txt" ? "plain text (.txt)" : "Word (.docx)"} file.`}
+            {templateId
+              ? templates.find((template) => template.id === templateId)
+                  ?.content
+                ? "Create a new document using this template’s content, styles and page settings."
+                : "Create a blank document using this template’s styles and page settings."
+              : kind === "book"
+                ? "Chapters flow onto pages as you write. Adjust typography and publication settings in Edit → Settings."
+                : `Write in a blank document and save a ${kind === "txt" ? "plain text (.txt)" : "Word (.docx)"} file.`}
           </p>
           {error && <p role="alert">{error}</p>}
         </div>
@@ -246,7 +301,7 @@ export default function StartScreen({
   onOpenFiles,
 }: {
   onOpen: (p: Project) => void;
-  onCreate: (p: Project) => void;
+  onCreate: (p: Project, fromTemplate?: boolean) => void | Promise<void>;
   onOpenFiles: (files: File[]) => Promise<void>;
 }) {
   const [mode, setMode] = useState<"home" | "new" | "open">("home");

@@ -3,6 +3,12 @@ import { defaultMarkdownSerializer } from "prosemirror-markdown";
 import { DOMParser as PMParser, DOMSerializer } from "prosemirror-model";
 import { schema, parseEditorDocument } from "./Editor";
 import type { Chapter, DocNode, RawSource } from "./types";
+import { imageSpec } from "./imageNodes";
+import { validCommentThread } from "./documentComments";
+import { validRevisionStamp } from "./trackedChanges";
+import { validRevisionBreak } from "./trackedParagraphs";
+import { validFormatLog } from "./trackedFormatting";
+import { validateReviewMarkup } from "./reviewMarkup";
 
 const markdown = new MarkdownIt({ html: false });
 export function sourceForChapter(chapter: Chapter): RawSource {
@@ -29,16 +35,8 @@ export function sourceForChapter(chapter: Chapter): RawSource {
   const sourceSerializer = new DOMSerializer(
     {
       ...serializer.nodes,
-      image: (node) => [
-        "img",
-        {
-          src: node.attrs.src,
-          alt: node.attrs.alt,
-          title: node.attrs.title,
-          width: node.attrs.width,
-          "data-asset-id": node.attrs.assetId,
-        },
-      ],
+      image: imageSpec(false, true).toDOM!,
+      inline_image: imageSpec(true, true).toDOM!,
     },
     serializer.marks,
   );
@@ -60,7 +58,63 @@ export function parseRawSource(source: RawSource): DocNode {
       " ",
     ),
   );
+  container
+    .querySelectorAll('[data-heading-marker="true"],.heading-number')
+    .forEach((node) => node.remove());
+  validateReviewMarkup(container);
   for (const el of container.querySelectorAll("*")) {
+    try {
+      for (const kind of ["insertion", "deletion"]) {
+        if (
+          el.hasAttribute(`data-revision-${kind}`) &&
+          !validRevisionStamp({
+            id: el.getAttribute(`data-revision-${kind}`),
+            author: el.getAttribute("data-revision-author") || "",
+            date: el.getAttribute("data-revision-date") || "",
+          })
+        )
+          throw new Error();
+      }
+      if (
+        el.hasAttribute("data-revision-break") &&
+        !validRevisionBreak(
+          JSON.parse(el.getAttribute("data-revision-break-content") || "null"),
+        )
+      )
+        throw new Error();
+      if (
+        el.hasAttribute("data-revision-format") &&
+        !validFormatLog(
+          JSON.parse(el.getAttribute("data-revision-format") || "null"),
+        )
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid tracked-change metadata. Your source is kept; correct the revision before returning to formatted writing.",
+      );
+    }
+    if (el.hasAttribute("data-comment-thread")) {
+      let valid = false;
+      try {
+        valid =
+          /^[A-Za-z0-9_.-]{1,128}$/.test(
+            el.getAttribute("data-comment-thread") || "",
+          ) &&
+          ["start", "end"].includes(
+            el.getAttribute("data-comment-edge") || "",
+          ) &&
+          validCommentThread(
+            JSON.parse(el.getAttribute("data-comment-content") || "null"),
+          );
+      } catch {
+        /* Invalid annotations must not silently disappear from Raw. */
+      }
+      if (!valid)
+        throw new Error(
+          "Invalid comment annotation. Your source is kept; correct its comment metadata before returning to formatted writing.",
+        );
+    }
     if (!allowed.has(el.tagName.toLowerCase()))
       throw new Error(
         `Unsupported markup: <${el.tagName.toLowerCase()}>. Your source is kept; correct it before returning to formatted writing.`,

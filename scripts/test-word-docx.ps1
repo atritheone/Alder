@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$FixtureDirectory, [switch]$OpenProbe, [switch]$RenderPdf, [switch]$RoundTrip, [switch]$Worker, [ValidateRange(5,120)][int]$TimeoutSeconds=30)
+param([Parameter(Mandatory=$true)][string]$FixtureDirectory, [switch]$OpenProbe, [switch]$RenderPdf, [switch]$RoundTrip, [switch]$UpdateFields, [switch]$Worker, [ValidateRange(5,120)][int]$TimeoutSeconds=30)
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath($FixtureDirectory)
 $taskExports = Get-Content -LiteralPath (Join-Path $taskRoot 'fixture-exports.json') -Raw | ConvertFrom-Json
@@ -9,6 +9,7 @@ if (-not $Worker) {
     if ($OpenProbe) { $taskArguments += '-OpenProbe' }
     if ($RenderPdf) { $taskArguments += '-RenderPdf' }
     if ($RoundTrip) { $taskArguments += '-RoundTrip' }
+    if ($UpdateFields) { $taskArguments += '-UpdateFields' }
     $taskProcessRecord = Join-Path $taskRoot 'word-process.json'
     Remove-Item -LiteralPath $taskProcessRecord -Force -ErrorAction SilentlyContinue
     $taskProcess = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $taskArguments -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $taskRoot 'word-stderr.txt') -RedirectStandardOutput (Join-Path $taskRoot 'word-stdout.txt')
@@ -57,8 +58,28 @@ try {
     }
     @{ status='pending'; stage='Repaginating' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
     $taskDocument.Repaginate()
+    if ($UpdateFields) {
+        # Only explicitly requested, trusted local fixtures use this path.
+        if ($taskDocument.Fields.Update() -ne 0) { throw 'Word could not update every fixture field.' }
+        if ($taskExports.runningMatterExpected) {
+            foreach ($taskSection in $taskDocument.Sections) {
+                foreach ($taskStory in @($taskSection.Headers.Item(1),$taskSection.Headers.Item(2),$taskSection.Headers.Item(3),$taskSection.Footers.Item(1),$taskSection.Footers.Item(2),$taskSection.Footers.Item(3))) {
+                    if ($taskStory.Exists -and $taskStory.Range.Fields.Update() -ne 0) { throw 'Word could not update a running-story field.' }
+                }
+            }
+        }
+        if ($taskExports.contentsExpected) {
+            if ($taskDocument.TablesOfContents.Count -ne $taskExports.contentsExpected) { throw 'Word did not recognise the native contents field.' }
+            foreach ($taskContents in $taskDocument.TablesOfContents) { $taskContents.Update() }
+        }
+        if ($taskExports.figuresExpected) {
+            if ($taskDocument.TablesOfFigures.Count -ne $taskExports.figuresExpected) { throw 'Word did not recognise the native figure/table lists.' }
+            foreach ($taskFigures in $taskDocument.TablesOfFigures) { $taskFigures.Update() }
+        }
+    }
     $taskText = $taskDocument.Content.Text
-    foreach ($taskExpected in @('Structured editing', 'First numbered item', 'Nested bullet', 'Second numbered item', 'Tall', 'Upper', 'Lower', 'Wide', 'final paragraph')) {
+    $taskExpectedText = if ($taskExports.expectedText) { $taskExports.expectedText } else { @('Structured editing', 'First numbered item', 'Nested bullet', 'Second numbered item', 'Tall', 'Upper', 'Lower', 'Wide', 'final paragraph') }
+    foreach ($taskExpected in $taskExpectedText) {
         if (-not $taskText.Contains($taskExpected)) { throw "Word lost expected wording: $taskExpected" }
     }
     @{ status='pending'; stage='Checking list numbers' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
@@ -66,7 +87,21 @@ try {
     foreach ($taskParagraph in $taskDocument.Paragraphs) {
         if ($taskParagraph.Range.Text -match '^(First|Second) numbered item') { $taskNumbers += $taskParagraph.Range.ListFormat.ListString }
     }
-    if (($taskNumbers -join ',') -ne '4.,5.') { throw "Unexpected Word list numbering: $($taskNumbers -join ',')" }
+    if (-not $taskExports.skipListNumbers -and ($taskNumbers -join ',') -ne '4.,5.') { throw "Unexpected Word list numbering: $($taskNumbers -join ',')" }
+    if ($taskExports.headingNumbersExpected) {
+        $taskHeadingNumbers = @()
+        foreach ($taskParagraph in $taskDocument.Paragraphs) {
+            if ($taskParagraph.Range.Text -match '^HEADING_NUMBER_') { $taskHeadingNumbers += $taskParagraph.Range.ListFormat.ListString }
+        }
+        if (($taskHeadingNumbers -join ',') -ne ($taskExports.headingNumbersExpected -join ',')) { throw "Unexpected Word heading numbering: $($taskHeadingNumbers -join ',')" }
+    }
+    if ($taskExports.outlineNumbersExpected) {
+        $taskOutlineNumbers = @()
+        foreach ($taskParagraph in $taskDocument.Paragraphs) {
+            if ($taskParagraph.Range.Text -match '^OUTLINE_') { $taskOutlineNumbers += $taskParagraph.Range.ListFormat.ListString }
+        }
+        if (($taskOutlineNumbers -join ',') -ne ($taskExports.outlineNumbersExpected -join ',')) { throw "Unexpected Word outline numbering: $($taskOutlineNumbers -join ',')" }
+    }
     if ($RenderPdf) {
         @{ status='pending'; stage='Rendering PDF' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
         [string]$taskPdfPath = Join-Path $taskRoot 'word-rendered.pdf'

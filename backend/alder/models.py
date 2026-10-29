@@ -13,6 +13,7 @@ import re
 from typing import Any
 from uuid import uuid4
 from .page_geometry import validate_page_settings
+from .page_numbering import validate_numbering
 
 
 class ValidationError(ValueError):
@@ -36,32 +37,39 @@ def text_document(text: str) -> dict:
 
 def document_text(document: dict) -> str:
     """Stable, lossless text projection of supported blocks, using LF boundaries."""
+    if any(mark.get('type') == 'revision_deletion' for mark in document.get('marks', [])):
+        return ''
     kind = document.get("type", "")
     if kind == "text":
         return document.get("text", "")
     if kind in ("hardBreak", "hard_break"):
         return "\n"
-    if kind == "image":
+    if kind in ("image", "inline_image"):
         return ""
     if kind in ("horizontalRule", "horizontal_rule", "pageBreak", "page_break", "section_break"):
         return ""
     parts = [document_text(child) for child in document.get("content", [])]
     if kind in ("tableRow", "table_row"):
         return "\t".join(parts)
-    if kind in ("doc", "blockquote", "bulletList", "bullet_list", "orderedList", "ordered_list",
+    if kind in ("doc", "table_of_contents", "blockquote", "bulletList", "bullet_list", "orderedList", "ordered_list",
                 "listItem", "list_item", "table", "tableCell", "table_cell", "tableHeader", "table_header"):
         return "\n".join(parts)
     return "".join(parts)
 
 
 NODE_TYPES = {
+    "table_of_contents",
+    "revision_break",
+    "comment_anchor",
+    "bookmark", "bookmark_end", "cross_reference", "sequence", "document_field",
     "doc", "paragraph", "heading", "text", "hardBreak", "hard_break", "blockquote",
     "codeBlock", "code_block", "bulletList", "bullet_list", "orderedList", "ordered_list",
-    "listItem", "list_item", "horizontalRule", "horizontal_rule", "image", "table",
+    "listItem", "list_item", "horizontalRule", "horizontal_rule", "image", "inline_image", "table",
     "tableRow", "table_row", "tableCell", "table_cell", "tableHeader", "table_header",
     "pageBreak", "page_break", "section_break", "footnote", "footnoteReference", "crossReference",
 }
 MARK_TYPES = {"bold", "strong", "italic", "em", "underline", "strike", "s", "code", "link",
+              "revision_insertion", "revision_deletion", "revision_format",
               "textStyle", "text_style", "highlight", "subscript", "superscript", "color", "fontFamily", "fontSize"}
 
 
@@ -69,9 +77,10 @@ def validate_document(document: Any) -> dict:
     if not isinstance(document, dict) or document.get("type") != "doc":
         raise ValidationError("A draft document must have a doc root.")
     count = 0
+    has_list_templates = False
 
     def walk(node: Any, depth: int) -> None:
-        nonlocal count
+        nonlocal count, has_list_templates
         count += 1
         if count > 250_000 or depth > 50:
             raise ValidationError("Document structure is too large or deeply nested.")
@@ -85,6 +94,29 @@ def validate_document(document: Any) -> dict:
         attrs = node.get("attrs", {}) or {}
         if not isinstance(attrs, dict):
             raise ValidationError("Node attributes must be an object.")
+        if node['type'] == 'table_of_contents':
+            from .document_contents import validate_contents
+            try: validate_contents(attrs)
+            except ValueError as exc: raise ValidationError(str(exc)) from exc
+            if not children or any(child.get('type') != 'paragraph' for child in children):
+                raise ValidationError('A table of contents must contain generated paragraphs.')
+        if attrs.get('revisionProperties') is not None:
+            from .paragraph_revisions import validate_paragraph_log
+            if node['type'] not in ('paragraph', 'heading'): raise ValidationError('Only prose paragraphs have reviewed paragraph properties.')
+            validate_paragraph_log(attrs['revisionProperties'])
+        if node['type'] == 'comment_anchor':
+            from .document_comments import validate_anchor
+            try:
+                validate_anchor(attrs)
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
+            if children:
+                raise ValidationError('Comment anchors cannot contain document text.')
+        if node['type'] == 'revision_break':
+            from .document_revisions import validate_break
+            validate_break(attrs)
+            if children: raise ValidationError('Paragraph revision markers cannot contain text.')
+            if attrs['kind'] == 'deletion': walk({'type': attrs['rightType'], 'attrs': attrs['rightAttrs']}, depth)
         if node['type'] == 'section_break':
             from .sections import validate_section
             if depth != 1 or children:
@@ -93,7 +125,14 @@ def validate_document(document: Any) -> dict:
                 validate_section(attrs)
             except ValueError as exc:
                 raise ValidationError(str(exc)) from exc
-        if node['type'] == 'image':
+        if node['type'] in ('image', 'inline_image'):
+            from .image_crop import validate_crop
+            try:
+                validate_crop(attrs.get('crop'))
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
+            if attrs.get('decorative') is not None and type(attrs['decorative']) is not bool:
+                raise ValidationError('Decorative image status must be true or false.')
             if attrs.get('align') not in (None, 'left', 'center', 'right'):
                 raise ValidationError('Unsupported image alignment.')
             if attrs.get('width') is not None:
@@ -106,21 +145,70 @@ def validate_document(document: Any) -> dict:
             for key in ('alt', 'title'):
                 if attrs.get(key) is not None and not isinstance(attrs[key], str):
                     raise ValidationError('Image alternative text and title must be text.')
+        if node['type'] == 'bookmark' and (not isinstance(attrs.get('name'),str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,39}',attrs['name'])):
+            raise ValidationError('Bookmark names must start with a letter and use up to 40 letters, numbers or underscores.')
+        if node['type'] == 'bookmark' and attrs.get('range') is not None and type(attrs['range']) is not bool:
+            raise ValidationError('Bookmark range status must be true or false.')
+        if node['type'] == 'bookmark_end' and (not isinstance(attrs.get('targetId'), str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', attrs['targetId'])):
+            raise ValidationError('A bookmark range end needs a valid target identity.')
+        if node['type'] == 'cross_reference':
+            if attrs.get('referenceFormat', 'text') not in ('text', 'labelNumber', 'number', 'page'):
+                raise ValidationError('Unsupported cross-reference display format.')
+            if not isinstance(attrs.get('targetId'), str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', attrs['targetId']):
+                raise ValidationError('A cross-reference needs a valid target identity.')
+            if any(not isinstance(child, dict) or child.get('type') != 'text' or not isinstance(child.get('text'), str) for child in children) or len(document_text(node)) > 10000:
+                raise ValidationError('A cross-reference needs a plain-text result of at most 10000 characters.')
+            if attrs.get('unresolved') is not None and type(attrs['unresolved']) is not bool:
+                raise ValidationError('Cross-reference availability must be true or false.')
+        if node['type'] == 'sequence':
+            if attrs.get('sequenceName') not in ('Figure','Table'):
+                raise ValidationError('Unsupported caption sequence.')
+            if any(not isinstance(child, dict) or child.get('type') != 'text' or not isinstance(child.get('text'), str) for child in children) or not re.fullmatch(r'[1-9][0-9]{0,5}', document_text(node)):
+                raise ValidationError('A caption number needs a positive whole-number result.')
+        if node['type'] == 'document_field':
+            from .document_fields import FIELD_LABELS
+            if attrs.get('fieldKind') not in FIELD_LABELS:
+                raise ValidationError('Unsupported document field.')
+            if any(not isinstance(child,dict) or child.get('type')!='text' or not isinstance(child.get('text'),str) for child in children) or len(document_text(node))>10000:
+                raise ValidationError('A document field needs a plain-text result of at most 10000 characters.')
+            if attrs.get('unresolved') is not None and type(attrs['unresolved']) is not bool:
+                raise ValidationError('Field availability must be true or false.')
+        if attrs.get('captionLabel') is not None and (node['type'] not in ('paragraph','heading') or attrs['captionLabel'] not in ('Figure','Table')):
+            raise ValidationError('A caption must be a Figure or Table paragraph.')
+        if attrs.get('captionTargetId') is not None and (not isinstance(attrs['captionTargetId'],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}',attrs['captionTargetId'])):
+            raise ValidationError('A caption needs a valid object identity.')
         if node['type'] in ('table', 'table_row', 'table_cell', 'table_header', 'tableRow', 'tableCell', 'tableHeader'):
             from .table_formatting import validate_table_attributes
             try:
                 validate_table_attributes({'tableRow': 'table_row', 'tableCell': 'table_cell', 'tableHeader': 'table_header'}.get(node['type'], node['type']), attrs)
             except ValueError as exc:
                 raise ValidationError(str(exc)) from exc
-        for key in ("keepWithNext", "keepTogether", "widowOrphan", "pageBreakBefore"):
+        for key in ("keepWithNext", "keepTogether", "widowOrphan", "pageBreakBefore", "headingNumbered"):
             if attrs.get(key) is not None and type(attrs[key]) is not bool:
                 raise ValidationError(f"{key} must be true, false or inherited.")
+        if attrs.get('headingStart') is not None and (type(attrs['headingStart']) is not int or not 1 <= attrs['headingStart'] <= 100000):
+            raise ValidationError('Heading restart must be a whole number from 1 to 100000.')
         if attrs.get('lineSpacingMode') not in (None, 'multiple', 'exact', 'atLeast'):
             raise ValidationError("Unsupported paragraph line spacing mode.")
+        from .paragraph_appearance import validate_appearance
+        try: validate_appearance(attrs)
+        except ValueError as exc: raise ValidationError(str(exc)) from exc
+        if attrs.get('tabStops') is not None:
+            from .tab_stops import validate_tab_stops
+            try: validate_tab_stops(attrs['tabStops'])
+            except ValueError as exc: raise ValidationError(str(exc)) from exc
         if attrs.get('lineSpacing') is not None and (type(attrs['lineSpacing']) not in (int, float) or not 1 <= attrs['lineSpacing'] <= 144):
             raise ValidationError("Paragraph line spacing must be between 1 and 144 points.")
+        if attrs.get('continuePrevious') is not None and type(attrs['continuePrevious']) is not bool:
+            raise ValidationError('List continuation must be true or false.')
         if attrs.get('listStyle') not in (None, 'decimal', 'lower-alpha', 'upper-alpha', 'lower-roman', 'upper-roman', 'disc', 'circle', 'square'):
             raise ValidationError('Unsupported list marker style.')
+        if attrs.get('listTemplate') is not None:
+            has_list_templates = True
+            from .outline_lists import validate_list_template
+            if node['type'] not in ('ordered_list','orderedList','bullet_list','bulletList'):raise ValidationError('A numbering template belongs to a list.')
+            try:validate_list_template(attrs['listTemplate'])
+            except ValueError as exc:raise ValidationError(str(exc)) from exc
         for key in ("src", "href"):
             value = attrs.get(key)
             if value and (not isinstance(value, str) or re.match(r"\s*(?:javascript|vbscript|data|file):", value, re.I)):
@@ -133,6 +221,12 @@ def validate_document(document: Any) -> dict:
                 raise ValidationError("Unsupported formatting mark.")
             if mark.get("attrs") is not None and not isinstance(mark["attrs"], dict):
                 raise ValidationError("Mark attributes must be an object.")
+            if mark['type'] in ('revision_insertion', 'revision_deletion'):
+                from .document_revisions import validate_revision
+                validate_revision(mark.get('attrs'))
+            if mark['type'] == 'revision_format':
+                from .revision_formatting import validate_format_log
+                validate_format_log(mark.get('attrs'))
             href = (mark.get("attrs") or {}).get("href")
             if href and (not isinstance(href, str) or re.match(r"\s*(?:javascript|vbscript|data|file):", href, re.I)):
                 raise ValidationError("Unsafe link URL.")
@@ -140,7 +234,12 @@ def validate_document(document: Any) -> dict:
             walk(child, depth + 1)
 
     walk(document, 0)
-    return document
+    if has_list_templates:
+        from .outline_lists import outline_layout
+        try:outline_layout(document)
+        except ValueError as exc:raise ValidationError(str(exc)) from exc
+    from .list_formatting import resolve_list_orders
+    return resolve_list_orders(document)
 
 
 def _identity(value: Any, description: str) -> str:
@@ -190,6 +289,16 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     for kind in ("ideas", "pronunciation", "styles"):
         for item in p[kind]:
             register(item, kind)
+            if kind == 'styles':
+                if item.get('headingNumbered') is not None and type(item['headingNumbered']) is not bool:
+                    raise ValidationError('Style heading numbering must be true, false or inherited.')
+                from .paragraph_appearance import validate_appearance
+                try: validate_appearance(item)
+                except ValueError as exc: raise ValidationError(str(exc)) from exc
+            if kind == 'styles' and item.get('tabStops') is not None:
+                from .tab_stops import validate_tab_stops
+                try: validate_tab_stops(item['tabStops'])
+                except ValueError as exc: raise ValidationError(str(exc)) from exc
     for row in p["dictionary"]:
         if not isinstance(row, dict) or not isinstance(row.get("word"), str) or not row["word"].strip():
             raise ValidationError("Dictionary entries require a word.")
@@ -308,7 +417,8 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     if not isinstance(p["settings"].get("proofreadingStyle", False), bool):
         raise ValidationError("Proofreading style advice must be true or false.")
     defaults = {"author": "", "description": "", "pageSize": "A4", "marginMm": 22,
-                "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True}
+                "fontFamily": "Cambria", "fontSize": 12, "lineHeight": 1.6, "header": "", "footer": True,
+                "pageNumberFormat": "decimal"}
     for k, v in defaults.items():
         p["settings"].setdefault(k, v)
     for prop, low, high in (("marginMm", 0, 100), ("fontSize", 6, 96), ("lineHeight", 0.8, 4)):
@@ -317,6 +427,9 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
             raise ValidationError(f"Invalid document setting: {prop}.")
     try:
         validate_page_settings(p["settings"])
+        from .running_matter import validate_running_matter
+        validate_running_matter(p['settings'].get('runningMatter'))
+        validate_numbering(p["settings"].get("firstPageNumber"), p["settings"].get("pageNumberFormat"))
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
     for field in ("rules", "customRules", "ignoredRules", "ignoredRuleIds", "disabledPronunciationDictionaries"):

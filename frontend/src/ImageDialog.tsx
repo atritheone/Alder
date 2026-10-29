@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { Asset } from "./types";
+import { cropEdges, imageCrop, type ImageCrop } from "./imageCrop";
 import "./word-processing.css";
 
 const minimumWidthMm = 0.264583;
@@ -19,8 +20,11 @@ export default function ImageDialog({
     width: number | null;
     align: string;
     alt: string;
+    decorative: boolean;
     title: string | null;
     assetId?: string;
+    placement: "inline" | "block";
+    crop: ImageCrop | null;
   }) => void;
   onClose: () => void;
 }) {
@@ -40,9 +44,26 @@ export default function ImageDialog({
   );
   const [widthChanged, setWidthChanged] = useState(false);
   const [align, setAlign] = useState(initial.align || "left");
+  const [placement, setPlacement] = useState<"inline" | "block">(
+    initial.placement || "block",
+  );
+  const close = () => {
+    dialog.current?.close();
+    onClose();
+  };
   const [alt, setAlt] = useState(initial.alt || "");
+  const [decorative, setDecorative] = useState(!!initial.decorative);
   const [title, setTitle] = useState(initial.title || "");
   const [assetId, setAssetId] = useState(initial.assetId || "");
+  const [crop, setCrop] = useState<ImageCrop>(
+    initial.crop || { left: 0, top: 0, right: 0, bottom: 0 },
+  );
+  let cropError = "";
+  try {
+    imageCrop(crop);
+  } catch (error) {
+    cropError = (error as Error).message;
+  }
   const choices = assets.filter((asset) => asset.mime.startsWith("image/"));
   useEffect(() => {
     dialog.current?.showModal();
@@ -52,12 +73,16 @@ export default function ImageDialog({
       className="word-dialog"
       aria-label="Image properties"
       ref={dialog}
-      onCancel={onClose}
+      onCancel={close}
     >
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          if (cropError) return;
+          dialog.current?.close();
           onApply({
+            crop: imageCrop(crop),
+            placement,
             width: !widthChanged
               ? initial.width == null
                 ? null
@@ -74,6 +99,7 @@ export default function ImageDialog({
                   ),
             align,
             alt,
+            decorative,
             title: title || null,
             ...(assetId && assetId !== initial.assetId ? { assetId } : {}),
           });
@@ -84,12 +110,25 @@ export default function ImageDialog({
           <button
             type="button"
             aria-label="Close image properties"
-            onClick={onClose}
+            onClick={close}
           >
             <X size={16} />
           </button>
         </header>
         <div className="word-dialog-fields">
+          <label>
+            Placement
+            <select
+              aria-label="Image placement"
+              value={placement}
+              onChange={(event) =>
+                setPlacement(event.target.value as "inline" | "block")
+              }
+            >
+              <option value="inline">In line with text</option>
+              <option value="block">Own paragraph</option>
+            </select>
+          </label>
           <label>
             Width (mm)
             <input
@@ -110,6 +149,7 @@ export default function ImageDialog({
             Alignment
             <select
               aria-label="Image alignment"
+              disabled={placement === "inline"}
               value={align}
               onChange={(event) => setAlign(event.target.value)}
             >
@@ -119,9 +159,18 @@ export default function ImageDialog({
             </select>
           </label>
           <label>
+            Decorative image
+            <input
+              type="checkbox"
+              checked={decorative}
+              onChange={(e) => setDecorative(e.target.checked)}
+            />
+          </label>
+          <label>
             Alternative text
             <input
               aria-label="Image alternative text"
+              disabled={decorative}
               value={alt}
               onChange={(event) => setAlt(event.target.value)}
             />
@@ -154,9 +203,38 @@ export default function ImageDialog({
             </label>
           )}
           <small>
-            Height follows the original proportions. Oversized images fit the
-            page.
+            Height follows the visible image’s proportions. Oversized images fit
+            the page.
           </small>
+          <details className="image-crop-fields">
+            <summary>Crop</summary>
+            <div className="word-dialog-fields">
+              {cropEdges.map((edge) => (
+                <label key={edge}>
+                  {edge[0].toUpperCase() + edge.slice(1)} (%)
+                  <input
+                    aria-label={`Crop ${edge} (%)`}
+                    type="number"
+                    min="0"
+                    max="99"
+                    step="0.1"
+                    value={crop[edge]}
+                    onChange={(event) =>
+                      setCrop({ ...crop, [edge]: Number(event.target.value) })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            <small>The original image is kept.</small>
+            {cropError && <p role="alert">{cropError}</p>}
+            <button
+              type="button"
+              onClick={() => setCrop({ left: 0, top: 0, right: 0, bottom: 0 })}
+            >
+              Remove crop
+            </button>
+          </details>
           <button
             type="button"
             onClick={() => {
@@ -168,10 +246,10 @@ export default function ImageDialog({
           </button>
         </div>
         <footer>
-          <button type="button" onClick={onClose}>
+          <button type="button" onClick={close}>
             Cancel
           </button>
-          <button className="accent" type="submit">
+          <button className="accent" type="submit" disabled={!!cropError}>
             Apply
           </button>
         </footer>

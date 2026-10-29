@@ -65,6 +65,35 @@
   flex-direction: row;
   align-items: center;
 }
+.document-templates .manager-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.document-templates .manager-toolbar button:last-child {
+  color: var(--accent);
+}
+.document-templates form {
+  display: grid;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.document-templates form label,
+.document-templates .voice-card-name {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.document-templates form > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.document-templates .voice-card-name small {
+  color: var(--muted);
+  font-size: 11px;
+}
 
 .start-content {
   display: flex;

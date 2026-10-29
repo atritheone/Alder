@@ -3,8 +3,28 @@ import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { pageInsets, type PageGeometry } from "./pageGeometry";
 import { TableMap } from "prosemirror-tables";
 import { documentCanvasWidth, sectionLayout } from "./sectionLayout";
-import { tableRowBoundary } from "./tableStructure";
+import { tableRowBoundary, parallelTableRows } from "./tableStructure";
 import type { FlowHeader } from "./tablePageHeaders";
+import { sectionNumbering, type PageNumberFormat } from "./pageNumbering";
+import { layoutTabs } from "./tabLayout";
+import { layoutExactLeading } from "./exactLeading";
+import {
+  physicalPageAtPosition,
+  contiguousPage,
+  type PageRange,
+} from "./pageRanges";
+import { tablePageFragments } from "./tablePageFragments";
+import {
+  resolveRunningMatter,
+  defaultRunningMatter,
+  type RunningMatter,
+} from "./runningMatter";
+import type { NamedStyle, Project } from "./types";
+import {
+  withRunningHeadings,
+  type HeadingField,
+  type HeadingContext,
+} from "./runningHeadings";
 
 export type PageLayout = PageGeometry & {
   lineHeight: number;
@@ -12,12 +32,22 @@ export type PageLayout = PageGeometry & {
   header?: string;
   footer?: boolean;
   firstPageNumber?: number;
+  pageNumberFormat?: PageNumberFormat;
+  // Derived offset from the physical page index, including section restarts.
+  pageNumberOffset?: number;
   fontFamily?: string;
+  runningMatter?: RunningMatter;
+  runningStyles?: NamedStyle[];
+  sectionStartPage?: number;
+  runningSectionId?: string;
+  runningHeadings?: Partial<Record<HeadingField, string>>;
+  headingContext?: HeadingContext;
 };
 export type FlowPage = {
   from: number;
   to: number;
   text: string;
+  fragments?: readonly PageRange[];
   header?: FlowHeader;
   section?: number;
   frame?: { top: number; left: number; layout: PageLayout };
@@ -26,15 +56,7 @@ export function pageAtPosition(
   pages: FlowPage[],
   position: number,
 ): number | null {
-  if (!pages.length) return null;
-  let low = 0,
-    high = pages.length - 1;
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
-    if (pages[middle].from <= position) low = middle;
-    else high = middle - 1;
-  }
-  return low;
+  return physicalPageAtPosition(pages, position);
 }
 export const PAGE_GAP = 28;
 type PageSpacer = {
@@ -49,7 +71,9 @@ type FlowCache = {
   key: string;
   spacers: PageSpacer[];
   pages: FlowPage[];
+  renderedPages?: FlowPage[];
   decorations: DecorationSet;
+  continuousStates?: { pos: number; page: number; layout: PageLayout }[];
 };
 const flowCache = new WeakMap<EditorView, FlowCache>();
 const sectionPresentation = new WeakMap<
@@ -87,6 +111,16 @@ export function paginatePages(
   const hasSections = Array.from({ length: doc.childCount }, (_, i) =>
     doc.child(i),
   ).some((n) => n.type.name === "section_break");
+  const hasNumberRestarts =
+    hasSections &&
+    Array.from({ length: doc.childCount }, (_, i) => doc.child(i)).some(
+      (n) => n.type.name === "section_break" && n.attrs.numberingStart != null,
+    );
+  const hasContinuous =
+    hasSections &&
+    Array.from({ length: doc.childCount }, (_, i) => doc.child(i)).some(
+      (n) => n.type.name === "section_break" && n.attrs.kind === "continuous",
+    );
   const canvasWidth = documentCanvasWidth(doc, layout);
   const key = JSON.stringify([
     layout.width,
@@ -98,7 +132,10 @@ export function paginatePages(
     layout.header,
     layout.footer,
     layout.firstPageNumber,
+    layout.pageNumberFormat,
     layout.fontFamily,
+    layout.runningMatter,
+    layout.headingContext,
   ]);
   const candidate =
     !invalidate && flowCache.get(view)?.key === key
@@ -107,9 +144,10 @@ export function paginatePages(
   // Display zoom is a transform; it cannot change the logical page map.
   if (candidate?.doc.eq(doc)) {
     apply(candidate.decorations);
-    return candidate.pages;
+    return candidate.renderedPages || candidate.pages;
   }
   const previous =
+    candidate?.pages.some((page) => page.fragments) ||
     hasSections !== !!candidate?.pages.some((page) => page.frame)
       ? undefined
       : candidate;
@@ -156,6 +194,13 @@ export function paginatePages(
     ...prefix.map((page) => ({ ...page.frame! })),
   ];
   let currentLayout = frames.at(-1)!.layout;
+  const continuousStates =
+    previous?.continuousStates?.filter((state) => state.pos < restart) || [];
+  const resumedContinuous = continuousStates.at(-1);
+  let pendingLayout: PageLayout | undefined =
+    resumedContinuous?.page === frames.length - 1
+      ? resumedContinuous.layout
+      : undefined;
   // Section widths do not change as pagination inserts spacers. Keep their
   // stylesheet outside the editable DOM: thousands of node decorations make
   // every spacer update expensive, while direct DOM attributes trigger parsing
@@ -244,8 +289,13 @@ export function paginatePages(
       .join("\n");
     if (sheet.textContent !== css) sheet.textContent = css;
   }
+  layoutExactLeading(view, invalidate);
+  layoutTabs(view, invalidate);
   let decorations = DecorationSet.empty;
+  let inlineImages: HTMLElement[] = [];
+  let inlineImageRects: DOMRect[] | undefined;
   const render = () => {
+    inlineImageRects = undefined;
     decorations = DecorationSet.create(doc, [
       ...spacers.map((spacer) =>
         spacer.nodeSize
@@ -304,12 +354,30 @@ export function paginatePages(
       : page * pitch;
   const y = (pos: number) => {
     const rect = view.coordsAtPos(pos, 1);
+    let top = rect.top,
+      bottom = rect.bottom;
+    if (inlineImages.length) {
+      inlineImageRects ??= inlineImages.map((image) =>
+        image.getBoundingClientRect(),
+      );
+      // A text caret beside a picture reports glyph bounds, not the picture's
+      // full line box. Pagination must move the whole line, including its top.
+      for (const image of inlineImageRects) {
+        if (rect.bottom > image.top + 0.5 && rect.top < image.bottom - 0.5) {
+          top = Math.min(top, image.top);
+          bottom = Math.max(bottom, image.bottom);
+        }
+      }
+    }
     return {
-      top: (rect.top - rootTop()) / scale,
-      bottom: (rect.bottom - rootTop()) / scale,
+      top: (top - rootTop()) / scale,
+      bottom: (bottom - rootTop()) / scale,
     };
   };
   let page = hasSections ? frames.length - 1 : retained;
+  let parallelTable = false;
+  let parallelHeader: FlowHeader | undefined;
+  const splitTables: { from: number; to: number }[] = [];
   const starts = [
     0,
     ...(hasSections
@@ -324,8 +392,11 @@ export function paginatePages(
     header?: FlowHeader,
     nextLayout?: PageLayout,
     parity?: "oddPage" | "evenPage",
+    restartNumber?: number | null,
   ) => {
-    if (hasSections) {
+    header ||= parallelTable ? parallelHeader : undefined;
+    const reuseParallelPage = parallelTable && page + 1 < starts.length;
+    if (hasSections && !reuseParallelPage) {
       const addFrame = (next: PageLayout) => {
         const prior = frames.at(-1)!;
         frames.push({
@@ -335,22 +406,34 @@ export function paginatePages(
         });
       };
       // A parity page is physically present, but contains no authored text.
-      if (
-        parity &&
-        (frames.length + (layout.firstPageNumber ?? 1)) % 2 !==
-          (parity === "oddPage" ? 1 : 0)
-      ) {
+      const numbering = sectionNumbering(
+        frames.length +
+          ((pendingLayout || currentLayout).pageNumberOffset ??
+            layout.firstPageNumber ??
+            1),
+        parity || "nextPage",
+        restartNumber,
+      );
+      if (numbering.blank) {
         addFrame(currentLayout);
         page++;
         starts.push(pos);
       }
-      currentLayout = nextLayout || currentLayout;
+      currentLayout = nextLayout || pendingLayout || currentLayout;
+      pendingLayout = undefined;
+      if (nextLayout)
+        currentLayout = {
+          ...currentLayout,
+          pageNumberOffset: numbering.number - frames.length,
+          sectionStartPage: frames.length,
+        };
       addFrame(currentLayout);
       const inset = pageInsets(currentLayout);
       bodyHeight = currentLayout.height - inset.top - inset.bottom;
     }
     page++;
-    starts.push(pos);
+    if (reuseParallelPage) starts[page] = Math.min(starts[page], pos);
+    else starts.push(pos);
     const spacer = {
       pos,
       height: Math.max(0, bodyTop() + (header?.height || 0) - top),
@@ -375,7 +458,7 @@ export function paginatePages(
     }
     // Identical unchanged boundary and gap means the remainder has stabilised.
     // Reuse its measured spacers (mapped by the document-size delta) in one pass.
-    if (previous && endDiff && pos > endDiff.b) {
+    if (!parallelTable && previous && endDiff && pos > endDiff.b) {
       const delta = endDiff.b - endDiff.a;
       const oldIndex = previous.spacers.findIndex(
         (old) => old.pos === pos - delta,
@@ -388,6 +471,7 @@ export function paginatePages(
       const sameSection =
         !hasSections ||
         (oldFrame &&
+          (!(hasNumberRestarts || hasContinuous) || oldPage === page) &&
           oldPage % 2 === page % 2 &&
           JSON.stringify({ ...oldFrame.layout, zoom: 1 }) ===
             JSON.stringify({ ...currentLayout, zoom: 1 }));
@@ -416,6 +500,12 @@ export function paginatePages(
             : {}),
         }));
         spacers.push(...tail);
+        if (hasContinuous)
+          continuousStates.push(
+            ...(previous.continuousStates || [])
+              .filter((state) => state.pos > pos - delta)
+              .map((state) => ({ ...state, pos: state.pos + delta })),
+          );
         if (hasSections) {
           const offset = frames[page].top - oldFrame!.top;
           const suffix = previous.pages.slice(oldPage + 1);
@@ -436,7 +526,7 @@ export function paginatePages(
       }
     }
   };
-  doc.descendants((node, pos) => {
+  const visit = (node: PMNode, pos: number): boolean | undefined => {
     if (stable || pos + node.nodeSize <= restart) return false;
     if (node.type.name === "table") {
       const map = TableMap.get(node);
@@ -460,6 +550,7 @@ export function paginatePages(
       const headerHeight = headerRows
         ? (bounds(headerRows - 1).bottom - bounds(0).top) / scale
         : 0;
+      const parallelCells = parallelTableRows(node);
       const groups: { row: number; end: number }[] = [];
       for (let row = 0; row < node.childCount; ) {
         let end = row + 1;
@@ -473,17 +564,108 @@ export function paginatePages(
         row = end;
       }
       if (
-        groups.some(
-          ({ row, end }) =>
-            (bounds(end - 1).bottom - bounds(row).top) / scale > bodyHeight,
+        headerRows &&
+        groups[0]?.end > headerRows &&
+        ((bounds(groups[0].end - 1).bottom - bounds(0).top) / scale >
+          bodyHeight ||
+          (parallelCells && node.child(headerRows).attrs.allowSplit === true))
+      ) {
+        const end = groups[0].end;
+        if (
+          Array.from(
+            { length: end - headerRows },
+            (_, i) => headerRows + i + 1,
+          ).every((boundary) => tableRowBoundary(map, boundary))
         )
-      )
-        return;
+          groups.splice(
+            0,
+            1,
+            { row: 0, end: headerRows },
+            ...Array.from({ length: end - headerRows }, (_, i) => ({
+              row: headerRows + i,
+              end: headerRows + i + 1,
+            })),
+          );
+      }
+      const oversized = groups.some(
+        ({ row, end }) =>
+          (bounds(end - 1).bottom - bounds(row).top) / scale > bodyHeight,
+      );
+      // Parallel cell flows share physical pages but have separate document
+      // intervals. Keep the legacy fallback for nested/vertically merged rows.
+      const splittable =
+        (oversized ||
+          Array.from({ length: node.childCount }, (_, i) => node.child(i)).some(
+            (row) => row.attrs.allowSplit === true,
+          )) &&
+        groups.every(
+          (group) => group.end === group.row + 1 || group.row === 0,
+        ) &&
+        parallelCells;
+      if (oversized && !splittable) return;
+      if (splittable) splitTables.push({ from: pos, to: pos + node.nodeSize });
+      // An allowed split must not strand a header at the bottom of the sheet.
+      // Reserve the first body line in each cell before dividing that row.
+      if (
+        splittable &&
+        headerRows &&
+        groups[0].end === headerRows &&
+        headerRows < node.childCount
+      ) {
+        let firstLineBottom = 0;
+        node.child(headerRows).forEach((_cell, offset) => {
+          firstLineBottom = Math.max(
+            firstLineBottom,
+            y(positions[headerRows] + 3 + offset).bottom,
+          );
+        });
+        const headerTop = (bounds(0).top - rootTop()) / scale;
+        if (
+          firstLineBottom > bodyTop() + bodyHeight &&
+          firstLineBottom - headerTop <= bodyHeight &&
+          headerTop > bodyTop() + 1
+        )
+          nextPage(positions[0], headerTop, undefined, true);
+      }
       for (const { row, end } of groups) {
         if (stable) break;
         const first = bounds(row),
           last = bounds(end - 1);
         const height = (last.bottom - first.top) / scale;
+        const repeatingHeader =
+          row >= headerRows && headerRows && headerHeight < bodyHeight / 2
+            ? { table: pos, rows: headerRows, height: headerHeight }
+            : undefined;
+        const availableHeight = bodyHeight - (repeatingHeader?.height || 0);
+        const overflow =
+          (last.bottom - rootTop()) / scale > bodyTop() + bodyHeight + 0.5;
+        if (
+          splittable &&
+          end === row + 1 &&
+          row >= headerRows &&
+          (height > availableHeight ||
+            (node.child(row).attrs.allowSplit === true && overflow))
+        ) {
+          const firstPage = page;
+          let lastPage = page;
+          parallelTable = true;
+          parallelHeader = repeatingHeader;
+          const rowNode = node.child(row),
+            rowStart = positions[row];
+          rowNode.forEach((cell, cellOffset) => {
+            page = firstPage;
+            if (hasSections) currentLayout = frames[page].layout;
+            cell.forEach((paragraph, offset) =>
+              visit(paragraph, rowStart + 2 + cellOffset + offset),
+            );
+            lastPage = Math.max(lastPage, page);
+          });
+          page = lastPage;
+          if (hasSections) currentLayout = frames[page].layout;
+          parallelTable = false;
+          parallelHeader = undefined;
+          continue;
+        }
         const repeat =
           row >= headerRows && headerRows && height + headerHeight <= bodyHeight
             ? { table: pos, rows: headerRows, height: headerHeight }
@@ -513,14 +695,54 @@ export function paginatePages(
     }
     if (node.type.name === "section_break") {
       const element = view.nodeDOM(pos) as HTMLElement;
+      const inherited = pendingLayout || currentLayout;
+      const nextLayout: PageLayout = {
+        ...sectionLayout(inherited, node.attrs.page),
+        runningMatter:
+          node.attrs.runningMatter || inherited.runningMatter
+            ? resolveRunningMatter(
+                inherited.runningMatter ||
+                  defaultRunningMatter({
+                    header: inherited.header,
+                    footer: inherited.footer,
+                  } as Project["settings"]),
+                node.attrs.runningMatter,
+              )
+            : undefined,
+        runningSectionId: node.attrs.blockId,
+        pageNumberFormat:
+          node.attrs.numberingFormat ?? inherited.pageNumberFormat,
+      };
+      if (
+        node.attrs.kind === "continuous" &&
+        Math.abs(nextLayout.width - currentLayout.width) < 0.01 &&
+        Math.abs(nextLayout.height - currentLayout.height) < 0.01
+      ) {
+        // Word keeps the current sheet's running stories, vertical margins and
+        // page label. New horizontal margins already apply via block widths;
+        // the remaining section settings take effect at the next sheet.
+        pendingLayout = {
+          ...nextLayout,
+          sectionStartPage: page,
+          pageNumberOffset:
+            node.attrs.numberingStart != null
+              ? node.attrs.numberingStart - page
+              : inherited.pageNumberOffset,
+        };
+        continuousStates.push({ pos, page, layout: pendingLayout });
+        return false;
+      }
       nextPage(
         pos,
         (element.getBoundingClientRect().top - rootTop()) / scale,
         node.nodeSize,
         false,
         undefined,
-        sectionLayout(layout, node.attrs.page),
-        node.attrs.kind === "nextPage" ? undefined : node.attrs.kind,
+        nextLayout,
+        node.attrs.kind === "oddPage" || node.attrs.kind === "evenPage"
+          ? node.attrs.kind
+          : undefined,
+        node.attrs.numberingStart,
       );
       return false;
     }
@@ -533,6 +755,14 @@ export function paginatePages(
       return false;
     }
     if (node.isTextblock) {
+      inlineImages = [];
+      inlineImageRects = undefined;
+      node.forEach((child, offset) => {
+        if (child.type.name === "inline_image") {
+          const image = view.nodeDOM(pos + offset + 1);
+          if (image instanceof HTMLElement) inlineImages.push(image);
+        }
+      });
       let from = pos + 1;
       const end = pos + node.nodeSize - 1;
       const element = view.nodeDOM(pos) as HTMLElement;
@@ -642,6 +872,8 @@ export function paginatePages(
         nextPage(lo, y(lo).top);
         from = lo + 1;
       }
+      inlineImages = [];
+      inlineImageRects = undefined;
       return false;
     }
     if (node.isBlock && node.isLeaf) {
@@ -657,7 +889,8 @@ export function paginatePages(
       }
       return false;
     }
-  });
+  };
+  doc.descendants(visit);
   const headers = new Map(
     spacers
       .filter((spacer) => spacer.header)
@@ -669,7 +902,7 @@ export function paginatePages(
       if (node.type.name === "section_break") sectionStarts.push(pos);
     });
   let section = 0;
-  const pages = starts.map((from, i) => {
+  let pages: FlowPage[] = starts.map((from, i) => {
     while (
       section + 1 < sectionStarts.length &&
       sectionStarts[section + 1] <= from
@@ -683,8 +916,19 @@ export function paginatePages(
       ...(i > 0 && headers.get(from) ? { header: headers.get(from) } : {}),
     };
   });
-  flowCache.set(view, { doc, key, spacers, pages, decorations });
-  return pages;
+  if (splitTables.length)
+    pages = tablePageFragments(view, layout, pages, splitTables);
+  const renderedPages = withRunningHeadings(doc, pages, layout);
+  flowCache.set(view, {
+    doc,
+    key,
+    spacers,
+    pages,
+    renderedPages,
+    decorations,
+    continuousStates,
+  });
+  return renderedPages;
 }
 
 /** Moving a physical page freezes the displayed boundaries as explicit breaks.
@@ -697,6 +941,10 @@ export function rearrangePages(
   to: number,
 ): PMNode {
   if (from === to) return doc;
+  if (pages.some((page) => !contiguousPage(page)))
+    throw new Error(
+      "Move paragraphs or sentences on pages containing split table cells. These pages cannot move as a single document range.",
+    );
   if (
     !Number.isInteger(from) ||
     !Number.isInteger(to) ||

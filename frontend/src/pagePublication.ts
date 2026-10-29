@@ -3,6 +3,15 @@ import type { EditorView } from "prosemirror-view";
 import type { FlowPage, PageLayout } from "./pageFlow";
 import { tableHeaderHTML } from "./tablePageHeaders";
 import { pageFurnitureDOM } from "./pageFurniture";
+import { assertRunningMatterFits } from "./runningMatter";
+import { copyExactLeading } from "./exactLeading";
+import { tabLeaderCSS } from "./tabLayout";
+import { freezeTablesInCopy } from "./tableSnapshotLayout";
+import {
+  pageTextSegments,
+  physicalPageAtPosition,
+  type PageRange,
+} from "./pageRanges";
 
 export type PublicationPage = {
   from: number;
@@ -10,6 +19,7 @@ export type PublicationPage = {
   width: number;
   height: number;
   html: string;
+  fragments?: readonly PageRange[];
 };
 export type PagePublication = {
   version: 1;
@@ -19,6 +29,11 @@ export type PagePublication = {
 };
 
 const paintProperties = [
+  "clip-path",
+  "outline-style",
+  "outline-width",
+  "outline-color",
+  "outline-offset",
   "font-family",
   "font-size",
   "font-weight",
@@ -40,6 +55,11 @@ const paintProperties = [
   "tab-size",
   "color",
   "background-color",
+  "background-image",
+  "background-size",
+  "background-repeat",
+  "background-position",
+  "--alder-tab-leader-y",
   "display",
   "box-sizing",
   "border-collapse",
@@ -60,7 +80,7 @@ const paintProperties = [
   ),
 ];
 
-/** Prototype bridge from the editing page map to a printable browser document.
+/** Freeze the editing page map as a printable browser document.
  * No paragraph is reflowed by a second typesetter. Invisible prefix/suffix text
  * retains its line geometry but is excluded from PDF drawing/extraction.
  * Flowing footnotes and accessibility tagging are not implemented. */
@@ -82,10 +102,38 @@ export function capturePagePublication(
     rect: element.getBoundingClientRect(),
   }));
   const rootStyle = getComputedStyle(view.dom);
+  const bookmarkNames = new Map<string, string>();
+  view.state.doc.descendants((node) => {
+    if (node.type.name === "bookmark") {
+      bookmarkNames.set(node.attrs.blockId, node.attrs.name);
+      bookmarkNames.set(node.attrs.name, node.attrs.name);
+    }
+  });
+  const checkedRunningMatter = new Set<string>();
   const copies = pages.map((page, index) => {
     const frame = pageFrame(pages, index, layout),
       current = frame.layout,
       pageTop = frame.top;
+    if (current.runningMatter) {
+      const key = JSON.stringify([
+        current.width,
+        current.height,
+        current.margin,
+        current.margins,
+        current.runningMatter,
+        current.runningStyles,
+        current.runningHeadings,
+        current.fontFamily,
+      ]);
+      if (!checkedRunningMatter.has(key)) {
+        assertRunningMatterFits(
+          current,
+          view.state.schema,
+          current.runningStyles,
+        );
+        checkedRunningMatter.add(key);
+      }
+    }
     const sheet = document.createElement("section");
     sheet.className = "publication-sheet";
     sheet.setAttribute("aria-label", `Page ${index + 1}`);
@@ -97,7 +145,10 @@ export function capturePagePublication(
     sheet.style.padding = "0";
     sheet.style.border = "0";
     sheet.style.display = "block";
-    if (page.from !== page.to) sheet.append(pageFurnitureDOM(current, index));
+    if (page.from !== page.to)
+      sheet.append(
+        pageFurnitureDOM(current, index, view.state.schema, pages.length),
+      );
     if (page.header) {
       const header = document.createElement("div");
       header.innerHTML = tableHeaderHTML(view, current, page.header);
@@ -120,9 +171,14 @@ export function capturePagePublication(
         const style = getComputedStyle(original);
         for (const property of paintProperties)
           clone.style.setProperty(property, style.getPropertyValue(property));
+        copyExactLeading(original, clone);
+        if (original.classList.contains("ProseMirror-selectednode")) {
+          clone.style.outline = "none";
+          clone.classList.remove("ProseMirror-selectednode");
+        }
         // Preserve authored column/image dimensions, which auto layout cannot infer
         // after separating a spanning table over independently clipped pages.
-        if (original.matches("table,col,th,td,img")) {
+        if (original.matches("table,col,th,td,img,.alder-tab")) {
           clone.style.width = `${original.getBoundingClientRect().width / scale}px`;
           if (original.matches("img"))
             clone.style.height = `${original.getBoundingClientRect().height / scale}px`;
@@ -133,12 +189,28 @@ export function capturePagePublication(
             ["id", "contenteditable", "tabindex"].includes(attribute.name)
           )
             clone.removeAttribute(attribute.name);
+        if (original.matches("[data-document-bookmark]")) {
+          const position = view.posAtDOM(original, 0);
+          // A spanning paragraph is copied onto several sheets. Only its owning
+          // sheet receives the destination, never an invisible earlier copy.
+          if (physicalPageAtPosition(pages, position) === index)
+            clone.id = original.getAttribute("data-document-bookmark")!;
+        }
+        if (original.matches('a[href^="#"]')) {
+          const name = bookmarkNames.get(
+            original.getAttribute("href")!.slice(1),
+          );
+          if (name) clone.setAttribute("href", `#${name}`);
+          else clone.removeAttribute("href");
+        }
         if (original.matches(".pagination-spacer")) {
           clone.style.height = `${original.getBoundingClientRect().height / scale}px`;
           clone.style.visibility = "hidden";
         }
         if (
-          original.matches(".structure-marker,.write-caret,.reading-highlight")
+          original.matches(
+            ".structure-marker,.write-caret,.reading-highlight,.ProseMirror-separator",
+          )
         )
           clone.style.display = "none";
       });
@@ -159,20 +231,13 @@ export function capturePagePublication(
           continue;
         const value = original.textContent || "";
         const start = view.posAtDOM(original, 0);
-        const visibleStart = Math.max(
-          0,
-          Math.min(value.length, page.from - start),
-        );
-        const visibleEnd = Math.max(
-          visibleStart,
-          Math.min(value.length, page.to - start),
-        );
         const fragment = document.createDocumentFragment();
-        for (const [text, visible] of [
-          [value.slice(0, visibleStart), false],
-          [value.slice(visibleStart, visibleEnd), true],
-          [value.slice(visibleEnd), false],
-        ] as const) {
+        for (const {
+          from: visibleStart,
+          to: visibleEnd,
+          visible,
+        } of pageTextSegments(page, start, value.length)) {
+          const text = value.slice(visibleStart, visibleEnd);
           if (!text) continue;
           const span = document.createElement("span");
           span.textContent = text;
@@ -199,6 +264,18 @@ export function capturePagePublication(
         }
         clone.parentNode!.replaceChild(fragment, clone);
       }
+      for (const reference of copy.querySelectorAll<HTMLElement>(
+        "[data-cross-reference]",
+      )) {
+        const name = bookmarkNames.get(reference.dataset.crossReference!);
+        if (!name || reference.dataset.referenceUnresolved === "true") continue;
+        const link = document.createElement("a");
+        link.href = `#${name}`;
+        link.style.cssText = "color:inherit;text-decoration:inherit";
+        link.append(...reference.childNodes);
+        reference.append(link);
+      }
+      freezeTablesInCopy(element, copy, scale);
       copy.style.position = "absolute";
       copy.style.top = `${(rect.top - origin.top) / scale - pageTop}px`;
       copy.style.left = `${(rect.left - origin.left) / scale - frame.left}px`;
@@ -210,6 +287,7 @@ export function capturePagePublication(
     return {
       from: page.from,
       to: page.to,
+      ...(page.fragments ? { fragments: page.fragments } : {}),
       width: current.width,
       height: current.height,
       html: sheet.outerHTML,
@@ -224,11 +302,12 @@ export function capturePagePublication(
 }
 
 export function publicationHTML(publication: PagePublication) {
-  const styles = publication.pages
-    .map(
-      (page, i) =>
-        `@page alder${i}{size:${page.width}px ${page.height}px;margin:0}.publication-sheet:nth-child(${i + 1}){page:alder${i}}`,
-    )
-    .join("");
+  const styles =
+    publication.pages
+      .map(
+        (page, i) =>
+          `@page alder${i}{size:${page.width}px ${page.height}px;margin:0}.publication-sheet:nth-child(${i + 1}){page:alder${i}}`,
+      )
+      .join("") + tabLeaderCSS;
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: file: alder:; style-src 'unsafe-inline'; font-src file: alder:"><style>${styles}html,body{margin:0;padding:0}*{box-sizing:border-box}.publication-sheet{contain:strict;break-inside:avoid}.publication-sheet:last-child{break-after:auto}</style></head><body>${publication.pages.map((page) => page.html).join("")}</body></html>`;
 }

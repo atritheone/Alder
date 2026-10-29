@@ -65,6 +65,39 @@ function run(state: EditorState, command: Command) {
   return result;
 }
 describe("table appearance and conversion", () => {
+  it("changes selected row break preferences with undo and reports mixed selections", () => {
+    const before = selected();
+    const after = run(
+      before,
+      setTableProperties("table", {
+        table: {},
+        cells: {},
+        rows: { allowSplit: true },
+      }),
+    );
+    expect(after.doc.firstChild!.child(0).attrs.allowSplit).toBe(false);
+    expect(after.doc.firstChild!.child(1).attrs.allowSplit).toBe(true);
+    expect(after.doc.firstChild!.child(2).attrs.allowSplit).toBe(false);
+    expect(selectedTableProperties(after)?.rows.allowSplit).toBe(true);
+    const all = after.apply(
+      after.tr.setSelection(
+        CellSelection.create(
+          after.doc,
+          1 + TableMap.get(after.doc.firstChild!).map[2],
+          1 + TableMap.get(after.doc.firstChild!).map[4],
+        ),
+      ),
+    );
+    expect(selectedTableProperties(all)?.rows.allowSplit).toBeUndefined();
+    expect(run(after, undo).doc.eq(before.doc)).toBe(true);
+    expect(
+      setTableProperties("table", {
+        table: {},
+        cells: {},
+        rows: { allowSplit: "false" },
+      })(before),
+    ).toBe(false);
+  });
   it("applies to selected cells and rows, sizes the entire selected column, and undoes together", () => {
     const state = selected();
     const changed = run(

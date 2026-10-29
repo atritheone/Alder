@@ -33,7 +33,10 @@ def test_sections_docx_pdf_and_html_round_trip(tmp_path, kind, count, first_numb
     assert doc.sections[0].page_width.mm == pytest.approx(210, abs=.03)
     assert doc.sections[1].page_height.mm == pytest.approx(148, abs=.03)
     assert doc.sections[1].left_margin.mm == pytest.approx(19, abs=.03)
-    assert doc.sections[1]._sectPr.find('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgNumType') is None
+    from docx.oxml.ns import qn
+    numbering = doc.sections[1]._sectPr.find(qn('w:pgNumType'))
+    assert numbering.get(qn('w:start')) is None
+    assert numbering.get(qn('w:fmt')) == 'decimal'
     imported = import_document(word)
     assert imported['settings']['firstPageNumber'] == first_number
     assert document_text(imported['document']) == document_text(source)
@@ -58,7 +61,7 @@ def test_sections_docx_pdf_and_html_round_trip(tmp_path, kind, count, first_numb
 
 
 @pytest.mark.parametrize('attrs', [
-    {'kind':'continuous', 'page':{}},
+    {'kind':'column', 'page':{}},
     {'kind':'nextPage', 'page':{'pageWidthMm':float('nan')}},
     {'kind':'nextPage', 'page':{'pageSize':'A5', 'marginLeftMm':99, 'marginRightMm':99}},
     {'kind':'nextPage', 'page':{'surprise':'value'}},

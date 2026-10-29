@@ -1,4 +1,8 @@
 import { screenPageGeometry } from "./pageGeometry";
+import { chapterRunningMatter } from "./runningMatter";
+import { chapterHeadingContext } from "./runningHeadings";
+import { chapterCaptionStarts } from "./documentCaptions";
+import { chapterHeadingStarts } from "./headingNumbering";
 import {
   documentPositionKey,
   readDocumentPosition,
@@ -30,6 +34,7 @@ import { usePlaybackSettings } from "./usePlaybackSettings";
 import { countSentences } from "./textCounts";
 import type { Annotation, Chapter, Project } from "./types";
 import { pageAtPosition, type FlowPage } from "./pageFlow";
+import { pagesInRange } from "./pageRanges";
 import "./book-workspace.css";
 import DocumentReader from "./DocumentReader";
 import { sourceForChapter, parseRawSource, rawTextDocument } from "./rawSource";
@@ -76,16 +81,24 @@ export default function BookWorkspace(p: Props) {
     [chapters],
   );
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
+  const headingStarts = useMemo(
+    () => chapterHeadingStarts(p.project, chapter?.id || ""),
+    [chapters, p.project.styles, chapter?.id],
+  );
   const [rawActive, setRawActive] = useState(false);
   const [rawOpenError, setRawOpenError] = useState("");
   useEffect(() => {
     const showFormatted = () => setRawActive(false);
+    const showRaw = () => setRawActive(true);
     window.addEventListener("alder-show-formatted-document", showFormatted);
-    return () =>
+    window.addEventListener("alder-show-raw-document", showRaw);
+    return () => {
+      window.removeEventListener("alder-show-raw-document", showRaw);
       window.removeEventListener(
         "alder-show-formatted-document",
         showFormatted,
       );
+    };
   }, []);
   useEffect(() => {
     setRawActive(false);
@@ -196,12 +209,7 @@ export default function BookWorkspace(p: Props) {
     useState<ReadingPosition | null>(null);
   const { speed } = usePlaybackSettings("reading");
   const selectedPages = selection
-    ? Math.max(
-        1,
-        (pageAtPosition(pages, selection.to - 1) ?? 0) -
-          (pageAtPosition(pages, selection.from) ?? 0) +
-          1,
-      )
+    ? Math.max(1, pagesInRange(pages, selection.from, selection.to).length)
     : 0;
   let estimateWords = selection?.words ?? totalWords;
   const readingIndex = chapters.findIndex(
@@ -246,12 +254,21 @@ export default function BookWorkspace(p: Props) {
     if (page !== null && page !== undefined) setPageNumber(String(page + 1));
   }, [speechPlaying, readingPosition, pages, chapter?.id, showRaw]);
   const layout = useMemo(() => {
+    const running = chapterRunningMatter(p.project, chapter?.id || "");
     return {
       ...screenPageGeometry(p.project.settings),
       lineHeight: p.project.settings.lineHeight,
       header: p.project.settings.header,
       footer: p.project.settings.footer,
+      runningMatter:
+        p.project.settings.runningMatter || running.sectionId
+          ? running.matter
+          : undefined,
+      runningSectionId: running.sectionId,
+      headingContext: chapterHeadingContext(p.project, chapter?.id || ""),
+      runningStyles: p.project.styles,
       firstPageNumber: p.project.settings.firstPageNumber || 1,
+      pageNumberFormat: p.project.settings.pageNumberFormat,
       fontFamily: p.project.settings.fontFamily,
       zoom,
     };
@@ -269,7 +286,12 @@ export default function BookWorkspace(p: Props) {
     p.project.settings.lineHeight,
     p.project.settings.header,
     p.project.settings.footer,
+    p.project.settings.runningMatter,
+    chapters,
+    chapter?.id,
+    p.project.styles,
     p.project.settings.firstPageNumber,
+    p.project.settings.pageNumberFormat,
     p.project.settings.fontFamily,
     zoom,
   ]);
@@ -512,6 +534,19 @@ export default function BookWorkspace(p: Props) {
           >
             <Editor
               ref={p.editorRef}
+              review={{
+                tracking: p.project.settings.trackChanges === true,
+                author:
+                  p.project.settings.reviewAuthor ||
+                  p.project.settings.author ||
+                  "",
+              }}
+              onReviewPreferences={(value) =>
+                p.change((project) => {
+                  project.settings.trackChanges = value.tracking;
+                  project.settings.reviewAuthor = value.author;
+                })
+              }
               label={showRaw ? "Raw text editor" : "Chapter text editor"}
               document={showRaw ? rawDocument : chapter.document}
               identity={
@@ -601,6 +636,8 @@ export default function BookWorkspace(p: Props) {
               fontFamily={showRaw ? "monospace" : p.project.settings.fontFamily}
               fontSize={(p.project.settings.fontSize * 96) / 72}
               styles={p.project.styles}
+              captionStarts={chapterCaptionStarts(p.project, chapter.id)}
+              headingStarts={headingStarts}
             />
           </div>
           {!p.previewActive && ["Write", "Pages"].includes(p.view) && (

@@ -166,7 +166,7 @@ class Store:
         def relocate(value):
             if isinstance(value, dict):
                 attrs = value.get("attrs") or {}
-                if value.get("type") == "image" and str(attrs.get("src", "")).startswith(f"/api/projects/{project_id}/"):
+                if value.get("type") in ("image", "inline_image") and str(attrs.get("src", "")).startswith(f"/api/projects/{project_id}/"):
                     attrs["src"] = attrs["src"].replace(f"/api/projects/{project_id}/", f"/api/projects/{new_id}/", 1)
                 for child in value.values():
                     relocate(child)

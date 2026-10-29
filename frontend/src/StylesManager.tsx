@@ -9,6 +9,8 @@ import {
   replaceProjectStyle,
 } from "./styleResolution";
 import "./styles-manager.css";
+import ParagraphAppearanceFields from "./ParagraphAppearanceFields";
+import TabStopsEditor from "./TabStopsEditor";
 
 type Props = {
   project: Project;
@@ -158,6 +160,17 @@ export default function StylesManager({
         : resolved?.lineSpacingMode === "atLeast" && resolved.lineSpacing
           ? `max(1.2em,${resolved.lineSpacing}pt)`
           : resolved?.lineHeight || undefined,
+    backgroundColor: resolved?.paragraphBackground || undefined,
+    outlineColor: resolved?.paragraphBorderColor || undefined,
+    outlineStyle: resolved?.paragraphBorderWidth != null ? "solid" : undefined,
+    outlineWidth:
+      resolved?.paragraphBorderWidth != null
+        ? `${resolved.paragraphBorderWidth}pt`
+        : undefined,
+    padding:
+      resolved?.paragraphPadding != null
+        ? `${resolved.paragraphPadding}pt`
+        : undefined,
     color: resolved?.color || undefined,
     textAlign: resolved?.align || undefined,
     marginLeft: resolved?.leftIndent ? `${resolved.leftIndent}pt` : undefined,
@@ -593,6 +606,42 @@ export default function StylesManager({
               </label>
             )}
           </div>
+          {editing.kind !== "character" && (
+            <label>
+              Number headings (1, 1.1, 1.1.1)
+              <select
+                aria-label="Style heading numbering"
+                value={
+                  editing.headingNumbered == null
+                    ? ""
+                    : String(editing.headingNumbered)
+                }
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    headingNumbered:
+                      e.target.value === "" ? null : e.target.value === "true",
+                  })
+                }
+              >
+                <option value="">Inherit</option>
+                <option value="true">On</option>
+                <option value="false">Off</option>
+              </select>
+            </label>
+          )}
+          {editing.kind !== "character" && (
+            <TabStopsEditor
+              value={editing.tabStops ?? null}
+              onChange={(tabStops) => setEditing({ ...editing, tabStops })}
+            />
+          )}
+          {editing.kind !== "character" && (
+            <ParagraphAppearanceFields
+              value={editing}
+              onChange={(patch) => setEditing({ ...editing, ...patch })}
+            />
+          )}
           <div className="style-preview">
             <small>Style preview</small>
             <p style={preview}>

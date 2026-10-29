@@ -87,7 +87,7 @@ try {
     "whole-book search navigates and selects; original selection does not leak to another chapter; excluded chapters included; replacement preserves formatting",
   );
   await page
-    .getByRole("button", { name: "Undo project change", exact: true })
+    .getByRole("button", { name: "Undo document change", exact: true })
     .click();
   await openChapter(2);
   await expect(editor).toHaveText("cat second");
@@ -108,7 +108,7 @@ try {
   await openChapter(2);
   await expect(editor).toHaveText("atc second");
   await page
-    .getByRole("button", { name: "Undo project change", exact: true })
+    .getByRole("button", { name: "Undo document change", exact: true })
     .click();
   await expect(editor).toHaveText("cat second");
   await find.getByLabel("Regular expression", { exact: true }).uncheck();

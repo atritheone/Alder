@@ -48,6 +48,7 @@ export function speechText(
     };
     doc.descendants((node, pos) => {
       const span = { start: offset(pos), end: offset(pos + node.nodeSize) };
+      if (node.type.name === "table_of_contents") { marked.push(span); return false; }
       if (
         node.type.name === "code_block" ||
         node.marks.some((mark) => mark.type.name === "code")
@@ -63,6 +64,10 @@ export function speechText(
         });
       if (node.isText && node.marks.some((mark) => mark.type.name === "link"))
         marked.push(span);
+      if (node.type.name === "cross_reference") {
+        marked.push(span);
+        return false;
+      }
       if (
         node.isText &&
         node.marks.some((mark) => mark.type.name === "superscript") &&

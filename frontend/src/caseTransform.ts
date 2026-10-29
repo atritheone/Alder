@@ -21,6 +21,12 @@ export function changeCase(
   let text = "",
     block = -1;
   state.doc.nodesBetween(from, to, (node, pos) => {
+    if (
+      ["cross_reference", "sequence", "document_field", "table_of_contents"].includes(node.type.name)
+    ) {
+      text += node.textContent;
+      return false;
+    }
     if (node.isTextblock) {
       if (block !== -1) text += "\n";
       block = pos;
@@ -129,6 +135,12 @@ export function caseInputPlugin(
       }[] = [];
       const contexts = new Map<number, Set<number>>();
       state.doc.nodesBetween(from, to, (node, pos) => {
+        if (
+          ["cross_reference", "sequence", "document_field", "table_of_contents"].includes(
+            node.type.name,
+          )
+        )
+          return false;
         if (!node.isText) return;
         const start = Math.max(from, pos),
           finish = Math.min(to, pos + node.nodeSize);

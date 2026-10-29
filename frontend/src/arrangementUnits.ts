@@ -38,6 +38,7 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
     );
   };
   doc.descendants((node, pos, parent) => {
+    if (node.type.name === "table_of_contents") { flush(); return false; }
     if (!node.isTextblock) {
       flush();
       return;
@@ -79,14 +80,49 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
   for (const group of groups) {
     let text = "";
     const positions: number[] = [];
+    const ends: number[] = [];
     for (const { node, pos } of group) {
       if (text) {
         positions.push(pos - 1);
+        ends.push(pos);
         text += " ";
       }
-      const part = node.textBetween(0, node.content.size, "", "\ufffc");
-      for (let i = 0; i < part.length; i++) positions.push(pos + 1 + i);
-      text += part;
+      let pendingBookmark: number | null = null;
+      node.forEach((child, offset) => {
+        const at = pos + 1 + offset;
+        if (
+          child.type.name === "bookmark_end" ||
+          (child.type.name === "comment_anchor" && child.attrs.edge === "end")
+        ) {
+          if (ends.length) ends[ends.length - 1] = at + 1;
+          return;
+        }
+        if (
+          child.type.name === "bookmark" ||
+          (child.type.name === "comment_anchor" && child.attrs.edge === "start")
+        ) {
+          pendingBookmark ??= at;
+          return;
+        }
+        const reference = [
+          "cross_reference",
+          "sequence",
+          "document_field",
+        ].includes(child.type.name);
+        const part = child.isText
+          ? child.text!
+          : reference
+            ? child.textContent
+            : "\ufffc";
+        for (let i = 0; i < part.length; i++) {
+          positions.push(
+            i === 0 ? (pendingBookmark ?? at) : reference ? at : at + i,
+          );
+          ends.push(reference ? at + child.nodeSize : at + i + 1);
+        }
+        pendingBookmark = null;
+        text += part;
+      });
     }
     units.push({
       kind: "paragraph",
@@ -94,14 +130,24 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
       to: group.at(-1)!.pos + group.at(-1)!.node.nodeSize,
       text,
     });
+    let sentenceStart = 0;
     for (const segment of segmenter.segment(text)) {
       const trim = segment.segment.trim();
       if (!trim) continue;
       const start = segment.index + segment.segment.indexOf(trim);
+      const previous = units.at(-1);
+      // An atomic generated passage may itself contain several sentences.
+      // Never expose overlapping handles that could split or duplicate it.
+      if (previous?.kind === "sentence" && previous.to > positions[start]) {
+        previous.to = Math.max(previous.to, ends[start + trim.length - 1]);
+        previous.text = text.slice(sentenceStart, start + trim.length).trim();
+        continue;
+      }
+      sentenceStart = start;
       units.push({
         kind: "sentence",
         from: positions[start],
-        to: positions[start + trim.length - 1] + 1,
+        to: ends[start + trim.length - 1],
         text: trim,
       });
     }

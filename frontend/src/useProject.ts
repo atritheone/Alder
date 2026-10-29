@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project } from "./types";
 import { api } from "./api";
+import { createEditorDraft } from "./editorDraft";
 import { migrateBook } from "./book";
 import { forgetSessionPosition, documentPositionKey } from "./documentPosition";
+import {
+  currentEditorEdit,
+  ProjectTimeline,
+  shareProject,
+} from "./projectTimeline";
+import { registerProjectHistory } from "./projectHistoryBridge";
+import {
+  captureEditorSessions,
+  rememberEditorSession,
+  restoreEditorSessions,
+} from "./editorSessions";
 export function useProject() {
   const [project, setProject] = useState<Project | null>(null),
     [saveState, setSaveState] = useState("Opening project…"),
@@ -17,6 +29,15 @@ export function useProject() {
     pristine.current.delete(id);
   }, []);
   const transitions = useRef(Promise.resolve());
+  const timelines = useRef(new Map<string, ProjectTimeline>());
+  const timelineFor = useCallback((id: string) => {
+    let timeline = timelines.current.get(id);
+    if (!timeline) {
+      timeline = new ProjectTimeline();
+      timelines.current.set(id, timeline);
+    }
+    return timeline;
+  }, []);
   const remember = useCallback((p: Project) => {
     opened.current.set(p.id, p);
     setDocuments((previous) => {
@@ -38,6 +59,11 @@ export function useProject() {
   const install = useCallback(
     (p: Project) => {
       window.dispatchEvent(new Event("alder-save-document-position"));
+      // An explicit reload may contain changes made outside this renderer.
+      // Its durable saved versions remain available, but old local steps may
+      // no longer address the same document and must not overwrite it.
+      if (current.current?.id === p.id && current.current !== p)
+        timelineFor(p.id).clear();
       let converted = !p.book;
       p = migrateBook(p);
       // Font substitution is a display decision. Never rewrite authored choices on open.
@@ -50,7 +76,7 @@ export function useProject() {
       setSaveState("Saved");
       localStorage.setItem("alder.project", p.id);
     },
-    [remember],
+    [remember, timelineFor],
   );
   const flush = useCallback(async () => {
     if (timer.current) clearTimeout(timer.current);
@@ -72,8 +98,8 @@ export function useProject() {
           );
           revision.current = saved.revision;
           if (seq === serial.current) {
-            current.current = saved;
-            setProject(saved);
+            current.current = shareProject(current.current!, saved);
+            setProject(current.current);
           } else if (current.current) {
             current.current = { ...current.current, revision: saved.revision };
           }
@@ -96,10 +122,12 @@ export function useProject() {
   }, [remember]);
   // Serialize open/switch/close so a rapid second click cannot race a save.
   const transition = useCallback((action: () => Promise<void>) => {
-    const next = transitions.current.then(action).catch((e) => {
+    const next = transitions.current.then(action);
+    // Keep the queue usable after a failure, but let an awaiting dialog or
+    // file-open operation stop before claiming the handoff succeeded.
+    transitions.current = next.catch((e) => {
       setError(String((e as Error).message));
     });
-    transitions.current = next;
     return next;
   }, []);
   const load = useCallback(
@@ -121,6 +149,7 @@ export function useProject() {
         else if (!cached) pristine.current.delete(p.id);
         if (replace) {
           opened.current.delete(replace);
+          timelines.current.delete(replace);
           pristine.current.delete(replace);
           forgetSessionPosition(documentPositionKey(replace));
           setDocuments((previous) =>
@@ -158,6 +187,7 @@ export function useProject() {
           }
         }
         opened.current.delete(id);
+        timelines.current.delete(id);
         pristine.current.delete(id);
         forgetSessionPosition(documentPositionKey(id));
         setDocuments((previous) => previous.filter((item) => item.id !== id));
@@ -174,8 +204,31 @@ export function useProject() {
   const change = useCallback(
     (mutate: (draft: Project) => void) => {
       if (!current.current) return;
-      const next = structuredClone(current.current);
-      mutate(next);
+      const before = current.current;
+      const origin = currentEditorEdit();
+      if (origin && origin.projectId !== before.id) return;
+      const editing = origin ? createEditorDraft(before) : null;
+      const draft = editing?.project ?? structuredClone(before);
+      mutate(draft);
+      const next = shareProject(before, editing ? editing.finish() : draft);
+      if (next === before) return;
+      const editor = currentEditorEdit(next.id);
+      timelineFor(next.id).record(
+        before,
+        next,
+        editor,
+        editor ? undefined : captureEditorSessions(next.id),
+      );
+      let retained = [...timelines.current.values()].reduce(
+        (n, t) => n + t.retainedBytes,
+        0,
+      );
+      for (const [id, timeline] of timelines.current) {
+        if (retained <= 64 * 1024 * 1024) break;
+        if (id === next.id) continue;
+        retained -= timeline.retainedBytes;
+        timeline.trimTo(0);
+      }
       pristine.current.delete(next.id);
       current.current = next;
       remember(next);
@@ -186,7 +239,7 @@ export function useProject() {
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => void flush().catch(() => {}), 500);
     },
-    [flush, remember],
+    [flush, remember, timelineFor],
   );
   useEffect(() => {
     if (project && dirty.current) void flush().catch(() => {});
@@ -202,16 +255,56 @@ export function useProject() {
     window.addEventListener("beforeunload", before);
     return () => window.removeEventListener("beforeunload", before);
   }, [flush]);
-  const history = async (action: "undo" | "redo") => {
-    await flush();
-    if (current.current)
-      load(
-        await api<Project>(
-          `/api/projects/${current.current.id}/${action}`,
-          "POST",
-        ),
+  const history = useCallback(
+    async (action: "undo" | "redo") => {
+      const source = current.current;
+      if (!source) return;
+      const result = timelineFor(source.id).step(
+        source,
+        action,
+        captureEditorSessions(source.id),
       );
-  };
+      if (!result) return;
+      if (result.sessions) restoreEditorSessions(result.sessions);
+      if (result.editor)
+        rememberEditorSession(
+          result.editor.identity,
+          action === "undo" ? result.editor.before : result.editor.after,
+        );
+      current.current = result.project;
+      remember(result.project);
+      serial.current++;
+      dirty.current = true;
+      setProject(result.project);
+      setSaveState("Unsaved changes");
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => void flush().catch(() => {}), 500);
+      if (result.editor)
+        window.dispatchEvent(
+          new CustomEvent("alder-history-source", {
+            detail: { projectId: source.id, identity: result.editor.identity },
+          }),
+        );
+    },
+    [timelineFor, remember, flush],
+  );
+  useEffect(() => {
+    if (!project) return;
+    const id = project.id;
+    return registerProjectHistory(id, {
+      can: (direction) =>
+        current.current?.id === id &&
+        !!(direction === "undo" ? timelineFor(id).past : timelineFor(id).future)
+          .length,
+      breakBefore: (identity) => timelineFor(id).breakBefore(identity),
+      run: (direction) => {
+        if (current.current?.id === id)
+          void history(direction).catch((e) =>
+            setError(String(e.message || e)),
+          );
+      },
+    });
+  }, [project?.id, history, timelineFor]);
   return {
     project,
     retain,

@@ -75,6 +75,20 @@ export function replaceMatches(
       undefined,
       projection,
     );
+    state.doc.nodesBetween(range.from, range.to, (node) => {
+      if (node.type.name === "table_of_contents")
+        throw new Error(
+          "This text is generated contents. Edit its source heading, then update fields.",
+        );
+      if (node.marks.some((mark) => mark.type.name === "revision_deletion"))
+        throw new Error(
+          "This match crosses a tracked deletion. Review that change before replacing the passage.",
+        );
+      if (node.isInline && !node.isText && node.type.name !== "hard_break")
+        throw new Error(
+          "This match crosses an image or bookmark. Replace its text separately to retain the object.",
+        );
+    });
     tr.insertText(match.replacement ?? replacement, range.from, range.to);
   }
   return tr;

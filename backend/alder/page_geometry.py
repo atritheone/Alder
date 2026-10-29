@@ -70,17 +70,6 @@ def docx_page_settings(document, warnings, section=None):
         settings[f"margin{edge.title()}Mm"] = value.mm if value is not None else PAGE_FORMAT["defaultMargin"]
     settings['gutterMm'] = section.gutter.mm if section.gutter is not None else 0
     from docx.oxml.ns import qn
-    numbering = section._sectPr.find(qn('w:pgNumType'))
-    if numbering is not None:
-        if first and numbering.get(qn('w:start')) is not None:
-            try:
-                settings['firstPageNumber'] = min(9999, max(1, int(numbering.get(qn('w:start')))))
-            except ValueError:
-                warnings.append('DOCX starting page number is invalid and was reset to 1.')
-        elif not first and numbering.get(qn('w:start')) is not None:
-            warnings.append('DOCX section page-number restarts are converted to continuous numbering.')
-        if numbering.get(qn('w:fmt'), 'decimal') != 'decimal':
-            warnings.append('DOCX page-number formats are converted to decimal numbering.')
     if document.settings.element.find(qn('w:mirrorMargins')) is not None or document.settings.element.find(qn('w:gutterAtTop')) is not None:
         warnings.append("DOCX mirrored margins or top binding are converted to ordinary margins with a left binding gutter.")
     try:
@@ -94,4 +83,11 @@ def docx_page_settings(document, warnings, section=None):
                     **{f'margin{edge.title()}Mm': value for edge, value in resolved['margins'].items()},
                     "gutterMm": 0}
         warnings.append("DOCX page dimensions or margins exceed Alder's supported range and were adjusted to retain a usable writing area.")
+    if first:
+        from .page_numbering import read_docx_numbering
+        numbering = read_docx_numbering(section, warnings)
+        if 'numberingStart' in numbering:
+            settings['firstPageNumber'] = numbering['numberingStart']
+        if 'numberingFormat' in numbering:
+            settings['pageNumberFormat'] = numbering['numberingFormat']
     return settings

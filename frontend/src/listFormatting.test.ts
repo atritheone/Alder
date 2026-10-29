@@ -3,7 +3,12 @@ import { EditorState, TextSelection } from "prosemirror-state";
 import { history, undo } from "prosemirror-history";
 import { schema } from "./Editor";
 import { blockIdentities } from "./blockIdentities";
-import { selectedList, setListFormatting } from "./listFormatting";
+import {
+  selectedList,
+  setListFormatting,
+  continuedLists,
+  normaliseListOrders,
+} from "./listFormatting";
 
 function fixture() {
   const doc = schema.node("doc", null, [
@@ -83,4 +88,64 @@ describe("list properties", () => {
       setListFormatting("decimal", 1)(EditorState.create({ schema })),
     ).toBe(false);
   });
+});
+
+const para = (text: string) =>
+  schema.node("paragraph", null, schema.text(text));
+const listing = (text: string, attrs = {}) =>
+  schema.node("ordered_list", attrs, [
+    schema.node("list_item", null, para(text)),
+  ]);
+it("continues matching sibling lists, updates after editing, and undoes atomically", () => {
+  const doc = schema.node("doc", null, [
+    listing("First", { order: 4 }),
+    para("Break"),
+    listing("Second", { continuePrevious: true }),
+  ]);
+  let state = EditorState.create({
+    doc: normaliseListOrders(doc),
+    plugins: [history(), continuedLists()],
+  });
+  expect(state.doc.child(2).attrs.order).toBe(5);
+  const before = state.doc;
+  state = state.applyTransaction(
+    state.tr.insert(1, schema.node("list_item", null, para("Added"))),
+  ).state;
+  expect(state.doc.child(2).attrs.order).toBe(6);
+  undo(state, (tr) => (state = state.applyTransaction(tr).state));
+  expect(state.doc.eq(before)).toBe(true);
+});
+it("keeps distinct markers, restarts and nested containers independent", () => {
+  const doc = schema.node("doc", null, [
+    listing("First", { order: 7 }),
+    listing("Alpha", { order: 20, listStyle: "lower-alpha" }),
+    schema.node("blockquote", null, [
+      listing("Nested", { continuePrevious: true }),
+    ]),
+    listing("Next", { continuePrevious: true }),
+    listing("Restart", { order: 2 }),
+    listing("After restart", { continuePrevious: true }),
+  ]);
+  const result = normaliseListOrders(doc);
+  expect(result.child(2).firstChild!.attrs.order).toBe(1);
+  expect(result.child(3).attrs.order).toBe(8);
+  expect(result.child(5).attrs.order).toBe(3);
+});
+it("continues from the selected item after a split in one undo", () => {
+  let state = fixture().reconfigure({
+    plugins: [history(), blockIdentities(), continuedLists()],
+  });
+  const original = state.doc;
+  setListFormatting(
+    "decimal",
+    1,
+    true,
+    true,
+  )(state, (tr) => (state = state.applyTransaction(tr).state));
+  expect(state.doc.child(1).attrs).toMatchObject({
+    continuePrevious: true,
+    order: 5,
+  });
+  undo(state, (tr) => (state = state.applyTransaction(tr).state));
+  expect(state.doc.eq(original)).toBe(true);
 });

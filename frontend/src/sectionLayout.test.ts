@@ -23,6 +23,13 @@ const raw = {
   ],
 };
 describe("section layout contract", () => {
+  it('retains continuous boundaries as structural metadata rather than authored wording',()=>{
+    const attrs={kind:'continuous',page};
+    expect(validSection(attrs)).toBe(true);
+    const parsed=parseEditorDocument({type:'doc',content:[raw.content[0],{type:'section_break',attrs},raw.content[2]]});
+    expect(parsed.document?.child(1).attrs.kind).toBe('continuous');
+    expect(parsed.document?.textContent).toBe('FirstLast');
+  });
   it("keeps section breaks silent and stable in the narration projection", () => {
     const doc = schema.nodeFromJSON(raw);
     doc.check();
@@ -38,7 +45,7 @@ describe("section layout contract", () => {
     ).toBeNull();
   });
   it.each([
-    { kind: "continuous", page },
+    { kind: "column", page },
     { kind: "nextPage", page: { marginMm: 99, pageSize: "A5" } },
     { kind: "nextPage", page: { pageWidthMm: NaN } },
     { kind: "nextPage", page: { orientation: "sideways" } },

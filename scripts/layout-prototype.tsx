@@ -84,6 +84,10 @@ function Prototype() {
   const [scale, setScale] = useState(1);
   const [generation, setGeneration] = useState(0);
   const pages = useRef<FlowPage[] | null>(null);
+  const operation = useRef<{ kind: string; start: number } | null>(null);
+  const layoutTimings = useRef<
+    { kind: string; milliseconds: number; pages: number }[]
+  >([]);
   const snapshots = useRef<string[]>([]);
   const [capturePages, setCapturePages] = useState(false);
   const [pageSize, setPageSize] = useState({
@@ -93,6 +97,7 @@ function Prototype() {
   });
   host.style.zoom = String(scale);
   const api = {
+    timings: () => layoutTimings.current,
     capture() {
       const started = performance.now();
       const publication = editor.current!.getPagePublication();
@@ -120,6 +125,7 @@ function Prototype() {
       setDoc(identifiedDocument(schema.nodeFromJSON(value)).toJSON());
     },
     fullLayout: () => {
+      operation.current = { kind: "full", start: performance.now() };
       pages.current = null;
       setGeneration((value) => value + 1);
     },
@@ -128,10 +134,11 @@ function Prototype() {
       return pages.current;
     },
     edit: (start: number, end: number, text: string) => {
+      operation.current = { kind: "edit", start: performance.now() };
       pages.current = null;
       editor.current!.replaceRange(start, end, text);
     },
-    clipboardRoundTrip: (value: DocNode) => {
+    clipboardRoundTrip: (value: DocNode, images?: Record<string, string>) => {
       const parsed = schema.nodeFromJSON(value);
       const container = window.document.createElement("div");
       container.append(
@@ -142,6 +149,9 @@ function Prototype() {
         parsed.textContent,
         container.innerHTML,
         "source",
+        undefined,
+        undefined,
+        images ? new Map(Object.entries(images)) : undefined,
       ).content.toJSON();
     },
     pageSize: setPageSize,
@@ -179,6 +189,14 @@ function Prototype() {
       }}
       onPages={(value) => {
         pages.current = value;
+        if (operation.current) {
+          layoutTimings.current.push({
+            kind: operation.current.kind,
+            milliseconds: performance.now() - operation.current.start,
+            pages: value.length,
+          });
+          operation.current = null;
+        }
       }}
       pageLayout={{
         ...pageSize,

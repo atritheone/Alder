@@ -6,10 +6,15 @@ import {
   type PageSettings,
 } from "./pageGeometry";
 import type { PageLayout, FlowPage } from "./pageFlow";
+import { validNumberFormat, type PageNumberFormat } from "./pageNumbering";
+import { validRunningMatter, type RunningMatter } from "./runningMatter";
 
 export type SectionSettings = {
-  kind: "nextPage" | "oddPage" | "evenPage";
+  kind: "nextPage" | "continuous" | "oddPage" | "evenPage";
   page: PageSettings;
+  numberingStart?: number | null;
+  numberingFormat?: PageNumberFormat | null;
+  runningMatter?: RunningMatter | null;
 };
 export const sectionBreakSpec: NodeSpec = {
   atom: true,
@@ -17,6 +22,9 @@ export const sectionBreakSpec: NodeSpec = {
     blockId: { default: null },
     kind: { default: "nextPage" },
     page: { default: {} },
+    numberingStart: { default: null },
+    numberingFormat: { default: null },
+    runningMatter: { default: null },
   },
   toDOM: (node) => [
     "div",
@@ -25,6 +33,9 @@ export const sectionBreakSpec: NodeSpec = {
       "data-section": JSON.stringify({
         kind: node.attrs.kind,
         page: node.attrs.page,
+        numberingStart: node.attrs.numberingStart,
+        numberingFormat: node.attrs.numberingFormat,
+        runningMatter: node.attrs.runningMatter,
       }),
       "aria-label": "Section break",
     },
@@ -49,8 +60,18 @@ export const sectionBreakSpec: NodeSpec = {
 export function validSection(value: unknown): value is SectionSettings {
   if (!value || typeof value !== "object") return false;
   const v = value as SectionSettings;
+  if (!validRunningMatter(v.runningMatter,true))return false;
   if (
-    !["nextPage", "oddPage", "evenPage"].includes(v.kind) ||
+    v.numberingStart != null &&
+    (!Number.isInteger(v.numberingStart) ||
+      v.numberingStart < 1 ||
+      v.numberingStart > 9999)
+  )
+    return false;
+  if (v.numberingFormat != null && !validNumberFormat(v.numberingFormat))
+    return false;
+  if (
+    !["nextPage", "continuous", "oddPage", "evenPage"].includes(v.kind) ||
     !v.page ||
     typeof v.page !== "object" ||
     Array.isArray(v.page)

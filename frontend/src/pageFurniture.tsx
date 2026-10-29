@@ -1,6 +1,9 @@
 import { pageInsets } from "./pageGeometry";
 import type { PageLayout } from "./pageFlow";
 import { memo } from "react";
+import { formatPageNumber } from "./pageNumbering";
+import type { Schema } from "prosemirror-model";
+import { runningMatterDOM } from "./runningMatter";
 
 const fittedHeaders = new Map<string, string>();
 if (typeof document !== "undefined")
@@ -50,7 +53,10 @@ function items(layout: PageLayout, page: number): Item[] {
   }
   if (layout.footer)
     result.push({
-      text: String(page + (layout.firstPageNumber || 1)),
+      text: formatPageNumber(
+        page + (layout.pageNumberOffset ?? layout.firstPageNumber ?? 1),
+        layout.pageNumberFormat,
+      ),
       x: layout.width / 2,
       y: layout.height - margins.bottom / 2,
       anchor: "middle",
@@ -63,11 +69,32 @@ function items(layout: PageLayout, page: number): Item[] {
 export const PageFurniture = memo(function PageFurniture({
   layout,
   page,
+  schema,
+  pageCount,
 }: {
   layout: PageLayout;
   page: number;
+  schema: Schema;
+  pageCount: number;
   fontVersion?: number;
 }) {
+  if (layout.runningMatter)
+    return (
+      <div
+        className="page-furniture"
+        aria-hidden="true"
+        style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+        dangerouslySetInnerHTML={{
+          __html: runningMatterDOM(
+            layout,
+            page,
+            pageCount,
+            schema,
+            layout.runningStyles,
+          ).innerHTML,
+        }}
+      />
+    );
   return (
     <svg
       className="page-furniture"
@@ -99,7 +126,20 @@ export const PageFurniture = memo(function PageFurniture({
   );
 });
 
-export function pageFurnitureDOM(layout: PageLayout, page: number) {
+export function pageFurnitureDOM(
+  layout: PageLayout,
+  page: number,
+  schema: Schema,
+  pageCount: number,
+) {
+  if (layout.runningMatter)
+    return runningMatterDOM(
+      layout,
+      page,
+      pageCount,
+      schema,
+      layout.runningStyles,
+    );
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("class", "page-furniture");

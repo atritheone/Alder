@@ -9,6 +9,8 @@ def validate_table_attributes(kind, attrs):
     if kind == 'table' and attrs.get('align') not in (None, 'left', 'center', 'right'):
         raise ValueError('Unsupported table alignment.')
     if kind == 'table_row':
+        if attrs.get('allowSplit') is not None and type(attrs['allowSplit']) is not bool:
+            raise ValueError('Row splitting must be a boolean.')
         bounds = {'minHeight': 1440}
     elif kind in ('table_cell', 'table_header'):
         bounds = {**{'padding' + side: 144 for side in PADDING}, 'borderWidth': 12}
@@ -37,6 +39,8 @@ def table_css(kind, attrs):
         css.extend(('margin-left:' + ('auto' if attrs.get('align') in ('center', 'right') else '0'), 'margin-right:' + ('auto' if attrs.get('align') == 'center' else '0')))
     if kind == 'table_row' and attrs.get('minHeight') is not None:
         css.append(f'height:{attrs["minHeight"]:g}pt')
+    if kind == 'table_row':
+        css.append('break-inside:' + ('auto' if attrs.get('allowSplit') else 'avoid'))
     if kind in ('table_cell', 'table_header'):
         for side in PADDING:
             if attrs.get('padding' + side) is not None:
@@ -67,6 +71,7 @@ def html_table_attributes(kind, element):
         if align in ('left', 'center', 'right'): attrs['align'] = align
     if kind == 'table_row':
         attrs['minHeight'] = points(styles.get('height'), 1440)
+        attrs['allowSplit'] = element.get('data-allow-split') == 'true' or styles.get('break-inside') == 'auto'
     if kind in ('table_cell', 'table_header'):
         for side in PADDING:
             attrs['padding' + side] = points(styles.get('padding-' + side.lower(), styles.get('padding')), 144)
