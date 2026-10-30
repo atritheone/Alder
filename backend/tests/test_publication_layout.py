@@ -43,6 +43,9 @@ def test_rendered_pdf_must_match_the_captured_page_map():
     assert validate_rendered_pdf(data, [{'width': 800, 'height': 800 / .75}])['pages'] == 1
     with pytest.raises(ValueError, match='geometry differs'): validate_rendered_pdf(data, [{'width': 1000, 'height': 1000}])
     with pytest.raises(ValueError, match='page count'): validate_rendered_pdf(data, [{'width': 800, 'height': 1000}] * 2)
+    assert validate_rendered_pdf(data, [{'width':800,'height':800/.75}])['tagged'] is False
+    with pytest.raises(ValueError,match='PDF tags'):
+        validate_rendered_pdf(data,[{'width':800,'height':800/.75}],True)
 
 
 def test_print_destinations_keep_editor_identities_without_word_only_attributes():
@@ -90,6 +93,9 @@ def test_publication_api_preserves_a_frozen_revision_and_verifies_the_renderer_o
         snapshot = client.post(f"/api/projects/{p['id']}/publication-layout", json={}).json()
         p['name'] = 'Changed after snapshot'
         assert client.put(f"/api/projects/{p['id']}", json={'project': p, 'expectedRevision': p['revision']}).status_code == 200
+        stale = client.post(f"/api/projects/{p['id']}/export", json={'format':'docx','expectedRevision':snapshot['sourceRevision'],'options':{'measuredRowSplits':[]}})
+        assert stale.status_code == 409
+        assert 'changed during export preparation' in stale.json()['detail']
         writer = PdfWriter(); writer.add_blank_page(width=600, height=800)
         stream = io.BytesIO(); writer.write(stream)
         route = f"/api/exports/{snapshot['id']}/rendered-pdf"
@@ -98,6 +104,7 @@ def test_publication_api_preserves_a_frozen_revision_and_verifies_the_renderer_o
         assert client.post(route, files=files, data={'metadata': '[]'}).status_code == 422
         wrong = {**metadata, 'sourceIdentity': 'stale'}
         assert client.post(route, files=files, data={'metadata': json.dumps(wrong)}).status_code == 422
+        assert client.post(route, files=files, data={'metadata': json.dumps({**metadata,'tagged':True})}).status_code == 422
         result = client.post(route, files=files, data={'metadata': json.dumps(metadata)})
         assert result.status_code == 200, result.text
         result = result.json()

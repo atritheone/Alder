@@ -2,16 +2,34 @@ import type { EditorView } from "prosemirror-view";
 import type { PageLayout } from "./pageFlow";
 import { pageInsets } from "./pageGeometry";
 import { freezeTableLayout } from "./tableSnapshotLayout";
+import { mirrorShiftToPage } from "./mirroredMargins";
+import { originalPaintProperty } from "./paragraphPaint";
 
-export type FlowHeader = { table: number; rows: number; height: number };
+export type FlowHeader = {
+  table: number;
+  rows: number;
+  height: number;
+  offset?: number;
+};
+export const tableHeaderHeight = (headers: readonly FlowHeader[] | undefined) =>
+  Math.max(
+    0,
+    ...(headers || []).map((header) => (header.offset || 0) + header.height),
+  );
 
 /** Repeated headers are paint-only copies. They never become authored text,
  * selections, narration, spelling results, or undo steps. */
 export function tableHeaderHTML(
   view: EditorView,
   layout: PageLayout,
-  header: FlowHeader,
-) {
+  header: FlowHeader | readonly FlowHeader[],
+  page = 0,
+): string {
+  if (Array.isArray(header))
+    return header
+      .map((item) => tableHeaderHTML(view, layout, item, page))
+      .join("");
+  header = header as FlowHeader;
   const node = view.nodeDOM(header.table) as HTMLElement | null;
   const table = node?.matches("table")
     ? (node as HTMLTableElement)
@@ -64,7 +82,11 @@ export function tableHeaderHTML(
   function appearance(original: HTMLElement, target: HTMLElement) {
     const style = getComputedStyle(original);
     for (const property of properties)
-      target.style.setProperty(property, style.getPropertyValue(property));
+      target.style.setProperty(
+        property,
+        originalPaintProperty(original, property) ??
+          style.getPropertyValue(property),
+      );
     for (const attribute of [...target.attributes])
       if (
         attribute.name.startsWith("on") ||
@@ -103,10 +125,11 @@ export function tableHeaderHTML(
   copy.style.cssText += `;width:${rect.width / scale}px;min-width:0;margin:0;`;
   const wrapper = document.createElement("div");
   wrapper.className = "repeated-table-header";
+  wrapper.dataset.sourceTable = String(header.table);
   wrapper.setAttribute("aria-hidden", "true");
   wrapper.setAttribute("inert", "");
-  wrapper.style.cssText = `position:absolute;left:${(rect.left - origin.left) / scale - (canvasWidth - layout.width) / 2}px;top:${pageInsets(layout).top}px;width:${rect.width / scale}px;height:${header.height}px;pointer-events:none;user-select:none;overflow:hidden;`;
-  freezeTableLayout(table,copy,scale);
+  wrapper.style.cssText = `position:absolute;left:${(rect.left - origin.left) / scale - (canvasWidth - layout.width) / 2 + mirrorShiftToPage(view, header.table, page)}px;top:${pageInsets(layout).top + (header.offset || 0)}px;width:${rect.width / scale}px;height:${header.height}px;pointer-events:none;user-select:none;overflow:hidden;`;
+  freezeTableLayout(table, copy, scale, true);
   wrapper.append(copy);
   return wrapper.outerHTML;
 }

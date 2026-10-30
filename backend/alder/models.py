@@ -40,24 +40,29 @@ def document_text(document: dict) -> str:
     if any(mark.get('type') == 'revision_deletion' for mark in document.get('marks', [])):
         return ''
     kind = document.get("type", "")
+    if kind == "text_box":
+        return '\n'+''.join(document_text(child) for child in document.get('content',[]))+'\n'
     if kind == "text":
         return document.get("text", "")
     if kind in ("hardBreak", "hard_break"):
         return "\n"
     if kind in ("image", "inline_image"):
         return ""
-    if kind in ("horizontalRule", "horizontal_rule", "pageBreak", "page_break", "section_break"):
+    if kind in ("horizontalRule", "horizontal_rule", "pageBreak", "page_break", "column_break", "section_break"):
         return ""
     parts = [document_text(child) for child in document.get("content", [])]
     if kind in ("tableRow", "table_row"):
         return "\t".join(parts)
-    if kind in ("doc", "table_of_contents", "blockquote", "bulletList", "bullet_list", "orderedList", "ordered_list",
-                "listItem", "list_item", "table", "tableCell", "table_cell", "tableHeader", "table_header"):
+    if kind in ("doc", "bibliography", "table_of_contents", "blockquote", "bulletList", "bullet_list", "orderedList", "ordered_list",
+                "form_block", "listItem", "list_item", "table", "tableCell", "table_cell", "tableHeader", "table_header"):
         return "\n".join(parts)
     return "".join(parts)
 
 
 NODE_TYPES = {
+    "citation", "bibliography",
+    "document_note", "text_box", "form_field", "form_block", "equation",
+    "index_entry", "index_reference",
     "table_of_contents",
     "revision_break",
     "comment_anchor",
@@ -66,7 +71,7 @@ NODE_TYPES = {
     "codeBlock", "code_block", "bulletList", "bullet_list", "orderedList", "ordered_list",
     "listItem", "list_item", "horizontalRule", "horizontal_rule", "image", "inline_image", "table",
     "tableRow", "table_row", "tableCell", "table_cell", "tableHeader", "table_header",
-    "pageBreak", "page_break", "section_break", "footnote", "footnoteReference", "crossReference",
+    "pageBreak", "page_break", "column_break", "section_break", "footnote", "footnoteReference", "crossReference",
 }
 MARK_TYPES = {"bold", "strong", "italic", "em", "underline", "strike", "s", "code", "link",
               "revision_insertion", "revision_deletion", "revision_format",
@@ -94,12 +99,47 @@ def validate_document(document: Any) -> dict:
         attrs = node.get("attrs", {}) or {}
         if not isinstance(attrs, dict):
             raise ValidationError("Node attributes must be an object.")
+        if node['type'] == 'citation':
+            from .citation_sources import validate_citation
+            validate_citation(attrs)
+            if any(child.get('type') != 'text' or child.get('marks') for child in children) or len(document_text(node)) > 100000:
+                raise ValidationError('A citation result must contain plain text.')
+        if node['type'] == 'bibliography':
+            if not isinstance(attrs.get('title'),str) or len(attrs['title']) > 200 or not isinstance(attrs.get('entryIds'),list) or any(not isinstance(ids,list) or any(not isinstance(i,str) or len(i)>128 for i in ids) for ids in attrs['entryIds']):
+                raise ValidationError('Invalid bibliography settings.')
+            if not children or any(child.get('type') != 'paragraph' for child in children): raise ValidationError('A bibliography contains generated paragraphs.')
+        if node['type'] in ('citation','bibliography') and attrs.get('renderedStyle','apa') not in ('apa','ieee'):
+            raise ValidationError('Unsupported citation style.')
+        if node['type'] == 'equation':
+            from .equations import validate as validate_equation
+            try: validate_equation(node)
+            except ValueError as exc: raise ValidationError(str(exc)) from exc
+        if node['type'] in ('form_field','form_block'):
+            from .form_fields import validate as validate_form_field
+            try: validate_form_field(node)
+            except ValueError as exc: raise ValidationError(str(exc)) from exc
+        if node['type'] == 'text_box':
+            from .text_boxes import validate as validate_text_box
+            try: validate_text_box(node)
+            except ValueError as exc: raise ValidationError(str(exc)) from exc
+        if node['type'] == 'document_note':
+            from .document_notes import validate_note
+            try: validate_note(attrs)
+            except ValueError as exc: raise ValidationError(str(exc)) from exc
+            if children or node.get('marks'): raise ValidationError('A note reference has a separate body, without inline marks.')
+            walk(attrs['body'], depth+1)
         if node['type'] == 'table_of_contents':
             from .document_contents import validate_contents
             try: validate_contents(attrs)
             except ValueError as exc: raise ValidationError(str(exc)) from exc
             if not children or any(child.get('type') != 'paragraph' for child in children):
                 raise ValidationError('A table of contents must contain generated paragraphs.')
+        if node['type'] in ('index_entry','index_reference'):
+            from .document_index import validate_entry,validate_reference
+            try:(validate_entry if node['type']=='index_entry' else validate_reference)(attrs)
+            except ValueError as exc:raise ValidationError(str(exc)) from exc
+            if node['type']=='index_entry' and children:raise ValidationError('Index entries do not contain authored text.')
+            if node['type']=='index_reference' and any(child.get('type')!='text' for child in children):raise ValidationError('Index page references contain only text.')
         if attrs.get('revisionProperties') is not None:
             from .paragraph_revisions import validate_paragraph_log
             if node['type'] not in ('paragraph', 'heading'): raise ValidationError('Only prose paragraphs have reviewed paragraph properties.')
@@ -127,8 +167,12 @@ def validate_document(document: Any) -> dict:
                 raise ValidationError(str(exc)) from exc
         if node['type'] in ('image', 'inline_image'):
             from .image_crop import validate_crop
+            from .image_wrapping import image_wrapping
             try:
                 validate_crop(attrs.get('crop'))
+                side, _ = image_wrapping(attrs)
+                if node['type'] == 'image' and side != 'none':
+                    raise ValueError('Wrapped pictures must be anchored inside a paragraph.')
             except ValueError as exc:
                 raise ValidationError(str(exc)) from exc
             if attrs.get('decorative') is not None and type(attrs['decorative']) is not bool:
@@ -169,6 +213,9 @@ def validate_document(document: Any) -> dict:
             from .document_fields import FIELD_LABELS
             if attrs.get('fieldKind') not in FIELD_LABELS:
                 raise ValidationError('Unsupported document field.')
+            if attrs.get('fieldKind')=='merge':
+                from .document_fields import validate_merge_key
+                validate_merge_key(attrs.get('mergeKey'))
             if any(not isinstance(child,dict) or child.get('type')!='text' or not isinstance(child.get('text'),str) for child in children) or len(document_text(node))>10000:
                 raise ValidationError('A document field needs a plain-text result of at most 10000 characters.')
             if attrs.get('unresolved') is not None and type(attrs['unresolved']) is not bool:
@@ -183,7 +230,10 @@ def validate_document(document: Any) -> dict:
                 validate_table_attributes({'tableRow': 'table_row', 'tableCell': 'table_cell', 'tableHeader': 'table_header'}.get(node['type'], node['type']), attrs)
             except ValueError as exc:
                 raise ValidationError(str(exc)) from exc
-        for key in ("keepWithNext", "keepTogether", "widowOrphan", "pageBreakBefore", "headingNumbered"):
+        from .hyphenation import validate_typography
+        try:validate_typography(attrs)
+        except ValueError as exc:raise ValidationError(str(exc)) from exc
+        for key in ("keepWithNext", "keepTogether", "widowOrphan", "pageBreakBefore", "headingNumbered", "suppressLineNumbers"):
             if attrs.get(key) is not None and type(attrs[key]) is not bool:
                 raise ValidationError(f"{key} must be true, false or inherited.")
         if attrs.get('headingStart') is not None and (type(attrs['headingStart']) is not int or not 1 <= attrs['headingStart'] <= 100000):
@@ -290,11 +340,17 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
         for item in p[kind]:
             register(item, kind)
             if kind == 'styles':
+                if item.get('suppressLineNumbers') is not None and type(item['suppressLineNumbers']) is not bool:
+                    raise ValidationError('Style line-number suppression must be true, false or inherited.')
                 if item.get('headingNumbered') is not None and type(item['headingNumbered']) is not bool:
                     raise ValidationError('Style heading numbering must be true, false or inherited.')
                 from .paragraph_appearance import validate_appearance
                 try: validate_appearance(item)
                 except ValueError as exc: raise ValidationError(str(exc)) from exc
+            if kind == 'styles':
+                from .hyphenation import validate_typography
+                try:validate_typography(item)
+                except ValueError as exc:raise ValidationError(str(exc)) from exc
             if kind == 'styles' and item.get('tabStops') is not None:
                 from .tab_stops import validate_tab_stops
                 try: validate_tab_stops(item['tabStops'])
@@ -410,6 +466,9 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     for section in p["sections"]:
         section.setdefault("title", "Untitled section")
         section.setdefault("role", "chapter")
+        from .book_structure import validate_structure
+        try: validate_structure(section)
+        except ValueError as exc: raise ValidationError(str(exc)) from exc
     if not isinstance(p.setdefault("settings", {}), dict):
         raise ValidationError("Project settings must be an object.")
     if p["settings"].get("proofreadingDialect", "en-GB") not in ("en-AU", "en-GB", "en-US"):
@@ -427,6 +486,12 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
             raise ValidationError(f"Invalid document setting: {prop}.")
     try:
         validate_page_settings(p["settings"])
+        if p['settings'].get('stationeryPreset') is not None:
+            from .stationery import preset
+            preset(p['settings']['stationeryPreset'])
+        from .note_options import note_options
+        note_options(p['settings'].get('noteOptions'))
+        if p['settings'].get('citationStyle','apa') not in ('apa','ieee'): raise ValidationError('Unsupported citation style.')
         from .running_matter import validate_running_matter
         validate_running_matter(p['settings'].get('runningMatter'))
         validate_numbering(p["settings"].get("firstPageNumber"), p["settings"].get("pageNumberFormat"))
@@ -455,6 +520,7 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
                 raise ValidationError(f"Custom rule {field} must be true or false.")
 
     def verify_assets(node):
+        if node['type']=='document_note':verify_assets(node['attrs']['body'])
         attrs = node.get("attrs") or {}
         reference = attrs.get("assetId")
         source = attrs.get("src", "")
@@ -485,6 +551,9 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
             raise ValidationError("A book requires between 1 and 10,000 chapters.")
         for chapter in chapters:
             register(chapter, "chapter")
+            from .book_structure import validate_structure
+            try: validate_structure(chapter)
+            except ValueError as exc: raise ValidationError(str(exc)) from exc
             if not isinstance(chapter.get("title"), str) or not chapter["title"].strip() or len(chapter["title"]) > 300:
                 raise ValidationError("A chapter requires a title of 1–300 characters.")
             if "rawSource" in chapter:
@@ -502,6 +571,8 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
             if chapter.get("voiceId") is not None and not isinstance(chapter["voiceId"], str):
                 raise ValidationError("A chapter voice must be an identifier.")
             verify_assets(chapter["document"])
+    from .running_matter import project_running_stories
+    for story in project_running_stories(p): verify_assets(story)
     p.setdefault("createdAt", now())
     p.setdefault("updatedAt", p["createdAt"])
     from .document_schema import migrate_project

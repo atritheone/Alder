@@ -30,6 +30,7 @@ try {
     exact: true,
   });
   await expect(editor).toBeVisible();
+  await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.unmaximize();w.setSize(1280,900);w.show();w.focus();});
   await expect(page.locator(".save-status")).toHaveText("Saved");
   await editor.focus();
   await page.locator('input[type=file][accept="image/*"]').setInputFiles({
@@ -40,7 +41,7 @@ try {
       "base64",
     ),
   });
-  await expect(editor.locator("img")).toHaveCount(1);
+  await expect(editor.locator("img:not(.ProseMirror-separator)")).toHaveCount(1);
   await expect(page.locator(".save-status")).toHaveText("Saved");
   const name = await page.evaluate(async () => {
     const id = localStorage.getItem("alder.project");
@@ -126,6 +127,7 @@ try {
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await page.getByRole("button", { name, exact: true }).first().click();
   await expect(editor).toContainText("Measured page layout");
+  await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.unmaximize();w.setSize(1280,900);w.show();w.focus();});
   await page.evaluate(() => document.fonts.ready);
   await expect
     .poll(() => page.locator(".book-editor .page-sheet").count())
@@ -205,6 +207,8 @@ try {
   );
   const area = await page.locator(".page-arranger").boundingBox();
   await page.mouse.move(area.x + 8, area.y + 80);
+  // A page-wheel gesture must end before beginning a layout-wheel gesture.
+  await page.waitForTimeout(450);
   await page.mouse.wheel(0, -120);
   await expect(page.getByLabel("Page zoom", { exact: true })).toHaveValue(
     "0.9",
@@ -248,6 +252,10 @@ try {
   });
   await expect(focus).toBeVisible();
   expect(await focus.locator(".page-snapshot").textContent()).toBe(pageText);
+  // The focus overlay is visible throughout its transition from the thumbnail.
+  await focus.evaluate(async (el) => {
+    await Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished));
+  });
   const sheet = await focus.locator(".focused-page-sheet").boundingBox();
   const frame = await focus.boundingBox();
   expect(sheet.height).toBeGreaterThan(first.height);
@@ -544,6 +552,8 @@ try {
     }),
   );
 } catch (error) {
+  await (await app.firstWindow()).screenshot({path:path.join(data,'failure.png')}).catch(()=>{});
+  console.error('Failure screenshot:',path.join(data,'failure.png'));
   console.error(error);
   process.exitCode = 1;
 } finally {

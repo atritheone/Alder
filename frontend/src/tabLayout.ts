@@ -141,6 +141,7 @@ export function layoutTabs(view: EditorView, invalidate = false) {
       element.offsetWidth,
       css.font,
       css.letterSpacing,
+      css.direction,
       css.textIndent,
       css.getPropertyValue("--alder-tab-stops"),
     ].join("|");
@@ -148,6 +149,7 @@ export function layoutTabs(view: EditorView, invalidate = false) {
     const contentsPage =
       element.closest("[data-document-contents]") &&
       block.node.lastChild?.attrs.referenceFormat === "page";
+    const rtl = css.direction === "rtl";
     const stops = contentsPage
       ? [
           {
@@ -161,6 +163,24 @@ export function layoutTabs(view: EditorView, invalidate = false) {
           },
         ]
       : cssTabStops(css.getPropertyValue("--alder-tab-stops"));
+    const measuredStops = rtl
+      ? stops.map((stop) => ({
+          ...stop,
+          align:
+            stop.align === "left"
+              ? ("right" as const)
+              : stop.align === "right"
+                ? ("left" as const)
+                : stop.align,
+        }))
+      : stops;
+    const leadingPosition = (tab: HTMLElement) =>
+      ((rtl
+        ? rect.right - tab.getBoundingClientRect().right
+        : tab.getBoundingClientRect().left - rect.left) /
+        scale +
+        (parseFloat(rtl ? css.marginRight : css.marginLeft) || 0)) *
+      0.75;
     const tabs = new Map(
       [...element.querySelectorAll<HTMLElement>("[data-alder-tab]")].map(
         (e) => [e.dataset.alderTab!, e],
@@ -168,7 +188,7 @@ export function layoutTabs(view: EditorView, invalidate = false) {
     );
     const alignmentRule = sheet.cssRules.length;
     sheet.insertRule(
-      `:is(p,h1,h2,h3,h4,h5,h6):has([data-alder-tab^="${block.key}-"]){text-align:left!important}`,
+      `:is(p,h1,h2,h3,h4,h5,h6):has([data-alder-tab^="${block.key}-"]){text-align:${rtl ? "right" : "left"}!important}`,
       alignmentRule,
     );
     for (const at of block.tabs) {
@@ -187,10 +207,7 @@ export function layoutTabs(view: EditorView, invalidate = false) {
       rule.style.width = "0px";
       const firstTop = tab.getBoundingClientRect().top;
       // Stops are measured from the text margin, before paragraph indentation.
-      const x =
-        ((tab.getBoundingClientRect().left - rect.left) / scale +
-          (parseFloat(css.marginLeft) || 0)) *
-        0.75;
+      const x = leadingPosition(tab);
       let width = 0,
         decimalWidth: number | undefined;
       let segmentEnd = block.node.content.size;
@@ -225,14 +242,14 @@ export function layoutTabs(view: EditorView, invalidate = false) {
         width += measure(value);
         if (end >= 0) break;
       }
-      let next = nextTab(stops, x, width, decimalWidth ?? width);
+      const decimal = rtl
+        ? width - (decimalWidth ?? 0)
+        : (decimalWidth ?? width);
+      let next = nextTab(measuredStops, x, width, decimal);
       rule.style.width = `${next.gap / 0.75}px`;
       if (tab.getBoundingClientRect().top > firstTop + scale * 2) {
-        const wrappedX =
-          ((tab.getBoundingClientRect().left - rect.left) / scale +
-            (parseFloat(css.marginLeft) || 0)) *
-          0.75;
-        next = nextTab(stops, wrappedX, width, decimalWidth ?? width);
+        const wrappedX = leadingPosition(tab);
+        next = nextTab(measuredStops, wrappedX, width, decimal);
         rule.style.width = `${next.gap / 0.75}px`;
       }
       rule.style.backgroundImage = leaders[next.leader];

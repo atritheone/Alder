@@ -88,18 +88,26 @@ class Store:
         return self.insert(create_project(name, template))
 
     def insert(self, project: dict) -> dict:
-        p = validate_project(project)
-        p["revision"] = 1
-        p["updatedAt"] = now()
-        payload = json.dumps(p, ensure_ascii=False)
+        return self.insert_many([project])[0]
+
+    def insert_many(self, projects: list[dict]) -> list[dict]:
+        """Publish a generated group with one durable commit, or none of it."""
+        prepared = []
+        for project in projects:
+            p = validate_project(project)
+            p["revision"] = 1
+            p["updatedAt"] = now()
+            prepared.append((p, json.dumps(p, ensure_ascii=False)))
         with self._lock, self.connection() as conn:
             try:
-                conn.execute("INSERT INTO projects VALUES (?,?,?,?,?,?)", (p["id"], p["name"], 1, p["updatedAt"], 0, payload))
-                conn.execute("INSERT INTO history VALUES (?,?,?)", (p["id"], 0, payload))
+                conn.execute('BEGIN IMMEDIATE')
+                for p, payload in prepared:
+                    conn.execute("INSERT INTO projects VALUES (?,?,?,?,?,?)", (p["id"], p["name"], 1, p["updatedAt"], 0, payload))
+                    conn.execute("INSERT INTO history VALUES (?,?,?)", (p["id"], 0, payload))
                 conn.commit()
             except sqlite3.IntegrityError as exc:
                 raise ConflictError("A project with this identity is already open.") from exc
-        return p
+        return [p for p, _ in prepared]
 
     def update(self, project_id: str, project: dict, expected_revision: int) -> dict:
         with self._lock, self.connection() as conn:

@@ -52,6 +52,7 @@ type Props = {
   onHighlight: (range: { start: number; end: number } | null) => void;
   onPosition?: (position: ReadingPosition | null) => void;
 };
+import { spokenNoteRange, type ReadingRange, type SpeechText } from './speechText';
 type Snapshot = {
   chapters: {
     id: string;
@@ -60,6 +61,7 @@ type Snapshot = {
     base: number;
     offsets: number[];
     endOffsets?: number[];
+    notes?: SpeechText['notes'];
   }[];
 };
 export default function DocumentReader(p: Props) {
@@ -154,8 +156,8 @@ export default function DocumentReader(p: Props) {
     job?.chunks[chunkIndex + 1]?.playbackEligible,
     chunkIndex,
   ]);
-  const range = useRef<{ start: number; end: number } | null>(null);
-  const setRange = (next: { start: number; end: number } | null) => {
+  const range = useRef<ReadingRange | null>(null);
+  const setRange = (next: ReadingRange | null) => {
     range.current = next;
     const editor = p.editorRef.current;
     if (editor) editor.setReadingRange(next);
@@ -230,7 +232,7 @@ export default function DocumentReader(p: Props) {
   const updateReading = (clock: number, publishPosition = true) => {
     if (playing && fullAudio.current && audio.current)
       clock = audio.current.currentTime;
-    let next: { start: number; end: number } | null = null;
+    let next: ReadingRange | null = null;
     let nextPosition: ReadingPosition | null = null;
     if (active && job && snapshot.current) {
       const chunk = fullAudio.current
@@ -265,6 +267,7 @@ export default function DocumentReader(p: Props) {
           if (word && current.id === p.chapter.id) {
             const base = (chunk.sourceStart || 0) - source.offset;
             next = {
+              note: spokenNoteRange(source.notes,base+word.sourceStart,base+word.sourceEnd),
               start:
                 source.base + (source.offsets[base + word.sourceStart] ?? 0),
               end:
@@ -272,6 +275,7 @@ export default function DocumentReader(p: Props) {
                 ((source.endOffsets ?? source.offsets)[base + word.sourceEnd] ??
                   0),
             };
+            nextPosition.note = next.note;
           }
           if (current.id !== p.chapter.id) p.onChapter(current.id);
         }
@@ -281,14 +285,14 @@ export default function DocumentReader(p: Props) {
       publishPosition &&
       (position.current?.chapterId !== nextPosition?.chapterId ||
         position.current?.offset !== nextPosition?.offset ||
-        position.current?.length !== nextPosition?.length)
+        position.current?.length !== nextPosition?.length || position.current?.note?.id !== nextPosition?.note?.id || position.current?.note?.start !== nextPosition?.note?.start)
     ) {
       position.current = nextPosition;
       p.onPosition?.(nextPosition);
     }
     if (
       range.current?.start !== next?.start ||
-      range.current?.end !== next?.end
+      range.current?.end !== next?.end || range.current?.note?.id !== next?.note?.id || range.current?.note?.start !== next?.note?.start || range.current?.note?.end !== next?.note?.end
     ) {
       setRange(next);
     }
@@ -504,6 +508,7 @@ export default function DocumentReader(p: Props) {
             base: span.start,
             offsets: input?.offsets ?? codePointOffsets(text),
             endOffsets: input?.endOffsets,
+            notes: input?.notes,
           },
         ],
       };

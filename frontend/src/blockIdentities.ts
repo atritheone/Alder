@@ -74,6 +74,17 @@ export function identifiedDocument(doc: PMNode): PMNode {
       if (mark.type.name === "link" && mark.attrs.href?.startsWith("#"))
         links.add(mark.attrs.href.slice(1));
     if (node.type.name === "cross_reference") links.add(node.attrs.targetId);
+    if (node.type.name === "index_entry" && node.attrs.rangeId) links.add(node.attrs.rangeId);
+    if (node.type.name === "document_note") {
+      const body = node.type.schema.nodeFromJSON(node.attrs.body),
+        fixed = walk(body);
+      if (fixed !== body)
+        result = result.type.create(
+          { ...result.attrs, body: fixed.toJSON() },
+          result.content,
+          result.marks,
+        );
+    }
     const children: PMNode[] = [];
     let changed = false;
     node.forEach((child) => {
@@ -102,6 +113,7 @@ export function identifiedDocument(doc: PMNode): PMNode {
     let result = marks.some((mark, i) => mark !== node.marks[i])
       ? node.mark(marks)
       : node;
+    if(node.type.name==='index_entry' && bindings.has(node.attrs.rangeId))result=result.type.create({...result.attrs,rangeId:bindings.get(node.attrs.rangeId)},result.content,result.marks);
     if (
       node.type.name === "cross_reference" &&
       bindings.has(node.attrs.targetId)
@@ -150,11 +162,13 @@ export function blockIdentities() {
       const tr = state.tr.setMeta("blockIdentities", true);
       fixed.descendants((node, position) => {
         if (
-          Object.hasOwn(node.attrs, "blockId") &&
-          (node.attrs.blockId !== state.doc.nodeAt(position)?.attrs.blockId ||
-            node.attrs.targetId !==
-              state.doc.nodeAt(position)?.attrs.targetId ||
-            node.attrs.name !== state.doc.nodeAt(position)?.attrs.name)
+          (Object.hasOwn(node.attrs, "blockId") &&
+            (node.attrs.blockId !== state.doc.nodeAt(position)?.attrs.blockId ||
+              node.attrs.targetId !==
+                state.doc.nodeAt(position)?.attrs.targetId ||
+              node.attrs.name !== state.doc.nodeAt(position)?.attrs.name)) ||
+          (node.type.name === "document_note" &&
+            node.attrs.body !== state.doc.nodeAt(position)?.attrs.body)
         )
           tr.setNodeMarkup(position, undefined, node.attrs);
         const before = state.doc.nodeAt(position);

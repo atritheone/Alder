@@ -54,11 +54,21 @@ export async function openDocuments(
     const imported = migrateBook(
       await upload<Project>(`/api/projects/${project.id}/import`, file),
     );
-    const kind = file.name.toLowerCase().endsWith(".txt") ? "txt" : "docx";
+    const kind = imported.lastImport?.bookStructure
+      ? "book"
+      : file.name.toLowerCase().endsWith(".txt")
+        ? "txt"
+        : "docx";
     Object.assign(imported.settings, {
       ...imported.lastImport?.pageSettings,
       documentKind: kind,
-      preferredFormat: /\.(md|markdown)$/i.test(file.name) ? "md" : kind,
+      preferredFormat: /\.(md|markdown)$/i.test(file.name)
+        ? "md"
+        : kind === "book"
+          ? "alder"
+          : /\.(odt|rtf)$/i.test(file.name)
+            ? file.name.split(".").at(-1)!.toLowerCase()
+            : kind,
       includeTitle: false,
       footer: false,
     });

@@ -20,7 +20,10 @@ def publication_project(project: dict) -> dict:
             continue
         identifier = chapter["id"]
         title = "" if project.get("settings", {}).get("documentKind") in {"txt", "docx"} else chapter["title"]
-        p["sections"].append({"id": identifier, "title": title, "role": chapter.get("role", "chapter"), "order": order})
+        p["sections"].append({"id": identifier, "title": title if chapter.get('showTitle', True) else '',
+                              "navigationTitle":chapter['title'], "showTitle":bool(title) and chapter.get('showTitle', True),
+                              "bookStructure":project.get('settings',{}).get('documentKind') not in ('txt','docx'),
+                              "role": chapter.get("role", "chapter"), "matter":chapter.get('matter'), "order": order})
         p["clips"].append({"id": identifier, "trackId": "book-output", "title": chapter["title"],
                            "document": deepcopy(chapter["document"]), "text": chapter["text"],
                            "variants": [], "voiceId": chapter.get("voiceId"), **({"rawSource":deepcopy(chapter["rawSource"])} if chapter.get("rawSource") else {})})

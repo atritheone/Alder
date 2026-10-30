@@ -5,6 +5,19 @@ import re
 PADDING = ('Top', 'Bottom', 'Left', 'Right')
 
 
+def row_vertical_inset(cells, *, authored=True):
+    """Word adds cell margins and collapsed borders outside an at-least height.
+
+    Alder's minimum is the complete physical row height, as in its HTML grid.
+    External Word cells without direct properties use Word's zero inset here;
+    exported Alder cells always have explicit margins and borders.
+    """
+    default_padding, default_border = (5.25, .75) if authored else (0, 0)
+    cells = list(cells)
+    return sum(max((attrs.get(key) if attrs.get(key) is not None else fallback for attrs in cells), default=0)
+               for key, fallback in [('paddingTop', default_padding), ('paddingBottom', default_padding), ('borderWidth', default_border)])
+
+
 def validate_table_attributes(kind, attrs):
     if kind == 'table' and attrs.get('align') not in (None, 'left', 'center', 'right'):
         raise ValueError('Unsupported table alignment.')
@@ -81,8 +94,8 @@ def html_table_attributes(kind, element):
         attrs['borderWidth'] = 0 if styles.get('border') == 'none' else points(styles.get('border-width', border[0] if border else ''), 12)
         attrs['borderColor'] = colour(styles.get('border-color', border[-1] if border else ''))
         widths = element.get('data-colwidth', '')
-        if re.fullmatch(r'\d+(?:,\d+)*', widths):
-            parsed = [min(10000, int(width)) for width in widths.split(',')]
+        if re.fullmatch(r'\d+(?:\.\d+)?(?:,\d+(?:\.\d+)?)*', widths):
+            parsed = [min(10000, float(width)) for width in widths.split(',')]
             try: span = int(element.get('colspan', 1))
             except (TypeError, ValueError): span = 1
             if len(parsed) == span: attrs['colwidth'] = parsed

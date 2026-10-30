@@ -23,15 +23,17 @@ from urllib.parse import unquote, urlparse
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
-from .page_geometry import page_geometry
+from .page_geometry import page_geometry, html_page_metadata, read_html_page_metadata
 from .page_numbering import validate_numbering, format_page_number, section_numbering, read_docx_numbering
 
 MAX_IMPORT_BYTES = 100 * 1024 * 1024
 DOCUMENT_FORMAT = json.loads(Path(__file__).with_name('document-format.json').read_text(encoding='utf-8'))
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
-SUPPORTED_FORMATS = ("txt", "md", "html", "docx", "pdf", "epub", "azw3")
+SUPPORTED_FORMATS = ("txt", "md", "html", "docx", "odt", "rtf", "pdf", "epub", "azw3")
 MIMES = {"txt": "text/plain", "md": "text/markdown", "html": "text/html",
          "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+         "odt": "application/vnd.oasis.opendocument.text",
+         "rtf": "application/rtf",
          "pdf": "application/pdf", "epub": "application/epub+zip", "azw3": "application/vnd.amazon.mobi8-ebook"}
 ALIASES = {"bulletList": "bullet_list", "orderedList": "ordered_list", "listItem": "list_item",
            "hardBreak": "hard_break", "horizontalRule": "horizontal_rule", "codeBlock": "code_block",
@@ -49,13 +51,15 @@ def _warn(warnings, message):
 
 def plain_text(node: dict) -> str:
     kind = _kind(node)
+    if kind == "text_box":
+        return '\n'+''.join(plain_text(child) for child in node.get('content',[]))+'\n'
     if kind == "text":
         return node.get("text", "")
     if kind == "hard_break":
         return "\n"
     if kind in ("image", "inline_image"):
         return ""
-    separator = "\n" if kind in ("doc", "blockquote", "bullet_list", "ordered_list", "list_item", "table", "table_cell", "table_header") else "\t" if kind == "table_row" else ""
+    separator = "\n" if kind in ("form_block", "doc", "blockquote", "bullet_list", "ordered_list", "list_item", "table", "table_cell", "table_header") else "\t" if kind == "table_row" else ""
     return separator.join(plain_text(child) for child in node.get("content", []))
 
 
@@ -111,6 +115,8 @@ def project_document(project: dict) -> list[dict]:
             blocks.extend(copy.deepcopy(document.get("content", [])))
             ids.append(clip["id"])
         result.append({"id": section["id"], "title": section.get("title", ""), "role": section.get("role", "chapter"),
+                       "navigationTitle":section.get('navigationTitle',section.get('title','')), "matter":section.get('matter'),
+                       "showTitle":section.get('showTitle',True), "bookStructure":section.get('bookStructure',False),
                        "blocks": blocks, "text": plain_text({"type": "doc", "content": blocks}), "clipIds": ids,
                        **({"rawMarkdown":clips[ids[0]]["rawSource"]["text"]} if len(selected)==1 and not selected[0][1].get("frozenDocument") and not selected[0][1].get("frozenText") and not selected[0][1].get("variantId") and not clips[ids[0]].get("activeVariantId") and clips[ids[0]].get("rawSource",{}).get("format")=="markdown" and not clips[ids[0]]["rawSource"].get("error") else {})})
     return result
@@ -138,6 +144,8 @@ def _publication_sections(project, warnings):
     from .running_headings import refresh_body_headings
     refresh_body_headings(sections,warnings)
     from .document_contents import refresh_contents
+    from .document_notes import number_notes
+    number_notes([{'type':'doc','content':section['blocks']} for section in sections],project['settings'].get('noteOptions'))
     refresh_contents([{'type':'doc','content':section['blocks']} for section in sections], {s['id']:s for s in project.get('styles', [])})
     from .document_references import publication_references
     publication_references(sections, warnings)
@@ -222,6 +230,7 @@ def _prepare_publication(project, options=None, warnings=None):
                 node['content'] = [child for child in node['content'] if child.get('type') != 'comment_anchor']
         if node.get("attrs"):
             node["attrs"] = apply(node["attrs"])
+        if node.get('type')=='document_note':walk(node['attrs']['body'])
         if node.get('type') == 'revision_break' and node['attrs'].get('kind') == 'deletion':
             original = {'type': node['attrs']['rightType'], 'attrs': node['attrs']['rightAttrs']}
             walk(original)
@@ -298,6 +307,12 @@ def _settings(project, options=None):
     values["firstPageNumber"] = int(_number(values.get("firstPageNumber"), 1, 1, 9999))
     values['pageNumberFormat'] = values.get('pageNumberFormat') or 'decimal'
     validate_numbering(values['firstPageNumber'], values['pageNumberFormat'])
+    from .page_border import validate_page_border
+    validate_page_border(values.get('pageBorder'))
+    from .watermark import validate_watermark
+    validate_watermark(values.get('watermark'))
+    from .line_numbering import validate_line_numbering
+    validate_line_numbering(values.get('lineNumbering'))
     return values
 
 
@@ -334,6 +349,7 @@ def _zip(path):
 
 class _Resources:
     def __init__(self, project, options, warnings):
+        self.notes = []
         self.bookmark_names = set()
         self.project = project
         self.options = options or {}
@@ -422,6 +438,7 @@ def _block_style(node, project):
             css.append(f"{prop}:{yes if values[key] else 'auto'}")
     if type(values.get("widowOrphan")) is bool:
         css.append("widows:2;orphans:2" if values['widowOrphan'] else "widows:1;orphans:1")
+    if type(values.get('suppressLineNumbers')) is bool:css.append('--suppress-line-numbers:'+('1' if values['suppressLineNumbers'] else '0'))
     if re.fullmatch(r"#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?", str(values.get("color") or "")):
         css.append("color:" + values["color"])
     return ";".join(css)
@@ -470,11 +487,38 @@ def _html_node(node, project, resources, warnings, epub=False):
             else:
                 _warn(warnings, f"Unsupported text mark '{name}' was omitted; its text was retained.")
         return text
+    if kind == 'equation':
+        from .equations import validate
+        value=validate(node);description=node['content'][0]['text']
+        return f'<span class="document-equation" data-equation="{html.escape(json.dumps(value),quote=True)}" role="math" aria-label="{html.escape(description,quote=True)}">{value["mathML"]}<span class="equation-description" style="display:none">{html.escape(description)}</span></span>'
+    if kind in ('form_field','form_block'):
+        from .form_fields import validate
+        value=validate(node)
+        content=''.join(_html_node({**child,'marks':node.get('marks',[])+child.get('marks',[])},project,resources,warnings,epub) for child in node.get('content',[]))
+        tag="div" if kind=="form_block" else "span"
+        return f'<{tag} data-form-field="{html.escape(json.dumps(value),quote=True)}" role="group" aria-label="{html.escape(value["label"] or "Form field",quote=True)}">{content}</{tag}>'
+    if kind == 'text_box':
+        from .text_boxes import properties,style
+        value=properties(attrs)
+        content=''.join(_html_node(child,project,resources,warnings,epub) for child in node.get('content',[]))
+        return f'<span data-text-box="{html.escape(json.dumps(value),quote=True)}" style="{html.escape(style(value),quote=True)}" role="group" aria-label="Text box">{content}</span>'
+    if kind == 'document_note':
+        from .document_notes import html_note
+        resources.notes.append(node)
+        return html_note(attrs,attrs.get('_noteLabel','1'),resources)
     if kind == 'comment_anchor':
         return '<span hidden="hidden" data-comment-thread="' + html.escape(attrs['threadId'], quote=True) + '" data-comment-edge="' + attrs['edge'] + '" data-comment-content="' + html.escape(json.dumps(attrs['thread'], ensure_ascii=False), quote=True) + '"></span>'
+    if kind=='index_entry':
+        from .document_index import html_entry
+        return html_entry(attrs)
+    if kind=='index_reference':
+        payload={key:attrs[key] for key in ('terms','targetIds','unresolved') if key in attrs}
+        value=''.join(_html_node({**child,'marks':node.get('marks',[])+child.get('marks',[])},project,resources,warnings,epub) for child in node.get('content',[]))
+        return '<span data-index-reference="'+html.escape(json.dumps(payload,ensure_ascii=False),quote=True)+'">'+value+'</span>'
     if kind == 'document_field':
         value = ''.join(_html_node({**child,'marks':node.get('marks',[])+child.get('marks',[])},project,resources,warnings,epub) for child in node.get('content',[]))
-        return f'<span data-document-field="{attrs["fieldKind"]}" data-field-unresolved="{str(bool(attrs.get("unresolved"))).lower()}">{value}</span>'
+        merge = ' data-merge-key="'+html.escape(attrs['mergeKey'],quote=True)+'"' if attrs['fieldKind']=='merge' else ''
+        return f'<span data-document-field="{attrs["fieldKind"]}" data-field-unresolved="{str(bool(attrs.get("unresolved"))).lower()}"{merge}>{value}</span>'
     if kind == 'cross_reference':
         target = attrs.get('targetName') or attrs['targetId']
         value = ''.join(_html_node({**child, 'marks':node.get('marks', []) + child.get('marks', [])}, project, resources, warnings, epub) for child in node.get('content', []))
@@ -503,7 +547,9 @@ def _html_node(node, project, resources, warnings, epub=False):
         from .sections import validate_section
         validate_section(attrs)
         from .running_matter import portable_matter
-        return '<div class="section-break" data-section="' + html.escape(json.dumps({'kind': attrs.get('kind', 'nextPage'), 'page': attrs.get('page', {}), 'numberingStart': attrs.get('numberingStart'), 'numberingFormat': attrs.get('numberingFormat'), 'runningMatter':portable_matter(attrs.get('runningMatter'))}), quote=True) + '"></div>'
+        return '<div class="section-break" data-section="' + html.escape(json.dumps({'kind': attrs.get('kind', 'nextPage'), 'page': attrs.get('page', {}), 'numberingStart': attrs.get('numberingStart'), 'numberingFormat': attrs.get('numberingFormat'), 'runningMatter':portable_matter(attrs.get('runningMatter'),resources), 'noteOptions':attrs.get('noteOptions')}), quote=True) + '"></div>'
+    if kind == 'column_break':
+        return '<div class="column-break" style="break-before:column"></div>'
     if kind == "page_break":
         return '<div class="page-break"></div>'
     if kind in ("image", "inline_image"):
@@ -524,9 +570,20 @@ def _html_node(node, project, resources, warnings, epub=False):
             original_source = 'images/' + original['name'] if epub else 'data:image/png;base64,' + base64.b64encode(original['data']).decode()
             crop_metadata = ' data-image-original="' + original_source + '" data-image-crop="' + html.escape(json.dumps(attrs['crop']), quote=True) + '"'
         identity = ' data-object-id="' + html.escape(attrs['blockId'], quote=True) + '"' if attrs.get('blockId') else ''
-        tag = f'<img src="{source}" alt="{alternative}" title="{title}" data-image-align="{alignment}" data-image-placement="{placement}"{identity}{crop_metadata}{decoration}{width}/>'
+        from .image_wrapping import image_wrapping, wrapping_css
+        side,gap=image_wrapping(attrs)
+        wrapping=f' data-image-wrap="{side}" data-image-wrap-gap="{gap:g}" style="{wrapping_css(attrs)}"' if side!='none' else ''
+        tag = f'<img src="{source}" alt="{alternative}" title="{title}" data-image-align="{alignment}" data-image-placement="{placement}"{identity}{crop_metadata}{decoration}{wrapping}{width}/>'
         return tag if kind == 'inline_image' else f'<figure style="text-align:{alignment};margin:12px 0">{tag}</figure>'
-    inner = "".join(_html_node(child, project, resources, warnings, epub) for child in node.get("content", []))
+    children=node.get("content", [])
+    if kind=='ordered_list' and attrs.get('_outlineIndent') is None and attrs.get('listStyle') not in (None,'decimal'):
+        from .list_formatting import list_marker
+        children=[{**child,'attrs':{**child.get('attrs',{}),'_listLabel':list_marker(attrs.get('order',1)+index,attrs['listStyle'])+'. '}} for index,child in enumerate(children)]
+    inner = "".join(_html_node(child, project, resources, warnings, epub) for child in children)
+    if kind in ('citation','bibliography'):
+        tag='span' if kind=='citation' else 'div'
+        payload={key:value for key,value in attrs.items() if key!='blockId'}
+        return '<'+tag+' data-document-'+kind+'="'+html.escape(json.dumps(payload,ensure_ascii=False),quote=True)+'">'+inner+'</'+tag+'>'
     if kind == 'table_of_contents':
         metadata = f' data-contents-title="{html.escape(attrs.get("title", "Contents"), quote=True)}" data-contents-depth="{attrs.get("depth", 3)}"'
         metadata += ' data-contents-pages="' + ('true' if attrs.get('pageNumbers',True) else 'false') + '"'
@@ -573,14 +630,21 @@ def _html_node(node, project, resources, warnings, epub=False):
             style += ';list-style-type:' + attrs['listStyle']
         if attrs.get('listTemplate') is not None:extra += ' data-list-template="'+html.escape(json.dumps(attrs['listTemplate']),quote=True)+'"'
         if attrs.get('_outlineIndent') is not None:style+=';list-style-type:none;padding-left:0;margin-left:'+str(attrs['_outlineIndent'])+'pt;margin-top:0;margin-bottom:0'
+    if kind=='list_item' and attrs.get('_listLabel') is not None:style+=';list-style-type:'+json.dumps(attrs['_listLabel'])
+    if attrs.get('textLanguage'):extra+=' lang="'+html.escape(attrs['textLanguage'],quote=True)+'"'
+    if attrs.get('textDirection') in ('ltr','rtl'):extra+=' dir="'+attrs['textDirection']+'"'
+    if attrs.get('hyphenation') is not None:
+        extra+=' data-hyphenation="'+str(attrs['hyphenation']).lower()+'"'
+        style+=';hyphens:'+('auto' if attrs['hyphenation'] else 'manual')
     if style:
         extra += ' style="' + html.escape(style, quote=True) + '"'
-    if kind == "ordered_list":
+    if kind == "ordered_list" or (kind == "bullet_list" and attrs.get('listTemplate') is not None):
         if attrs.get("continuePrevious"): extra += ' data-continue-list="true"'
-        extra += f' start="{int(_number(attrs.get("order", attrs.get("start")), 1, 1, 1000000000))}"'
+        start_attribute = 'start' if kind == 'ordered_list' else 'data-list-start'
+        extra += f' {start_attribute}="{int(_number(attrs.get("order", attrs.get("start")), 1, 1, 1000000000))}"'
     if kind in ("table_cell", "table_header"):
         if attrs.get('colwidth'):
-            extra += ' data-colwidth="' + ','.join(str(round(value)) for value in attrs['colwidth']) + '"'
+            extra += ' data-colwidth="' + ','.join(f'{value:.8g}' for value in attrs['colwidth']) + '"'
         for field in ("colspan", "rowspan"):
             if attrs.get(field, 1) > 1:
                 extra += f' {field}="{int(_number(attrs[field], 1, 1, 100))}"'
@@ -603,7 +667,12 @@ def _html_node(node, project, resources, warnings, epub=False):
 def _css(settings):
     geometry = page_geometry(settings)
     margins = geometry['margins']
+    mirrored = ''
+    if settings.get('mirrorMargins'):
+        swapped = 'right' if settings.get('firstPageNumber',1)%2 == 0 else 'left'
+        mirrored = f"@page :{swapped} {{ margin-left: {margins['right']:g}mm; margin-right: {margins['left']:g}mm; }}"
     return f"""@page {{ size: {geometry['width']:g}mm {geometry['height']:g}mm; margin: {margins['top']:g}mm {margins['right']:g}mm {margins['bottom']:g}mm {margins['left']:g}mm; }}
+{mirrored}
 * {{ box-sizing: border-box; }}
 body {{ color: #202020; background: white; font-family: {settings['fontFamily']}, serif;
 font-size: {settings['fontSize']:g}pt; line-height: {settings['lineHeight']:g}; margin: 0; }}
@@ -628,20 +697,37 @@ def render_html(project: dict, options: dict | None = None) -> str:
     return _render_html(_prepare_publication(project, options, warnings), options, warnings)
 
 
+def _notes_html(resources, project, warnings, epub=False):
+    if not resources.notes: return ''
+    notes=resources.notes;resources.notes=[]
+    values=[]
+    for node in notes:
+        attrs=node['attrs'];identifier=html.escape(attrs['blockId'],quote=True)
+        from .document_notes import prepared_body
+        story=prepared_body(attrs['body'])
+        from .outline_lists import paint_outline_labels
+        paint_outline_labels(story)
+        body=_html_node(story,project,resources,warnings,epub)
+        role=(' epub:type="'+attrs['kind']+'"') if epub else ''
+        values.append('<div id="note_'+identifier+'"'+role+'><strong>'+html.escape(attrs.get('_noteLabel','1'))+'</strong> '+body+'</div>')
+    return '<div data-document-notes="true">'+''.join(values)+'</div>'
+
+
 def _render_html(project, options, warnings):
     settings = _settings(project, options)
     resources = _Resources(project, settings, warnings)
     sections = _publication_sections(project, warnings)
     title = html.escape(project.get("name", "Untitled"))
-    pieces = [f"<h1>{title}</h1>" if settings["includeTitle"] else ""]
+    pieces = [f'<h1 data-alder-publication-title="true">{title}</h1>' if settings["includeTitle"] else ""]
     if settings.get("author") and settings["includeTitle"]:
-        pieces.append('<p class="author">' + html.escape(str(settings["author"])) + "</p>")
+        pieces.append('<p class="author" data-alder-publication-title="true">' + html.escape(str(settings["author"])) + "</p>")
     if settings["includeToc"]:
-        pieces.append('<nav aria-label="Contents"><h2>Contents</h2><ol>' + "".join(f'<li><a href="#section-{i}">{html.escape(s["title"] or "Untitled section")}</a></li>' for i, s in enumerate(sections)) + "</ol></nav>")
+        pieces.append('<nav aria-label="Contents"><h2>Contents</h2><ol>' + "".join(f'<li><a href="#section-{i}">{html.escape(s.get("navigationTitle") or s["title"] or "Untitled section")}</a></li>' for i, s in enumerate(sections)) + "</ol></nav>")
     page_styles = []
     for i, section in enumerate(sections):
-        heading = f'<h2>{html.escape(section["title"])}</h2>' if section["title"] else ""
-        chunks, pending, page_style = [], [], None
+        heading = f'<h2 data-alder-chapter-title="true">{html.escape(section["title"])}</h2>' if section["title"] else ""
+        from .columns import column_css
+        chunks, pending, page_style = [], [], column_css(settings.get('columns'))
         for b in section['blocks']:
             if _kind(b) == 'section_break':
                 chunks.append(('<div style="' + page_style + '">' if page_style else '<div>') + ''.join(pending) + '</div>')
@@ -656,22 +742,45 @@ def _render_html(project, options, warnings):
                 if attrs.get('kind')=='continuous':
                     page_style=''
                     _warn(warnings,'HTML retains continuous-section settings as metadata; use desktop PDF for their physical margin and running-story transitions.')
+                page_style+=';'+column_css(attrs.get('page',{}).get('columns'))
             else:
                 pending.append(_html_node(b, project, resources, warnings))
         chunks.append(('<div style="' + page_style + '">' if page_style else '<div>') + ''.join(pending) + '</div>')
-        content = ''.join(chunks)
-        pieces.append(f'<section id="section-{i}" data-role="{html.escape(section["role"], quote=True)}">{heading}{content}</section>')
+        content = ''.join(chunks) + _notes_html(resources,project,warnings)
+        from .book_structure import html_attributes
+        pieces.append(f'<section id="section-{i}" data-role="{html.escape(section["role"], quote=True)}"{html_attributes(section)}>{heading}{content}</section>')
     # Used by the preview endpoint: a restrictive document policy survives use in a new tab.
     csp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src 'none'; base-uri 'none'; form-action 'none'"
     language = html.escape(project.get("language", "en"), quote=True)
     metadata = ''.join(f'<meta name="{key}" content="{html.escape(str(settings.get(key,"")),quote=True)}"/>' for key in ('author','subject','description'))
     from .running_matter import html_metadata
-    metadata += html_metadata(settings)
+    metadata += html_metadata(settings,resources) + html_page_metadata(settings)
     return f'<!DOCTYPE html><html lang="{language}"><head><meta charset="utf-8"/><meta http-equiv="Content-Security-Policy" content="{csp}"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>{title}</title>{metadata}<style>{_css(settings)}{"".join(page_styles)}</style></head><body><main>{"".join(pieces)}</main></body></html>'
 
 
 def _markdown(node, warnings):
     kind, attrs = _kind(node), node.get("attrs", {})
+    if kind == 'equation':
+        _warn(warnings,'Markdown retains equation reading descriptions as text, without editable formulas.')
+        return node['content'][0]['text']
+    if kind in ('form_field','form_block'):
+        _warn(warnings,'Markdown keeps form field values as ordinary text, without editable fields or restrictions.')
+        return ''.join(_markdown({**child,'marks':node.get('marks',[])+child.get('marks',[])},warnings) for child in node.get('content',[]))
+    if kind in ('citation','bibliography'):
+        _warn(warnings,'Markdown retains formatted citations and bibliography text, without editable source metadata.')
+        return ''.join(_markdown(child,warnings) for child in node.get('content',[]))
+    if kind == 'text_box':
+        _warn(warnings,'Markdown retains text-box wording and inline formatting without the box geometry.')
+        return ''.join(_markdown(child,warnings) for child in node.get('content',[]))
+    if kind == 'document_note':
+        _warn(warnings,'Markdown keeps notes as numbered text after the document, without editable note anchors.')
+        return '['+('Footnote ' if attrs['kind']=='footnote' else 'Endnote ')+attrs.get('_noteLabel','1')+']'
+    if kind == 'index_entry':
+        _warn(warnings, 'Markdown omits index-entry anchors while retaining all wording and the generated index as text.')
+        return ''
+    if kind == 'index_reference':
+        _warn(warnings, 'Markdown keeps current index page numbers as ordinary text.')
+        return ''.join(_markdown(child, warnings) for child in node.get('content', []))
     if kind in ('document_field','sequence'):
         _warn(warnings, 'Markdown keeps the current document fields and caption numbers as ordinary text.')
         return ''.join(_markdown({**child,'marks':node.get('marks',[])+child.get('marks',[])},warnings) for child in node.get('content',[]))
@@ -703,7 +812,7 @@ def _markdown(node, warnings):
     if kind == "table":
         _warn(warnings, "Markdown tables are flattened to tab-separated rows.")
         return "\n" + plain_text(node) + "\n\n"
-    if kind in ("page_break", "section_break"):
+    if kind in ("page_break", "column_break", "section_break"):
         _warn(warnings, "Markdown does not preserve print page or section breaks.")
         return "\n\n"
     if kind == "horizontal_rule":
@@ -854,23 +963,44 @@ def _epub(project, path, settings, warnings):
     manifest = []
     spine = []
     nav = []
+    landmarks, landmark_types = [], set()
     cover = None
     if settings.get("coverAssetId"):
         cover = resources.image({"assetId": settings["coverAssetId"], "alt": "Cover"})
     for i, section in enumerate(sections):
         name = f"section-{i+1}.xhtml"
-        section_title = html.escape(section["title"] or project.get("name", "Untitled"))
-        blocks = "".join(_html_node(b, project, resources, warnings, epub=True) for b in section["blocks"])
-        role = section.get("role", "chapter")
-        if role not in ("chapter", "part", "preface", "foreword", "introduction", "appendix", "acknowledgments", "epilogue", "afterword", "bibliography", "glossary", "index"):
-            role = "chapter"
-        heading = f"<h1>{section_title}</h1>" if section["title"] else ""
+        section_title = html.escape(section.get('navigationTitle') or section["title"] or project.get("name", "Untitled"))
+        from .columns import column_css
+        chunks, pending, columns = [], [], settings.get('columns')
+        def flush_columns():
+            style = column_css(columns)
+            chunks.append(('<div style="'+style+'">' if style else '<div>')+''.join(pending)+'</div>')
+            if columns and columns.get('count',1)>1:
+                _warn(warnings,'EPUB column layout depends on the reading application and its screen size; desktop PDF retains the measured page layout.')
+        for block in section['blocks']:
+            if _kind(block)=='section_break':
+                flush_columns()
+                pending=[]
+                columns=block.get('attrs',{}).get('page',{}).get('columns')
+            pending.append(_html_node(block,project,resources,warnings,epub=True))
+        flush_columns()
+        blocks=''.join(chunks)+_notes_html(resources,project,warnings,True)
+        from .book_structure import epub_role, matter, html_attributes
+        role = epub_role(section)
+        division = matter(section)
+        landmark = 'bodymatter' if division=='bodymatter' else role
+        if landmark not in landmark_types:
+            landmarks.append(f'<li><a epub:type="{landmark}" href="{name}#chapter">{section_title}</a></li>')
+            landmark_types.add(landmark)
+        heading = f'<h1 data-alder-chapter-title="true">{section_title}</h1>' if section["title"] else ""
         if i == 0 and settings.get("includeTitle"):
-            heading = f'<header><h1>{title}</h1><p>{html.escape(str(settings.get("author", "")))}</p></header>' + heading
-        body = f'<section epub:type="{role}">{heading}{blocks}</section>'
+            heading = f'<header data-alder-publication-title="true"><h1>{title}</h1><p>{html.escape(str(settings.get("author", "")))}</p></header>' + heading
+        semantics = division if role==division else division+' '+role
+        body = f'<section id="chapter" epub:type="{semantics}"{html_attributes(section)}>{heading}{blocks}</section>'
         from .running_matter import html_metadata
-        documents.append((name, f'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{language}" xml:lang="{language}"><head><title>{section_title}</title><link rel="stylesheet" href="style.css"/>{html_metadata(settings) if i==0 else ""}</head><body>{body}</body></html>'))
-        manifest.append(f'<item id="s{i}" href="{name}" media-type="application/xhtml+xml"/>')
+        documents.append((name, f'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{language}" xml:lang="{language}"><head><title>{section_title}</title><link rel="stylesheet" href="style.css"/>{html_metadata(settings,resources) + html_page_metadata(settings) if i==0 else ""}</head><body>{body}</body></html>'))
+        mathml=' properties="mathml"' if '<math ' in blocks else ''
+        manifest.append(f'<item id="s{i}" href="{name}" media-type="application/xhtml+xml"{mathml}/>')
         spine.append(f'<itemref idref="s{i}"/>')
         nav.append(f'<li><a href="{name}">{section_title}</a></li>')
     if cover:
@@ -880,7 +1010,7 @@ def _epub(project, path, settings, warnings):
     for i, image in enumerate(resources.images.values()):
         prop = ' properties="cover-image"' if cover and image["name"] == cover["name"] else ""
         manifest.append(f'<item id="image{i}" href="images/{image["name"]}" media-type="image/png"{prop}/>')
-    nav_doc = f'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{language}" xml:lang="{language}"><head><title>Contents</title></head><body><nav epub:type="toc" id="toc"><h1>Contents</h1><ol>{"".join(nav)}</ol></nav></body></html>'
+    nav_doc = f'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{language}" xml:lang="{language}"><head><title>Contents</title></head><body><nav epub:type="toc" id="toc"><h1>Contents</h1><ol>{"".join(nav)}</ol></nav><nav epub:type="landmarks" hidden="hidden"><h2>Guide</h2><ol>{"".join(landmarks)}</ol></nav></body></html>'
     identifier = html.escape(str(settings.get("identifier") or "urn:uuid:" + str(uuid.uuid5(uuid.NAMESPACE_URL, str(project.get("id", title))))))
     modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     metadata = f'<dc:identifier id="book-id">{identifier}</dc:identifier><dc:title>{title}</dc:title><dc:language>{language}</dc:language><meta property="dcterms:modified">{modified}</meta>'
@@ -901,6 +1031,10 @@ def _epub(project, path, settings, warnings):
 
 
 def _docx(project, path, settings, warnings):
+    measured_rows = settings.get('measuredRowSplits')
+    if measured_rows is not None and (not isinstance(measured_rows, list) or len(measured_rows) > 250000 or any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', value) for value in measured_rows)):
+        raise ValueError('Invalid measured table-row layout.')
+    measured_rows = set(measured_rows or [])
     from .docx_support import set_font_family, apply_paragraph_flow
     from docx import Document
     from docx.shared import Mm, Pt, RGBColor
@@ -910,9 +1044,22 @@ def _docx(project, path, settings, warnings):
     from docx.oxml.ns import qn
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
     document = Document()
+    if settings.get('stationeryPreset'):
+        # Word 2010 aligns the first cell's text to the margin, shifting the
+        # actual label grid left by its padding. Modern layout aligns its edge.
+        compat = document.settings.element.find(qn('w:compat'))
+        if compat is None:
+            compat = OxmlElement('w:compat'); document.settings.element.append(compat)
+        mode = next((n for n in compat.findall(qn('w:compatSetting')) if n.get(qn('w:name'))=='compatibilityMode'),None)
+        if mode is None:
+            mode=OxmlElement('w:compatSetting');compat.append(mode)
+        mode.set(qn('w:name'),'compatibilityMode');mode.set(qn('w:uri'),'http://schemas.microsoft.com/office/word');mode.set(qn('w:val'),'15')
     section = document.sections[0]
+    watermarks=[settings.get('watermark')]
     from .sections import write_docx_geometry
     write_docx_geometry(section, settings)
+    if settings.get('mirrorMargins'):
+        document.settings.element.append(OxmlElement('w:mirrorMargins'))
     geometry = page_geometry(settings)
     numbering = OxmlElement("w:pgNumType")
     numbering.set(qn("w:start"), str(settings["firstPageNumber"]))
@@ -920,8 +1067,14 @@ def _docx(project, path, settings, warnings):
     numbering.set(qn('w:fmt'), numbering_format)
     section._sectPr.append(numbering)
     normal = document.styles["Normal"]
+    from .hyphenation import write_properties
+    write_properties(normal.paragraph_format,{'hyphenation':False,'textLanguage':project.get('language','en')})
+    auto_hyphenation=OxmlElement('w:autoHyphenation');auto_hyphenation.set(qn('w:val'),'1');document.settings.element.append(auto_hyphenation)
     set_font_family(normal.font, settings["fontFamily"])
     normal.font.size = Pt(settings["fontSize"])
+    if settings.get('lineNumbering') or any(node.get('type')=='section_break' and node.get('attrs',{}).get('page',{}).get('lineNumbering') for item in _publication_sections(project,warnings) for node in item['blocks']):
+        line_style=document.styles['line number'] if 'line number' in document.styles else document.styles.add_style('line number',WD_STYLE_TYPE.CHARACTER,builtin=True)
+        set_font_family(line_style.font,settings['fontFamily']);line_style.font.size=Pt(9);line_style.font.color.rgb=RGBColor.from_string('777777')
     normal.paragraph_format.line_spacing = settings["lineHeight"]
     normal.paragraph_format.space_after = Pt(8)
     caption_style = document.styles['Caption']
@@ -980,9 +1133,20 @@ def _docx(project, path, settings, warnings):
     revision_writer = WordRevisionWriter()
     sections = _publication_sections(project, warnings)
     sections = [{**section, 'blocks': word_review_paragraphs({'type': 'doc', 'content': section['blocks']})['content']} for section in sections]
+    from .document_notes import requires_note_geometry
+    measured_notes=settings.get('measuredNoteGeometry')
+    if measured_notes is not None and type(measured_notes) is not bool:raise ValueError('Invalid measured footnote layout.')
+    if measured_notes:
+        raise ValueError('Word can clip footnotes that continue across different page dimensions. Use desktop PDF, or keep those sections at the same paper size and margins before Word export.')
+    if measured_notes is None and requires_note_geometry([{'type':'doc','content':s['blocks']} for s in sections],settings):
+        raise ValueError('Use desktop DOCX export to check footnotes across different page dimensions.')
     from .running_headings import export_heading_styles
     heading_styles = export_heading_styles(sections,settings,style_ids)
     comment_writer = WordCommentsWriter(document, sections, warnings)
+    from .document_notes import WordNotesWriter
+    note_writer = WordNotesWriter(document,settings.get('noteOptions'))
+    from .word_citations import WordCitationsWriter
+    citation_writer=WordCitationsWriter(document)
     def append_field(paragraph, instruction, node):
         # CHARFORMAT refers to the first instruction character, not the cached
         # result. Paired fields give that character the authored run properties.
@@ -1005,11 +1169,38 @@ def _docx(project, path, settings, warnings):
         nonlocal bookmark_counter
         if revision_writer.inline(paragraph, node, inline): return
         kind, attrs = _kind(node), node.get("attrs", {})
-        if kind == 'comment_anchor':
+        if kind=='citation':
+            citation_writer.inline(paragraph,node,inline)
+        elif kind == 'equation':
+            from .equations import to_word
+            paragraph._p.append(to_word(node))
+        elif kind == 'form_field':
+            from .form_fields import write_word
+            write_word(paragraph,node,inline,bookmark_counter)
+            bookmark_counter+=1
+        elif kind == 'text_box':
+            from .text_boxes import write_word
+            write_word(paragraph,node,inline,settings.get('measuredTextBoxes',{}).get(attrs.get('blockId')),bookmark_counter)
+            bookmark_counter+=1
+        elif kind == 'document_note':
+            note_writer.reference(paragraph, node)
+        elif kind == 'comment_anchor':
             comment_writer.inline(paragraph, attrs)
+        elif kind=='index_entry':
+            from .document_index import xe_instruction
+            for kind in ('begin','instruction','end'):
+                # XE is intrinsically hidden. Explicit w:vanish makes Word's
+                # index compiler exclude the entry as hidden document content.
+                run=OxmlElement('w:r')
+                element=OxmlElement('w:instrText' if kind=='instruction' else 'w:fldChar')
+                if kind=='instruction':element.set(qn('xml:space'),'preserve');element.text=xe_instruction(attrs)
+                else:element.set(qn('w:fldCharType'),kind)
+                run.append(element);paragraph._p.append(run)
+        elif kind=='index_reference':
+            for child in node.get('content',[]):inline(paragraph,{**child,'marks':node.get('marks',[])+child.get('marks',[])})
         elif kind == 'document_field':
             from .document_fields import field_instruction
-            append_field(paragraph,field_instruction(attrs['fieldKind'],heading_styles),node)
+            append_field(paragraph,field_instruction(attrs['fieldKind'],heading_styles,attrs.get('mergeKey')),node)
         elif kind == 'sequence':
             field = OxmlElement('w:fldSimple'); field.set(qn('w:instr'), ' SEQ ' + attrs['sequenceName'] + ' \\* ARABIC ')
             start = len(paragraph._p)
@@ -1019,7 +1210,7 @@ def _docx(project, path, settings, warnings):
         elif kind == 'cross_reference':
             name = attrs.get('targetName')
             if name and not attrs.get('unresolved'):
-                append_field(paragraph,(' PAGEREF ' if attrs.get('referenceFormat') == 'page' else ' REF ') + name + (' \\w' if attrs.get('referenceFormat') == 'number' else '') + ' \\h \\* CHARFORMAT ',node)
+                append_field(paragraph,(' PAGEREF ' if attrs.get('referenceFormat') == 'page' else ' NOTEREF ' if attrs.get('_noteReference') else ' REF ') + name + (' \\w' if attrs.get('referenceFormat') == 'number' and not attrs.get('_noteReference') else '') + ' \\h \\* CHARFORMAT ',node)
             else:
                 for child in node.get('content', []): inline(paragraph, child)
         elif kind == "bookmark":
@@ -1064,6 +1255,8 @@ def _docx(project, path, settings, warnings):
                 write_decorative(shape._inline.docPr, attrs.get("decorative"))
                 if attrs.get('title'):
                     shape._inline.docPr.set('title', attrs['title'])
+                from .image_wrapping import write_word_wrapping
+                write_word_wrapping(shape, attrs)
             elif attrs.get("alt") and not attrs.get("decorative"):
                 paragraph.add_run(attrs["alt"])
         elif kind == "text":
@@ -1118,14 +1311,23 @@ def _docx(project, path, settings, warnings):
     outline_bindings, outline_lists = word_outline_bindings(document,sections)
 
     def block(container, node, indent=0, prefix="", list_info=None):
+        nonlocal geometry, numbering_format, bookmark_counter
         kind, attrs = _kind(node), node.get("attrs", {})
+        if kind == 'form_block':
+            from .form_fields import write_word_block
+            number=bookmark_counter;bookmark_counter+=1
+            write_word_block(container,node,block,number)
+            return
         if kind == "table":
             from .docx_support import table_grid
             rows = node.get("content", [])
             columns, placed = table_grid(rows)
-            table = container.add_table(rows=max(1, len(rows)), cols=columns)
+            from docx.section import _BaseHeaderFooter
+            from docx.blkcntnr import BlockItemContainer
+            table_options = {'width':Mm(geometry['width']-geometry['margins']['left']-geometry['margins']['right'])} if isinstance(container,_BaseHeaderFooter) or type(container) is BlockItemContainer else {}
+            table = container.add_table(rows=max(1, len(rows)), cols=columns, **table_options)
             table.style = "Table Grid"
-            from .table_formatting import write_docx_cell
+            from .table_formatting import write_docx_cell, row_vertical_inset
             from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
             table.alignment = {'left': WD_TABLE_ALIGNMENT.LEFT, 'center': WD_TABLE_ALIGNMENT.CENTER, 'right': WD_TABLE_ALIGNMENT.RIGHT}.get(attrs.get('align'), WD_TABLE_ALIGNMENT.LEFT)
             widths = {}
@@ -1162,10 +1364,19 @@ def _docx(project, path, settings, warnings):
                                 break
                             grid_column += element.grid_span
             for r, row in enumerate(rows):
+                row_cells = [cell.get('attrs', {}) for first, _column, count, _span, cell in placed if first <= r < first + count]
+                if any(len({attrs.get(key) if attrs.get(key) is not None else 5.25 for attrs in row_cells}) > 1 for key in ('paddingTop','paddingBottom')):
+                    _warn(warnings, 'DOCX uses the largest top and bottom cell padding in each row; unequal vertical cell padding is converted.')
                 if not row.get('attrs', {}).get('allowSplit'):
-                    table.rows[r]._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+                    if row.get('attrs', {}).get('blockId') in measured_rows:
+                        _warn(warnings, 'A table row taller than a page allows splitting in this DOCX copy to keep all its content visible in Word. The Alder row setting is unchanged.')
+                    else:
+                        table.rows[r]._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+                        if settings.get('measuredRowSplits') is None:
+                            _warn(warnings, 'Word can clip rows taller than a page when row splitting is disabled. Export from the Alder desktop for measured overflow handling, or allow row splitting.')
                 if row.get('attrs', {}).get('minHeight') is not None:
-                    table.rows[r].height = Pt(row['attrs']['minHeight'])
+                    inset = row_vertical_inset(row_cells)
+                    table.rows[r].height = Pt(max(0, row['attrs']['minHeight'] - inset))
                     table.rows[r].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
                 if row.get("content") and all(_kind(c) == "table_header" for c in row["content"]):
                     table.rows[r]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
@@ -1187,10 +1398,11 @@ def _docx(project, path, settings, warnings):
                 block(container, child, indent+1)
             return
         if kind == "section_break":
-            nonlocal geometry, numbering_format
             from docx.enum.section import WD_SECTION
+            note_writer.section(attrs.get('noteOptions'))
             new_section = document.add_section({'nextPage': WD_SECTION.NEW_PAGE, 'continuous':WD_SECTION.CONTINUOUS, 'oddPage': WD_SECTION.ODD_PAGE, 'evenPage': WD_SECTION.EVEN_PAGE}[attrs.get('kind', 'nextPage')])
             write_docx_geometry(new_section, attrs.get('page', {}))
+            watermarks.append(attrs.get('page',{}).get('watermark'))
             geometry = page_geometry(attrs.get('page', {}))
             for numbering in list(new_section._sectPr.findall(qn('w:pgNumType'))):
                 new_section._sectPr.remove(numbering)
@@ -1204,13 +1416,16 @@ def _docx(project, path, settings, warnings):
                 from .running_matter import write_running_matter
                 write_running_matter(new_section,attrs['runningMatter'],block,document)
             return
+        if kind=='bibliography':
+            citation_writer.block(container,node,block)
+            return
         if kind == 'table_of_contents':
             from .word_contents import write_contents
             write_contents(container, node, block, document, style_ids, warnings)
             return
-        if kind == "page_break":
+        if kind in ("page_break", "column_break"):
             from docx.enum.text import WD_BREAK
-            container.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+            container.add_paragraph().add_run().add_break(WD_BREAK.COLUMN if kind=='column_break' else WD_BREAK.PAGE)
             return
         if kind == "horizontal_rule":
             paragraph = container.add_paragraph()
@@ -1245,6 +1460,14 @@ def _docx(project, path, settings, warnings):
             else:
                 for child in node.get("content", []):
                     inline(paragraph, child)
+                if len(node.get('content',[]))==1 and node['content'][0]['type']=='equation':
+                    # Word otherwise turns a lone inline equation into a
+                    # centred display equation, regardless of paragraph layout.
+                    math=paragraph._p.find(qn('m:oMath'))
+                    if math is not None:
+                        paragraph._p.remove(math)
+                        display=OxmlElement('m:oMathPara');pr=OxmlElement('m:oMathParaPr');jc=OxmlElement('m:jc')
+                        jc.set(qn('m:val'),{'center':'center','right':'right'}.get(attrs.get('align'),'left'));pr.append(jc);display.append(pr);display.append(math);paragraph._p.append(display)
             if kind == "code_block":
                 for run in paragraph.runs:
                     set_font_family(run.font, "Consolas")
@@ -1289,9 +1512,12 @@ def _docx(project, path, settings, warnings):
     if settings["includeToc"]:
         document.add_heading("Contents", 1)
         for i, item in enumerate(sections):
-            inline(document.add_paragraph(), {"type": "text", "text": item["title"] or "Untitled section", "marks": [{"type": "link", "attrs": {"href": f"#_AlderSection{i}"}}]})
+            inline(document.add_paragraph(), {"type": "text", "text": item.get("navigationTitle") or item["title"] or "Untitled section", "marks": [{"type": "link", "attrs": {"href": f"#_AlderSection{i}"}}]})
         document.add_page_break()
+    from .word_book import WordBookWriter
+    book_writer=WordBookWriter(document)
     for i, item in enumerate(sections):
+        chapter_start=len(document._element.body)-1
         if settings.get("chapterPageBreaks") and i:
             document.add_page_break()
         start_index = len(document._element.body) - 1
@@ -1308,6 +1534,7 @@ def _docx(project, path, settings, warnings):
         end = OxmlElement("w:bookmarkEnd")
         end.set(qn("w:id"), str(i))
         anchor.append(end)
+        book_writer.wrap(chapter_start,item,settings.get('chapterPageBreaks') and i)
     if settings.get("header") and not rich_running_matter:
         section.header.paragraphs[0].text = str(settings["header"])
     if settings.get("footer") and not rich_running_matter:
@@ -1317,6 +1544,18 @@ def _docx(project, path, settings, warnings):
         field.set(qn("w:instr"), "PAGE")
         footer._p.append(field)
     comment_writer.finish()
+    def prepare_note_lists(body):
+        bindings,lists=word_outline_bindings(document,[{'blocks':body['content']}])
+        outline_bindings.update(bindings);outline_lists.update(lists)
+        for listing,previous in list_sequences(body):
+            attrs=listing.get('attrs',{})
+            continuation_numbers[id(listing)]=continuation_numbers[id(previous)] if previous is not None else list_numbering.create(True,attrs.get('order',1),attrs.get('listStyle'))
+    note_writer.finish(block,prepare_note_lists)
+    from .watermark import write_watermarks
+    write_watermarks(document,watermarks)
+    from .text_direction import resolve_word_directions, complex_script_properties
+    resolve_word_directions(document)
+    complex_script_properties(document)
     document.save(path)
 
 
@@ -1328,7 +1567,7 @@ def _pdf(project, path, settings, warnings):
     from reportlab.lib.units import mm
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Flowable, Paragraph, Spacer, PageBreak, CondPageBreak, KeepTogether, Table, TableStyle, Image, HRFlowable
+    from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Flowable, Paragraph, Spacer, PageBreak, FrameBreak, CondPageBreak, KeepTogether, Table, TableStyle, Image, HRFlowable
     from .fonts import installed_faces, register_pdf_font
     faces = installed_faces()
     font_cache = {}
@@ -1366,6 +1605,22 @@ def _pdf(project, path, settings, warnings):
                                  title=project.get("name", "Untitled"), author=str(settings.get("author", "")), subject=str(settings.get("description", "")))
     sections = _publication_sections(project, warnings)
     from .running_headings import refresh_body_headings, heading_text
+    if settings.get('lineNumbering') or any(node.get('attrs',{}).get('page',{}).get('lineNumbering') for section in sections for node in section['blocks']):
+        raise ValueError('Line numbering requires desktop PDF to retain the measured visual lines.')
+    if settings.get('watermark') or any(node.get('attrs',{}).get('page',{}).get('watermark') for section in sections for node in section['blocks']):
+        raise ValueError('Text watermarks require desktop PDF to retain their measured typography.')
+    from .document_comments import walk as direction_walk
+    from .document_comments import walk as wrapped_nodes
+    if any(node.get('type') == 'text_box' for node in wrapped_nodes({'type':'doc','content':[n for section in sections for n in section['blocks']]})):
+        raise ValueError('Text boxes require desktop PDF export.')
+    if any(node.get('type') in ('image', 'inline_image') and node.get('attrs', {}).get('wrap', 'none') != 'none'
+           for section in sections for node in direction_walk({'content':section['blocks']})):
+        raise ValueError('Wrapped pictures require desktop PDF to preserve their measured text flow.')
+    if any(node.get('attrs',{}).get('textDirection')=='rtl' for section in sections for node in direction_walk({'content':section['blocks']})):
+        raise ValueError('Right-to-left paragraphs require desktop PDF to preserve text shaping and reading direction.')
+    from .document_notes import notes
+    if notes([{'type':'doc','content':section['blocks']} for section in sections]):
+        raise ValueError('Documents with notes require the desktop PDF renderer so that note text and page space are preserved.')
     from .document_fields import is_heading_field
     first_headings = refresh_body_headings(sections, warnings)
     latest_headings, page_headings = {}, {}
@@ -1394,6 +1649,9 @@ def _pdf(project, path, settings, warnings):
         size = (geo['width'] * mm, geo['height'] * mm)
         edges = {edge: value * mm for edge, value in geo['margins'].items()}
         body_width = size[0] - edges['left'] - edges['right']
+        columns=page_settings.get('columns') or {'count':1,'gapMm':8}
+        column_gap=columns['gapMm']*mm
+        column_width=(body_width-column_gap*(columns['count']-1))/columns['count']
         body_h = size[1] - edges['top'] - edges['bottom']
         name = 'section-' + str(len(templates))
         from .running_matter import stories
@@ -1410,11 +1668,23 @@ def _pdf(project, path, settings, warnings):
                 if restart is not None:
                     number_offset = section_numbering(doc.page + number_offset, kind, restart)[0] - doc.page
                 first_page = False
+            if settings.get('mirrorMargins'):
+                for index,frame in enumerate(frames):
+                    frame._x1 = (edges['right'] if (doc.page + number_offset) % 2 == 0 else edges['left'])+index*(column_width+column_gap)
+                    frame._geom()
             if not deferred_paint:paint(canvas,doc)
         def paint(canvas, doc):
             if doc.page in blank_pages:return
             is_first=doc.page==first_sheet
+            from .page_border import draw_page_border
+            draw_page_border(canvas,size,page_settings.get('pageBorder'),is_first)
+            left = edges['right'] if settings.get('mirrorMargins') and (doc.page+number_offset)%2==0 else edges['left']
             canvas.saveState()
+            if columns.get('separator'):
+                canvas.setStrokeColor(colors.HexColor('#888888'));canvas.setLineWidth(.5)
+                for index in range(1,columns['count']):
+                    x=left+index*(column_width+column_gap)-column_gap/2
+                    canvas.line(x,edges['bottom'],x,size[1]-edges['top'])
             canvas.setFont(font, 9)
             canvas.setFillColor(colors.HexColor('#555555'))
             if matter is not None:
@@ -1423,7 +1693,8 @@ def _pdf(project, path, settings, warnings):
                 for part in ('header','footer'):
                     source=matter.get(part,{}).get(variant)
                     if source is None:continue
-                    source=copy.deepcopy(source)
+                    from .running_matter import with_story_defaults
+                    source=with_story_defaults(source)
                     for field in story_walk(source):
                         if field.get('type')=='document_field' and field.get('attrs',{}).get('fieldKind')=='page':
                             field['content']=[{'type':'text','text':format_page_number(doc.page+number_offset,number_format)}]
@@ -1444,19 +1715,19 @@ def _pdf(project, path, settings, warnings):
                         raise ValueError(f'The {part} needs more room. Increase its page margin, reduce its distance from the edge, or shorten the text.')
                     y=size[1]-distance if part=='header' else distance+total
                     for item,height in paragraphs:
-                        y-=item.getSpaceBefore()+height;item.drawOn(canvas,edges['left'],y);y-=item.getSpaceAfter()
+                        y-=item.getSpaceBefore()+height;item.drawOn(canvas,left,y);y-=item.getSpaceAfter()
             elif settings.get('header'):
                 header = str(settings['header'])
                 while pdfmetrics.stringWidth(header, font, 9) > body_width and len(header) > 1:
                     header = header[:-2] + '\u2026'
-                canvas.drawString(edges['left'], size[1] - edges['top']/2, header)
+                canvas.drawString(left, size[1] - edges['top']/2, header)
             if matter is None and settings.get('footer'):
                 canvas.drawCentredString(size[0]/2, edges['bottom']/2, format_page_number(doc.page + number_offset, number_format))
             canvas.restoreState()
-        frame = Frame(edges['left'], edges['bottom'], body_width, body_h, id=name, leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
-        templates.append(PageTemplate(id=name, pagesize=size, frames=[frame], onPage=begin_page, onPageEnd=lambda canvas,doc:paint(canvas,doc) if deferred_paint else None))
-        return name, body_width, body_h
-    add_template(settings, number_format=numbering_format,matter=running if advanced_running else None)
+        frames = [Frame(edges['left']+index*(column_width+column_gap), edges['bottom'], column_width, body_h, id=name+'-'+str(index), leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0) for index in range(columns['count'])]
+        templates.append(PageTemplate(id=name, pagesize=size, frames=frames, onPage=begin_page, onPageEnd=lambda canvas,doc:paint(canvas,doc) if deferred_paint else None))
+        return name, column_width, body_h
+    _,width,body_height=add_template(settings, number_format=numbering_format,matter=running if advanced_running else None)
 
     class SectionBreak(Flowable):
         def __init__(self, name, kind, restart=None):
@@ -1488,7 +1759,8 @@ def _pdf(project, path, settings, warnings):
     bookmark_names = set()
     def inline(node, available):
         kind = _kind(node)
-        if kind in ('document_field','sequence'):
+        if kind=='index_entry':return ''
+        if kind in ('document_field','sequence','index_reference','form_field'):
             return ''.join(inline({**child,'marks':node.get('marks',[])+child.get('marks',[])},available) for child in node.get('content',[]))
         if kind == 'cross_reference':
             attrs = node['attrs']
@@ -1545,6 +1817,7 @@ def _pdf(project, path, settings, warnings):
     def block(node, available=None, indent=0, prefix=""):
         available = width if available is None else available
         kind, attrs = _kind(node), node.get("attrs", {})
+        if kind=='form_block':return sum((block(child,available,indent) for child in node['content']),[])
         output = []
         if kind == "table":
             from .docx_support import table_grid
@@ -1601,6 +1874,8 @@ def _pdf(project, path, settings, warnings):
             elif attrs.get("alt") and not attrs.get("decorative"):
                 output.append(Paragraph(html.escape(attrs["alt"]), base))
             return output
+        if kind == 'column_break':
+            return [FrameBreak()]
         if kind == "page_break":
             return [PageBreak()]
         if kind == "horizontal_rule":
@@ -1638,6 +1913,9 @@ def _pdf(project, path, settings, warnings):
             style.borderColor = colors.HexColor(merged.get('paragraphBorderColor') or '#000000') if merged.get('paragraphBorderColor') != 'transparent' else None
             style.borderPadding = merged.get('paragraphPadding') or 0
             style.allowWidows = style.allowOrphans = int(merged.get("widowOrphan") is False)
+            if merged.get('hyphenation'):
+                from .hyphenation import dictionary
+                style.hyphenationLang=dictionary(merged.get('textLanguage') or project.get('language','en')).iterate
             if attrs.get('_outlineHanging') is not None:style.firstLineIndent-=attrs['_outlineHanging']
             if merged.get("lineSpacingMode") in ("exact", "atLeast") and merged.get("lineSpacing") is not None:
                 style.leading = _number(merged['lineSpacing'], size * 1.2, 1, 144)
@@ -1708,7 +1986,16 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
         raise ValueError("Unsupported export format: " + format)
     warnings = []
     options = dict(options or {})
-    if format in ('txt', 'md', 'pdf', 'azw3'): options.setdefault('reviewView', 'final')
+    if format in ('txt', 'md', 'odt', 'rtf', 'pdf', 'azw3'): options.setdefault('reviewView', 'final')
+    if project.get('settings', {}).get('stationeryPreset'):
+        from .stationery import validate_stock
+        if format in ('docx', 'pdf'):
+            validate_stock(project)
+            if format == 'pdf':
+                raise ValueError('Use desktop PDF export to verify that the content fits the stationery.')
+            if options.get('measuredRowSplits') is None:
+                raise ValueError('Use desktop DOCX export to verify that the content fits the stationery.')
+        warnings.append('Stationery print checks belong to the Alder document. Print at actual size (100%), one-sided, using matching paper and the correct feed tray; recheck fit after editing in another application.')
     project = _prepare_publication(project, options, warnings)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1720,8 +2007,23 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
     settings = _settings(project, options)
     if page_geometry(settings)['adjusted']:
         _warn(warnings, "The document's margins were reduced proportionally to retain a 20 mm writing area, matching Write.")
+    if format in ('txt','md','html','epub','azw3') and (settings.get('noteOptions',{}).get('footnote',{}).get('restart')=='page' or any(node.get('attrs',{}).get('noteOptions',{}).get('footnote',{}).get('restart')=='page' for item in _publication_sections(project,warnings) for node in item['blocks'] if node['type']=='section_break' and node.get('attrs',{}).get('noteOptions'))):
+        _warn(warnings,'This output uses continuous footnote numbers because its pages can reflow. DOCX and desktop PDF retain per-page numbering.')
     sections = _publication_sections(project, warnings)
     ids = [cid for section in sections for cid in section["clipIds"]]
+    if settings.get('lineNumbering') or any(node.get('attrs',{}).get('page',{}).get('lineNumbering') for section in sections for node in section['blocks']):
+        if format in ('txt','md'):_warn(warnings,'This text format omits line numbering; retain Alder, DOCX or desktop PDF for physical line labels.')
+        elif format in ('html','epub','azw3'):_warn(warnings,'Reflowable output retains line-numbering settings for Alder but does not number physical lines. Use desktop PDF for printed pages.')
+    if settings.get('watermark') or any(node.get('attrs',{}).get('page',{}).get('watermark') for section in sections for node in section['blocks']):
+        if format in ('txt','md'):_warn(warnings,'This text format omits watermarks; retain Alder, DOCX or desktop PDF for page decoration.')
+        elif format in ('html','epub','azw3'):_warn(warnings,'Reflowable output retains watermark settings for Alder but does not draw physical page watermarks. Use desktop PDF for printed pages.')
+    if settings.get('pageBorder') or any(node.get('attrs',{}).get('page',{}).get('pageBorder') for section in sections for node in section['blocks']):
+        if format in ('txt','md'):_warn(warnings,'This text format omits page borders; retain Alder, DOCX or PDF for page decoration.')
+        elif format in ('html','epub','azw3'):_warn(warnings,'Reflowable output retains page-border settings for Alder but does not draw physical page borders. Use desktop PDF for printed pages.')
+    from .document_comments import walk as citation_walk
+    if any(n.get('type') in ('citation','bibliography') for section in sections for n in citation_walk({'content':section['blocks']})):
+        _warn(warnings,'Citations retain their last calculated wording. Update fields before headless export; desktop Save and Export refresh citations automatically.')
+        if format=='docx':_warn(warnings,'Word retains Alder citation source metadata and managed text; edit sources in Alder, not in Word’s citation manager.')
     from .running_matter import project_running_stories
     if any(plain_text(doc).strip() for doc in project_running_stories(project)):
         if format in ('txt','md'):
@@ -1730,7 +2032,7 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
             _warn(warnings,'Reflowable output retains header/footer metadata for Alder but does not repeat it on reader pages.')
     if format != 'docx':
         from .document_comments import walk as field_walk
-        if any(n.get('type')=='document_field' and n.get('attrs',{}).get('fieldKind') in ('page','pageCount') or n.get('type')=='cross_reference' and n.get('attrs',{}).get('referenceFormat')=='page' for section in sections for n in field_walk({'content':section['blocks']})):
+        if any(n.get('type')=='index_reference' or n.get('type')=='document_field' and n.get('attrs',{}).get('fieldKind') in ('page','pageCount') or n.get('type')=='cross_reference' and n.get('attrs',{}).get('referenceFormat')=='page' for section in sections for n in field_walk({'content':section['blocks']})):
             _warn(warnings, 'This output retains the last calculated page fields. Use Update fields before exporting; desktop PDF recalculates them from its own page layout.')
     if format in ('txt', 'md', 'pdf'):
         from .document_comments import walk as comment_walk
@@ -1742,6 +2044,13 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
     if len(ids) != len(set(ids)):
         _warn(warnings, "The collation includes repeated draft placements; they are repeated in the output.")
     validation = {"status": "passed", "format": format}
+    from .document_comments import walk as equation_walk
+    has_equations=any(n.get('type')=='equation' for section in sections for n in equation_walk({'content':section['blocks']}))
+    if has_equations:
+        if format in ('pdf','odt','rtf','azw3'):
+            raise ValueError('Use desktop PDF, DOCX, HTML or EPUB for equations. This conversion cannot retain their formulas yet.')
+        if format in ('txt','md'):_warn(warnings,'This text format retains equation reading descriptions, without editable formulas.')
+        if format=='docx':_warn(warnings,'Equations are editable Office Math. Word uses its own math font and spacing; custom reading descriptions are regenerated when importing Word equations.')
     try:
         if format == "html":
             path.write_text(_render_html(project, settings, warnings), "utf-8")
@@ -1752,7 +2061,8 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
             for section in sections:
                 if section["title"]:
                     pieces.append(("## " if format == "md" else "") + section["title"] + "\n\n")
-                pieces.append((section["text"] + "\n\n") if format == "txt" else section["rawMarkdown"] + "\n\n" if "rawMarkdown" in section else "".join(_markdown(n, warnings) for n in section["blocks"]))
+                from .document_notes import text_with_note_references
+                pieces.append((text_with_note_references({'type':'doc','content':section['blocks']}) + "\n\n") if format == "txt" else section["rawMarkdown"] + "\n\n" if "rawMarkdown" in section else "".join(_markdown(n, warnings) for n in section["blocks"]))
             output = "".join(pieces)
             # Remove only our final section separator, never authored trailing
             # spaces or empty paragraphs when saving an existing text file.
@@ -1760,6 +2070,11 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
                 if sections: output = output[:-2]
             else:
                 output = output.rstrip() + "\n"
+            from .document_notes import notes
+            note_items=notes([{'type':'doc','content':section['blocks']} for section in sections])
+            if note_items:
+                _warn(warnings,'This text format keeps note bodies after the document; editable note anchors and page placement are not retained.')
+                output+='\n\n'+'\n\n'.join(('Footnote ' if note['attrs']['kind']=='footnote' else 'Endnote ')+note['attrs'].get('_noteLabel','1')+': '+plain_text(note['attrs']['body']) for note in note_items)
             path.write_text(output, "utf-8", newline="")
             def has_rich_content(node):
                 if _kind(node) not in ("doc", "paragraph", "text", "hard_break") or node.get("marks"):
@@ -1774,6 +2089,17 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
             _docx(project, path, settings, warnings)
             with _zip(path) as archive:
                 _xml(archive.read("word/document.xml"))
+        elif format == "odt":
+            from .odt_writer import write_odt
+            write_odt(project, path, settings, sections, warnings)
+            with _zip(path) as archive:
+                for name in ('content.xml','styles.xml','meta.xml','META-INF/manifest.xml'):
+                    _xml(archive.read(name))
+        elif format == "rtf":
+            from .rtf_writer import write_rtf
+            from .rtf_syntax import parse as parse_rtf
+            write_rtf(project, path, settings, sections, warnings)
+            parse_rtf(path.read_bytes())
         elif format == "pdf":
             _pdf(project, path, settings, warnings)
             from pypdf import PdfReader
@@ -1816,9 +2142,10 @@ def _asset_from_bytes(data, name, assets, warnings):
     return asset_id
 
 
-def _import_html(content, warnings, assets, image_reader=None, link_reader=None):
+def _import_html(content, warnings, assets, image_reader=None, link_reader=None, chapter_output=None):
     from bs4 import BeautifulSoup, NavigableString, Tag, Comment, Doctype, ProcessingInstruction
     soup = BeautifulSoup(content, "html.parser")
+    chapter_nodes, publication_nodes = set(), set()
     if soup.find(["script", "iframe", "object", "embed", "form"]):
         _warn(warnings, "Active HTML content was removed during import.")
     for tag in soup.find_all(["script", "style", "iframe", "object", "embed", "form", "head", "nav"]):
@@ -1832,6 +2159,20 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None)
         css = {key.lower(): value.strip() for key, value in re.findall(r'([\w-]+)\s*:\s*([^;]+)', element.get('style', ''))}
         from .paragraph_appearance import html_appearance
         attrs = html_appearance(css)
+        if css.get('--suppress-line-numbers') in ('0','1'):attrs['suppressLineNumbers']=css['--suppress-line-numbers']=='1'
+        from .hyphenation import valid_language
+        language_source=element if element.has_attr('lang') else element.find_parent(attrs={'lang':True})
+        if language_source and valid_language(language_source.get('lang')):attrs['textLanguage']=language_source['lang']
+        direction_source=element if element.has_attr('dir') else element.find_parent(attrs={'dir':True})
+        direction=direction_source.get('dir') if direction_source else css.get('direction')
+        if direction in ('ltr','rtl'):attrs['textDirection']=direction
+        elif direction=='auto':
+            import unicodedata
+            strong=next((unicodedata.bidirectional(char) for char in direction_source.get_text() if unicodedata.bidirectional(char) in ('L','R','AL')),'L')
+            attrs['textDirection']='ltr' if strong=='L' else 'rtl'
+            _warn(warnings,'Automatic HTML text direction was resolved to each source element’s current reading direction.')
+        if element.get('data-hyphenation') in ('true','false'):attrs['hyphenation']=element['data-hyphenation']=='true'
+        elif css.get('hyphens') in ('auto','none','manual'):attrs['hyphenation']=css['hyphens']=='auto'
         if element.get('data-heading-numbered') in ('true', 'false'): attrs['headingNumbered'] = element['data-heading-numbered'] == 'true'
         if element.get('data-heading-start'): attrs['headingStart'] = int(element['data-heading-start'])
         if element.has_attr('data-revision-paragraph'):
@@ -1868,7 +2209,7 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None)
         return attrs
 
     def inline(element, marks=None):
-        if getattr(element, 'attrs', None) and (element.get('data-heading-marker') == 'true' or element.get('data-outline-number') == 'true'): return []
+        if getattr(element, 'attrs', None) and (element.get('data-heading-marker') == 'true' or element.get('data-outline-number') == 'true' or element.get('data-discretionary-hyphen') == 'true'): return []
         marks = marks or []
         if isinstance(element, NavigableString):
             text = str(element)
@@ -1898,10 +2239,61 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None)
                 _warn(warnings, 'An invalid HTML comment annotation was not imported.')
             return [anchor] if anchor else []
         from .document_fields import FIELD_LABELS
+        if name=='span' and element.has_attr('data-document-citation'):
+            from .citation_sources import validate_citation
+            attrs=json.loads(element['data-document-citation']);validate_citation(attrs)
+            value=element.get_text()
+            return [{'type':'citation','attrs':attrs,'content':[{'type':'text','text':value}] if value else []}]
+        if name=='math':
+            from .equations import import_mathml
+            if not element.has_attr('xmlns'):element['xmlns']='http://www.w3.org/1998/Math/MathML'
+            return [import_mathml(str(element))]
+        if name=='span' and element.has_attr('data-equation'):
+            from .equations import validate
+            description=element.select_one('.equation-description')
+            equation={'type':'equation','attrs':json.loads(element['data-equation']),'content':[{'type':'text','text':description.get_text() if description else element.get('aria-label','')}]}
+            validate(equation)
+            return [equation]
+        if name=='span' and element.has_attr('data-form-field'):
+            from .form_fields import properties,validate,canonical_content
+            field={'type':'form_field','attrs':properties(json.loads(element['data-form-field'])),'content':[]}
+            for child in element.children:field['content'].extend(inline(child))
+            if field['attrs']['kind']!='rich':
+                appearances=[n.get('marks',[]) for n in field['content'] if n['type']=='text']
+                appearance=appearances[0] if appearances else []
+                if any(m!=appearance for m in appearances):raise ValueError('Non-rich form fields must use uniform formatting.')
+                if appearance:field['marks']=appearance
+                for n in field['content']:n.pop('marks',None)
+            field['content']=canonical_content(field['content'])
+            validate(field)
+            return [field]
+        if name=='span' and element.has_attr('data-text-box'):
+            from .text_boxes import properties,validate
+            box={'type':'text_box','attrs':properties(json.loads(element['data-text-box'])),'content':[]}
+            for child in element.children:box['content'].extend(inline(child))
+            validate(box)
+            return [box]
+        if name=='sup' and element.has_attr('data-document-note'):
+            from .document_notes import validate_note
+            attrs=json.loads(element['data-document-note']);validate_note(attrs)
+            from .running_matter import collect_story_images
+            collect_story_images(attrs['body'],assets,warnings)
+            attrs['blockId']=element.get('data-note-id') or 'note_'+uuid.uuid4().hex
+            return [{'type':'document_note','attrs':attrs}]
+        if name=='span' and element.has_attr('data-index-entry'):
+            from .document_index import validate_entry
+            attrs=json.loads(element['data-index-entry']);validate_entry(attrs)
+            identifier=element.get('data-index-id')
+            if identifier and re.fullmatch(r'[A-Za-z0-9_.-]{1,128}',identifier):attrs['blockId']=identifier
+            return [{'type':'index_entry','attrs':attrs}]
+        if name=='span' and element.has_attr('data-index-reference'):
+            from .document_index import validate_reference
+            attrs=json.loads(element['data-index-reference']);validate_reference(attrs)
+            return [{'type':'index_reference','attrs':attrs,'content':[{'type':'text','text':element.get_text()}] if element.get_text() else []}]
         if name == 'span' and element.get('data-document-field') in FIELD_LABELS:
             parts = sum((inline(child,marks) for child in element.children),[])
             appearance = next((part.get('marks',[]) for part in parts if part['type']=='text'),[])
-            return [{'type':'document_field','attrs':{'fieldKind':element['data-document-field'],'unresolved':element.get('data-field-unresolved')=='true'},'content':[{'type':'text','text':element.get_text()}] if element.get_text() else [],**({'marks':appearance} if appearance else {})}]
+            return [{'type':'document_field','attrs':{'fieldKind':element['data-document-field'],'unresolved':element.get('data-field-unresolved')=='true',**({'mergeKey':element.get('data-merge-key')} if element['data-document-field']=='merge' else {})},'content':[{'type':'text','text':element.get_text()}] if element.get_text() else [],**({'marks':appearance} if appearance else {})}]
         if name == 'span' and re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', element.get('data-cross-reference', '')):
             format = element.get('data-reference-format', 'text')
             return [{'type':'cross_reference', 'attrs':{'targetId':element['data-cross-reference'], 'referenceFormat':format if format in ('text','number','labelNumber','page') else 'text', 'unresolved':element.get('data-reference-unresolved') == 'true'}, 'content':[{'type':'text', 'text':element.get_text()}] if element.get_text() else []}]
@@ -1950,7 +2342,10 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None)
                 if element.get("width"):
                     attrs["width"] = _number(element["width"], 500, 1, 10000)
                 placement = element.get('data-image-placement')
+                if element.get('data-image-wrap') in ('left','right'):
+                    attrs.update(wrap=element['data-image-wrap'],wrapGap=_number(element.get('data-image-wrap-gap'),12,0,192))
                 block_image = placement == 'block' or (placement != 'inline' and element.parent.name == 'figure')
+                if attrs.get('wrap'):block_image=False
                 return [{"type": "image" if block_image else "inline_image", "attrs": attrs}]
             _warn(warnings, "An unavailable or external image was replaced with its alt text; no remote resource was fetched.")
             return [{"type": "text", "text": element.get("alt") or "[Image unavailable]"}]
@@ -1996,9 +2391,36 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None)
             if not isinstance(element, Tag):
                 continue
             name = element.name.lower()
+            if element.get('data-document-notes')=='true': continue
             if name in ("p", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote", "ul", "ol", "li", "table", "hr", "div", "section", "article", "main", "body", "html", "header", "footer", "figure", "figcaption"):
                 flush()
-                if name == 'div' and element.get('data-document-contents') == 'true':
+                if name=='div' and element.has_attr('data-form-field'):
+                    from .form_fields import properties,validate,canonical_content
+                    field={'type':'form_block','attrs':properties(json.loads(element['data-form-field'])),'content':blocks(element) or [{'type':'paragraph'}]}
+                    field['content']=canonical_content(field['content'])
+                    validate(field);output.append(field)
+                elif name=='div' and element.has_attr('data-document-bibliography'):
+                    attrs=json.loads(element['data-document-bibliography']);attrs['entryStyle']=None
+                    generated={'type':'bibliography','attrs':attrs,'content':blocks(element) or [{'type':'paragraph'}]}
+                    from .models import validate_document
+                    validate_document({'type':'doc','content':[generated]})
+                    output.append(generated)
+                elif name=='section' and element.has_attr('data-alder-chapter') and chapter_output is not None:
+                    from .book_structure import validate_structure
+                    meta=json.loads(element['data-alder-chapter'])
+                    if not isinstance(meta,dict): raise ValueError('Invalid book chapter metadata.')
+                    nodes=blocks(element)
+                    output.extend(nodes)
+                    if meta.get('book') is True:
+                        validate_structure(meta)
+                        title=meta.get('title')
+                        if not isinstance(title,str) or not 1<=len(title.strip())<=300: raise ValueError('Invalid book chapter title.')
+                        # Generated publication/chapter headings are not authored
+                        # body paragraphs. Retain them in the flat import only.
+                        body=[node for node in nodes if id(node) not in publication_nodes]
+                        chapter_output.append({key:meta[key] for key in ('title','role','matter','showTitle') if key in meta} | {'document':{'type':'doc','content':body or [{'type':'paragraph'}]}})
+                        chapter_nodes.update(map(id,nodes))
+                elif name == 'div' and element.get('data-document-contents') == 'true':
                     # Standalone HTML carries resolved entry formatting, not the
                     # project's named-style catalogue.
                     attrs = {'title':element.get('data-contents-title','Contents'), 'depth':int(element.get('data-contents-depth','3')), 'entryStyle':None, 'pageNumbers':element.get('data-contents-pages') != 'false'}
@@ -2016,6 +2438,7 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None)
                     if attrs:
                         node["attrs"] = attrs
                     output.append(node)
+                    if element.get('data-alder-chapter-title')=='true' or element.get('data-alder-publication-title')=='true': publication_nodes.add(id(node))
                 elif name == "pre":
                     output.append({"type":"code_block", "attrs": paragraph_attributes(element), "content":[{"type":"text", "text":element.get_text()}]})
                 elif name in ("ul", "ol"):
@@ -2023,11 +2446,11 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None)
                     from .list_formatting import NUMBER_FORMATS, BULLETS
                     marker = re.search(r'(?:^|;)\s*list-style-type\s*:\s*([\w-]+)', element.get('style', ''))
                     marker = marker.group(1) if marker else {'a':'lower-alpha', 'A':'upper-alpha', 'i':'lower-roman', 'I':'upper-roman', '1':'decimal'}.get(element.get('type'))
-                    attrs = {'order':int(_number(element.get('start'),1,1,1000000000))}
+                    attrs = {'order':int(_number(element.get('start' if name=='ol' else 'data-list-start'),1,1,1000000000))}
                     if element.get('data-list-template'):
                         from .outline_lists import validate_list_template
                         template=json.loads(element['data-list-template']);validate_list_template(template);attrs['listTemplate']=template
-                    if name == 'ol' and element.get('data-continue-list') == 'true': attrs['continuePrevious'] = True
+                    if (name == 'ol' or attrs.get('listTemplate')) and element.get('data-continue-list') == 'true': attrs['continuePrevious'] = True
                     if marker in (NUMBER_FORMATS if name == 'ol' else BULLETS): attrs['listStyle'] = marker
                     output.append({"type":"ordered_list" if name == "ol" else "bullet_list", "attrs": attrs, "content":items})
                 elif name == "blockquote":
@@ -2051,19 +2474,29 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None)
                     from .sections import validate_section
                     try:
                         attrs = json.loads(element['data-section'])
+                        from .running_matter import collect_portable_images
+                        collect_portable_images(attrs.get('runningMatter'),assets,warnings)
                         validate_section(attrs)
                         output.append({'type':'section_break', 'attrs':attrs})
                     except (ValueError, TypeError, AttributeError):
                         _warn(warnings, 'Invalid section page settings were omitted.')
+                elif name == "div" and "column-break" in element.get("class", []):
+                    output.append({'type':'column_break'})
                 elif name == "div" and "page-break" in element.get("class", []):
                     output.append({"type":"page_break"})
                 else:
-                    output.extend(blocks(element))
+                    children=blocks(element)
+                    output.extend(children)
+                    if element.get('data-alder-publication-title')=='true': publication_nodes.update(map(id,children))
             else:
                 pending.extend(inline(element))
         flush()
         return output
-    return {"type":"doc", "content":blocks(soup) or [{"type":"paragraph"}]}
+    result=blocks(soup) or [{"type":"paragraph"}]
+    if chapter_output and any(id(node) not in chapter_nodes|publication_nodes for node in result):
+        chapter_output.clear()
+        _warn(warnings,'Unassigned content outside book chapters was retained in one document; chapter divisions were not restored.')
+    return {"type":"doc", "content":result}
 
 
 def _import_docx(path, warnings, assets):
@@ -2074,9 +2507,18 @@ def _import_docx(path, warnings, assets):
         from .document_comments import WordCommentsReader
         comment_reader = WordCommentsReader(archive, _xml, warnings)
         names = set(archive.namelist())
-        if any(n in names for n in ("word/footnotes.xml", "word/endnotes.xml")):
-            _warn(warnings, "DOCX footnotes/endnotes are not imported; inspect the original for additional material.")
+        for name in ('word/footnotes.xml','word/endnotes.xml'):
+            if name in names: _xml(archive.read(name))
     doc = Document(path)
+    if doc.settings.element.find(qn('w:mailMerge')) is not None:
+        _warn(warnings, 'Word merge fields are retained, but external data connections and queries are not used. Choose a local CSV in Mail merge.')
+    from .document_notes import WordNotesReader
+    note_reader = WordNotesReader(doc, warnings)
+    from .word_citations import WordCitationsReader
+    citation_reader=WordCitationsReader(doc,_xml)
+    from .word_book import WordBookReader
+    book_reader=WordBookReader(doc,_xml)
+    book_chapters,book_groups=[],[]
     from .running_headings import import_heading_styles
     heading_styles = import_heading_styles(doc)
     from .document_revisions import WordRevisionReader, restore_review_paragraphs
@@ -2095,6 +2537,23 @@ def _import_docx(path, warnings, assets):
             inherited = inherited or []
             tag = element.tag.rsplit("}",1)[-1]
             if tag == 'pPr': return
+            if tag == 'oMath':
+                from .equations import from_word
+                if inherited:raise ValueError('Resolve tracked or linked equations in the source before importing.')
+                content.append(from_word(element));return
+            if tag=='sdt':
+                citation=citation_reader.inline(element)
+                if citation is not None:
+                    content.append(citation);return
+                from .form_fields import read_word as read_form_field
+                field=read_form_field(element,paragraph,p._parent,warnings)
+                if field is not None:
+                    if any(m['type'].startswith('revision_') for m in inherited):raise ValueError('Tracked form fields are not supported. Resolve changes in the source before importing.')
+                    content.append(field);return
+            if tag in ('footnoteReference','endnoteReference'):
+                content.append(note_reader.reference(element, paragraph, container))
+                return
+            if tag in ('footnoteRef','endnoteRef'): return
             if tag in ('ins', 'del'):
                 inherited = inherited + [revision_reader.mark(element)]
             if tag in ('commentRangeStart', 'commentRangeEnd', 'commentReference'):
@@ -2103,6 +2562,11 @@ def _import_docx(path, warnings, assets):
                 return
             if tag == 'fldSimple':
                 instruction = element.get(qn('w:instr'), '').strip()
+                from .document_index import read_xe
+                entry=read_xe(instruction,warnings)
+                if entry:
+                    content.append(entry)
+                    return
                 from .document_fields import read_field
                 field_kind = read_field(instruction,heading_styles)
                 if field_kind:
@@ -2111,7 +2575,8 @@ def _import_docx(path, warnings, assets):
                     for child in element: visit(child,inherited)
                     marks = next((child.get('marks',[]) for child in content[start:] if child['type']=='text'),[])
                     del content[start:]
-                    content.append({'type':'document_field','attrs':{'fieldKind':field_kind},'content':[{'type':'text','text':value}] if value else [],**({'marks':marks} if marks else {})})
+                    from .document_fields import read_merge_key
+                    content.append({'type':'document_field','attrs':{'fieldKind':field_kind,**({'mergeKey':read_merge_key(instruction)} if field_kind=='merge' else {})},'content':[{'type':'text','text':value}] if value else [],**({'marks':marks} if marks else {})})
                     return
                 sequence = re.fullmatch(r'SEQ\s+(Figure|Table)(?:\s+\\\*\s+ARABIC)?\s*',instruction,re.I)
                 if sequence:
@@ -2119,11 +2584,11 @@ def _import_docx(path, warnings, assets):
                     if re.fullmatch(r'[1-9][0-9]{0,5}',value):
                         content.append({'type':'sequence','attrs':{'sequenceName':sequence[1].title()},'content':[{'type':'text','text':value}]})
                         return
-                match = re.fullmatch(r'(?:REF|PAGEREF)\s+"?([A-Za-z_][A-Za-z0-9_]{0,39})"?(?P<switches>(?:\s+\\[hw])*)(?:\s+\\\*\s+(?:MERGEFORMAT|CHARFORMAT))?\s*', instruction, re.I)
+                match = re.fullmatch(r'(?:REF|PAGEREF|NOTEREF)\s+"?([A-Za-z_][A-Za-z0-9_]{0,39})"?(?P<switches>(?:\s+\\[hw])*)(?:\s+\\\*\s+(?:MERGEFORMAT|CHARFORMAT))?\s*', instruction, re.I)
                 if match:
                     value = ''.join(t.text or '' for t in element.iter(qn('w:t')))
                     target = imported_reference_names.get(match[1], match[1])
-                    content.append({'type':'cross_reference', 'attrs':{'targetId':target, **({'referenceFormat':'page'} if instruction.upper().startswith('PAGEREF') else {'referenceFormat':'number'} if '\\w' in match['switches'].lower() else {})}, 'content':[{'type':'text','text':value}] if value else []})
+                    content.append({'type':'cross_reference', 'attrs':{'targetId':target, **({'referenceFormat':'page'} if instruction.upper().startswith('PAGEREF') else {'referenceFormat':'number'} if instruction.upper().startswith('NOTEREF') or '\\w' in match['switches'].lower() else {})}, 'content':[{'type':'text','text':value}] if value else []})
                     return
                 _warn(warnings, 'An unsupported Word field was imported as its displayed text.')
             if tag == "bookmarkStart":
@@ -2143,6 +2608,13 @@ def _import_docx(path, warnings, assets):
                 if target and target[2]:
                     content.append({'type':'bookmark_end','attrs':{'targetId':target[0],'name':target[1]}})
                 return
+            if tag == "AlternateContent":
+                # Word resaves drawings with an equivalent VML fallback. Import
+                # one representation, never duplicate the same authored story.
+                chosen=next((c for c in element if c.tag.rsplit('}',1)[-1]=='Choice'),None)
+                if chosen is None:chosen=next((c for c in element if c.tag.rsplit('}',1)[-1]=='Fallback'),None)
+                if chosen is not None:visit(chosen,inherited)
+                return
             if tag == "hyperlink":
                 rid = element.get(qn("r:id"))
                 link = p.part.rels.get(rid)
@@ -2159,16 +2631,38 @@ def _import_docx(path, warnings, assets):
                     # property revision; retain it in both projected appearances.
                     formatting['attrs']['base'] += [copy.deepcopy(m) for m in inherited if m['type'] == 'link']
                     marks.append(formatting)
+                run_children=[]
                 for child in element:
+                    if child.tag.rsplit('}',1)[-1]=='AlternateContent':
+                        chosen=next((c for c in child if c.tag.rsplit('}',1)[-1]=='Choice'),None)
+                        if chosen is None:chosen=next((c for c in child if c.tag.rsplit('}',1)[-1]=='Fallback'),None)
+                        if chosen is not None:run_children.extend(chosen)
+                    else:run_children.append(child)
+                for child in run_children:
                     child_tag = child.tag.rsplit("}",1)[-1]
-                    if child_tag in ("t", "delText") and child.text:
+                    if child_tag in ('footnoteReference','endnoteReference'):
+                        content.append(note_reader.reference(child, paragraph, container))
+                    elif child_tag in ("t", "delText") and child.text:
                         content.append({"type":"text","text":child.text, **({"marks":marks} if marks else {})})
                     elif child_tag in ("br", "cr"):
-                        content.append({"type":"hard_break", **({'marks':marks} if marks else {})})
+                        break_kind=child.get(qn('w:type'))
+                        content.append({'type':{'page':'page_break','column':'column_break'}.get(break_kind,'hard_break'), **({'marks':marks} if marks and break_kind not in ('page','column') else {})})
                     elif child_tag == "tab":
                         content.append({"type":"text","text":"\t", **({'marks':marks} if marks else {})})
-                    elif child_tag == "drawing":
-                        if next(child.iter(qn('wp:anchor')), None) is not None:
+                    elif child_tag in ("drawing","pict"):
+                        from .text_boxes import read_word as read_text_box
+                        boxes=read_text_box(child,paragraph,p._parent,warnings)
+                        if boxes is not None:
+                            content.extend(boxes);continue
+                        if child_tag == 'pict':
+                            from .docx_legacy_images import read_pictures
+                            content.extend(read_pictures(child, p.part, assets, warnings))
+                            continue
+                        from .image_wrapping import read_word_wrapping
+                        wrapping=read_word_wrapping(next(child.iter(qn('wp:anchor')), None))
+                        if wrapping and str(p.part.partname) != '/word/document.xml':
+                            wrapping = None
+                        if wrapping is None:
                             _warn(warnings, 'A floating Word picture was placed in line with text; its original wrapping and page position were not retained.')
                         crop = next(child.iter(qn('a:srcRect')), None)
                         from .image_crop import validate_crop
@@ -2185,6 +2679,7 @@ def _import_docx(path, warnings, assets):
                                 if asset_id:
                                     properties = next(child.iter(qn('wp:docPr')), None)
                                     attrs = {'assetId': asset_id, 'src': 'asset:'+asset_id, 'alt': properties.get('descr', '') if properties is not None else ''}
+                                    attrs.update(wrapping or {})
                                     if image_crop: attrs['crop'] = image_crop
                                     from .image_accessibility import read_decorative
                                     if read_decorative(properties): attrs['decorative'] = True
@@ -2194,11 +2689,17 @@ def _import_docx(path, warnings, assets):
                                     if extent is not None and extent.get('cx'):
                                         attrs['width'] = _number(extent.get('cx'), 9525, 9525, 95250000) / 9525
                                     block_image = properties is not None and properties.get('name', '').startswith('Alder block image ')
+                                    if wrapping:block_image=False
                                     content.append({'type': 'image' if block_image else 'inline_image', 'attrs': attrs})
                 return
             for child in element:
                 visit(child, inherited)
         visit(p._p)
+        # Word's paragraph-relative drawing is anchored at the paragraph top,
+        # even when its XML run follows some text. Keep the same semantic anchor
+        # in the editable document instead of turning it into a mid-line float.
+        wrapped = lambda child: child.get('type') in ('inline_image','text_box') and child.get('attrs', {}).get('wrap') in ('left', 'right')
+        content = [child for child in content if wrapped(child)] + [child for child in content if not wrapped(child)]
         style = p.style.name if p.style else ""
         heading = re.match(r"Heading (\d)", style)
         outline = p._p.pPr.find(qn('w:outlineLvl')) if p._p.pPr is not None else None
@@ -2217,6 +2718,10 @@ def _import_docx(path, warnings, assets):
         if heading: attrs["level"] = heading
         if p.alignment is not None:
             attrs["align"] = {0:"left",1:"center",2:"right",3:"justify"}.get(int(p.alignment),"left")
+        if len(content)==1 and content[0]['type']=='equation' and p._p.find(qn('m:oMathPara')) is not None:
+            math_align=p._p.find(qn('m:oMathPara')).find(qn('m:oMathParaPr'))
+            jc=math_align.find(qn('m:jc')) if math_align is not None else None
+            attrs['align']={'left':'left','right':'right','center':'center','centerGroup':'center'}.get(jc.get(qn('m:val')) if jc is not None else 'center','center')
         if attrs:
             node["attrs"] = attrs
         return node
@@ -2234,23 +2739,49 @@ def _import_docx(path, warnings, assets):
                 kind = 'nextPage'
                 _warn(warnings, 'Column section breaks are converted to next-page sections.')
             from .running_matter import read_running_matter
-            output.append({'type':'section_break', 'attrs':{'kind':kind, 'page':docx_page_settings(doc, warnings, following), 'runningMatter':read_running_matter(following,paragraph,warnings), **read_docx_numbering(following, warnings)}})
-    def container(item):
+            output.append({'type':'section_break', 'attrs':{'kind':kind, 'page':docx_page_settings(doc, warnings, following), 'runningMatter':read_running_matter(following,paragraph,warnings,container=container), 'noteOptions':note_reader.section_options[section_index] if note_reader.section_options[section_index]!=note_reader.section_options[section_index-1] else None, **read_docx_numbering(following, warnings)}})
+    def container(item, main_story=False):
         nonlocal section_index
+        main_story=main_story or item is doc
         from docx.table import Table
         from docx.text.paragraph import Paragraph
         output, stack = [], []
         previous_lists = {}
         root = item._element.body if item is doc else item._element
         def children(root):
-            for element in root:
+            from .word_contents import indexed_children
+            for element in indexed_children(root, item, paragraph, warnings):
+                if isinstance(element, dict):
+                    yield element
+                    continue
                 if element.tag == qn('w:p'): yield Paragraph(element, item)
                 elif element.tag == qn('w:tbl'): yield Table(element, item)
                 elif element.tag == qn('w:sdt'):
+                    chapter=book_reader.chapter(element) if main_story else None
+                    if chapter is not None:
+                        from docx.blkcntnr import BlockItemContainer
+                        nested=element.find(qn('w:sdtContent'))
+                        if nested is None:raise ValueError('A Word chapter is missing its content.')
+                        nodes=container(BlockItemContainer(nested,item),main_story=True)
+                        body=list(nodes)
+                        if chapter.get('pageBreak') and body and body[0]['type']=='paragraph' and body[0].get('content') and all(n['type']=='page_break' for n in body[0]['content']):body.pop(0)
+                        if chapter.get('showTitle',True) and body and body[0]['type']=='heading':
+                            title=plain_text(body[0]).strip()
+                            if title:chapter['title']=title[:300];body.pop(0)
+                        elif chapter.get('showTitle',True):chapter['showTitle']=False
+                        book_chapters.append({key:chapter[key] for key in ('title','role','matter','showTitle') if key in chapter} | {'document':{'type':'doc','content':body or [{'type':'paragraph'}]}})
+                        book_groups.append(nodes)
+                        yield from nodes
+                        continue
                     from .word_contents import read_contents
-                    generated = read_contents(element, item, paragraph, warnings)
+                    generated = citation_reader.block(element,item,paragraph)
+                    if generated is None:generated = read_contents(element, item, paragraph, warnings)
+                    if generated is None:
+                        from .form_fields import read_word as read_form_field
+                        generated=read_form_field(element,paragraph,item,warnings,container)
                     if generated is not None: yield generated
                     else:
+                        _warn(warnings,'A block-level Word content control was converted to its content; form fields currently support inline text, checkboxes and dates.')
                         nested = element.find(qn('w:sdtContent'))
                         if nested is not None: yield from children(nested)
         for child in children(root):
@@ -2265,7 +2796,7 @@ def _import_docx(path, warnings, assets):
                     if numbered_heading:
                         node.setdefault('attrs', {}).update(numbered_heading)
                         info = None
-                section_end = child._p.pPr is not None and child._p.pPr.sectPr is not None and item is doc
+                section_end = child._p.pPr is not None and child._p.pPr.sectPr is not None and main_story
                 if not info:
                     stack = []
                     if not section_end or node.get('content'):
@@ -2285,12 +2816,12 @@ def _import_docx(path, warnings, assets):
                 if not stack or stack[-1][0] != level:
                     target = stack[-1][2]["content"][-1]["content"] if stack else output
                     listing = {"type": kind, "content": []}
-                    listing['attrs'] = {'listStyle': marker, **({'order': start} if kind == 'ordered_list' else {})}
+                    listing['attrs'] = {'listStyle': marker, **({'order': start} if kind == 'ordered_list' or outline_template else {})}
                     if outline_template and level==0:listing['attrs']['listTemplate']=outline_template
                     scope = (id(target), marker)
-                    if kind == 'ordered_list' and previous_lists.get(scope) == number:
+                    if (kind == 'ordered_list' or outline_template) and previous_lists.get(scope) == number:
                         listing['attrs']['continuePrevious'] = True
-                    if kind == 'ordered_list': previous_lists[scope] = number
+                    if kind == 'ordered_list' or outline_template: previous_lists[scope] = number
                     target.append(listing)
                     stack.append((level, number, listing))
                 stack[-1][2]["content"].append({"type": "list_item", "content": [node]})
@@ -2305,8 +2836,29 @@ def _import_docx(path, warnings, assets):
     from .page_geometry import docx_page_settings
     imported = {"type":"doc", "content":container(doc) or [{"type":"paragraph"}]}
     comment_reader.finish(imported)
-    restore_review_paragraphs(imported)
+    if book_chapters:
+        # Additional Word prose outside the managed groups remains in its
+        # actual position as an ordinary chapter, including title/contents pages.
+        group_at={id(node):index for index,nodes in enumerate(book_groups) for node in nodes}
+        ordered,unassigned,seen=[],[],set()
+        def flush_unassigned():
+            if not unassigned:return
+            ordered.append({'title':'Opening material' if not ordered else 'Additional material','role':'frontmatter' if not ordered else 'chapter','showTitle':False,'document':{'type':'doc','content':list(unassigned)}})
+            unassigned.clear()
+        for node in imported['content']:
+            index=group_at.get(id(node))
+            if index is None:unassigned.append(node)
+            else:
+                flush_unassigned()
+                if index not in seen:ordered.append(book_chapters[index]);seen.add(index)
+        flush_unassigned()
+        book_chapters=ordered
+        for chapter in book_chapters:restore_review_paragraphs(chapter['document'])
+        imported['content']=[node for chapter in book_chapters for node in chapter['document']['content']]
+    else:restore_review_paragraphs(imported)
     def bind_fields(node):
+        if node['type']=='index_entry' and node.get('attrs',{}).get('rangeId'):
+            attrs=node['attrs'];attrs['rangeId']=imported_reference_names.get(attrs['rangeId'],attrs['rangeId'])
         if node['type'] == 'cross_reference':
             attrs = node['attrs']; attrs['targetId'] = imported_reference_names.get(attrs['targetId'], attrs['targetId'])
         for mark in node.get('marks', []):
@@ -2318,10 +2870,11 @@ def _import_docx(path, warnings, assets):
     from .document_captions import associate_captions
     associate_captions(imported)
     settings = docx_page_settings(doc, warnings)
+    settings['noteOptions']=note_reader.options
     from .running_matter import read_running_matter
-    settings['runningMatter']=read_running_matter(doc.sections[0],paragraph,warnings,first=True)
+    settings['runningMatter']=read_running_matter(doc.sections[0],paragraph,warnings,first=True,container=container)
     settings.update(author=doc.core_properties.author or '',subject=doc.core_properties.subject or '',description=doc.core_properties.comments or '')
-    return imported, doc.core_properties.title or path.stem, settings
+    return imported, doc.core_properties.title or path.stem, settings, book_chapters
 
 
 def _normalise_import_blocks(document):
@@ -2330,10 +2883,10 @@ def _normalise_import_blocks(document):
         result = []
         for source in nodes:
             node = copy.deepcopy(source)
-            if _kind(node) in ("paragraph", "heading") and any(_kind(n) == "image" for n in node.get("content", [])):
+            if _kind(node) in ("paragraph", "heading") and any(_kind(n) in ('image','page_break','column_break') for n in node.get("content", [])):
                 pending = []
                 for child in node.get("content", []):
-                    if _kind(child) == "image":
+                    if _kind(child) in ('image','page_break','column_break'):
                         inherited_align = node.get('attrs', {}).get('align')
                         if inherited_align in ('left', 'center', 'right'):
                             child.setdefault('attrs', {}).setdefault('align', inherited_align)
@@ -2364,6 +2917,7 @@ def import_document(path: Path) -> dict:
     title = path.stem
     raw_source = None
     imported_settings = None
+    imported_chapters = []
     if extension in (".txt", ".md", ".markdown", ".html", ".htm"):
         raw = path.read_bytes()
         try:
@@ -2378,21 +2932,28 @@ def import_document(path: Path) -> dict:
                 raw_source = {"format":"markdown", "text":text}
                 from markdown_it import MarkdownIt
                 text = MarkdownIt("commonmark", {"html": False}).render(text)
-            document = _import_html(text, warnings, assets)
+            document = _import_html(text, warnings, assets, chapter_output=imported_chapters if extension in ('.html','.htm') else None)
             if extension in ('.html','.htm'):
                 from bs4 import BeautifulSoup
                 metadata = BeautifulSoup(text,'html.parser').head
                 if metadata:
                     if metadata.title and metadata.title.get_text().strip(): title = metadata.title.get_text().strip()[:500]
-                    imported_settings = {}
+                    imported_settings = read_html_page_metadata(text)
                     from .running_matter import read_html_metadata
-                    running = read_html_metadata(text)
+                    running = read_html_metadata(text,assets,warnings)
                     if running is not None: imported_settings['runningMatter']=running
                     for key in ('author','subject','description'):
                         entry = metadata.find('meta', attrs={'name':key})
                         if entry and entry.get('content') is not None: imported_settings[key] = entry['content'][:10000]
     elif extension == ".docx":
-        document, title, imported_settings = _import_docx(path, warnings, assets)
+        document, title, imported_settings, imported_chapters = _import_docx(path, warnings, assets)
+    elif extension == ".odt":
+        from .odt_reader import read_odt
+        document, title, imported_settings = read_odt(path, warnings, assets)
+    elif extension == ".rtf":
+        from .rtf_reader import read_rtf
+        document, metadata_title, imported_settings = read_rtf(path, warnings, assets)
+        title = metadata_title or title
     elif extension == ".epub":
         with _zip(path) as archive:
             container = _xml(archive.read("META-INF/container.xml"))
@@ -2419,8 +2980,9 @@ def import_document(path: Path) -> dict:
                 if ".." in resource.parts:
                     raise ValueError("EPUB content path escapes its package.")
                 raw = archive.read(str(resource))
+                imported_settings.update(read_html_page_metadata(raw.decode('utf-8-sig')))
                 from .running_matter import read_html_metadata
-                running = read_html_metadata(raw.decode('utf-8-sig'))
+                running = read_html_metadata(raw.decode('utf-8-sig'),assets,warnings)
                 if running is not None: imported_settings['runningMatter']=running
                 # HTML doctype is common and has no effect with BeautifulSoup's HTML parser.
                 def image_reader(src, root=resource.parent):
@@ -2440,17 +3002,38 @@ def import_document(path: Path) -> dict:
                     if parsed.scheme or parsed.netloc or not parsed.fragment: return ''
                     destination=posixpath.normpath(str(root / unquote(parsed.path)))
                     return '#'+unquote(parsed.fragment) if destination in content_paths else ''
-                blocks.extend(_import_html(raw.decode("utf-8-sig"), warnings, assets, image_reader, link_reader)["content"])
+                chapter_parts=[]
+                imported_part=_import_html(raw.decode("utf-8-sig"), warnings, assets, image_reader, link_reader, chapter_parts)
+                blocks.extend(imported_part['content'])
+                if chapter_parts: imported_chapters.extend(chapter_parts)
+                else:
+                    # Do not discard an unlabelled spine document (for example
+                    # a cover) from a partially structured book.
+                    imported_settings['_mixedBookStructure']=True
             document = {"type":"doc", "content":blocks or [{"type":"paragraph"}]}
-        _warn(warnings, "EPUB was imported in spine reading order; title, author, subject and description are retained, while other publication metadata, CSS and separate section identities are not imported.")
+        if imported_settings.pop('_mixedBookStructure',False):
+            if imported_chapters: _warn(warnings,'The EPUB mixes structured and unstructured spine items; all content was retained in one document.')
+            imported_chapters=[]
+        _warn(warnings, "EPUB was imported in spine reading order. Supported Alder book divisions and title/author/subject/description metadata are retained; external CSS and other publication metadata are not imported.")
     else:
         from .text_import import extract_text
         text, notices = extract_text(path)
         warnings.extend(notices)
         document = text_document(text)
-    document = _normalise_import_blocks(document)
+    if imported_chapters:
+        for chapter in imported_chapters: chapter['document']=_normalise_import_blocks(chapter['document'])
+        document={'type':'doc','content':[node for chapter in imported_chapters for node in chapter['document']['content']]}
+    else: document = _normalise_import_blocks(document)
     from .document_captions import restore_caption_references
     restore_caption_references(document)
     from .word_contents import restore_contents_links
     restore_contents_links(document)
-    return {"title":title, "document":document, "text":plain_text(document), "warnings":warnings, "assets":assets, **({"settings": imported_settings} if imported_settings else {}), **({"rawSource":raw_source, "rawFormat":"markdown"} if raw_source else {})}
+    from .document_notes import restore_note_references
+    restore_note_references(document)
+    from .document_comments import walk as citation_walk
+    citation_styles={node.get('attrs',{}).get('renderedStyle','apa') for node in citation_walk(document) if node.get('type') in ('citation','bibliography')}
+    if citation_styles:
+        imported_settings = imported_settings or {}
+        imported_settings['citationStyle']=next(iter(citation_styles)) if len(citation_styles)==1 else 'apa'
+        if len(citation_styles)>1:_warn(warnings,'Imported citations use different styles. Their wording is retained; Update fields applies APA consistently unless another style is selected in Sources.')
+    return {"title":title, "document":document, "text":plain_text(document), "warnings":warnings, "assets":assets, **({'chapters':imported_chapters} if imported_chapters else {}), **({"settings": imported_settings} if imported_settings else {}), **({"rawSource":raw_source, "rawFormat":"markdown"} if raw_source else {})}

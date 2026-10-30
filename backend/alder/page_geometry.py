@@ -38,6 +38,16 @@ def page_geometry(settings):
 
 
 def validate_page_settings(settings):
+    from .line_numbering import validate_line_numbering
+    validate_line_numbering(settings.get('lineNumbering'))
+    from .watermark import validate_watermark
+    validate_watermark(settings.get('watermark'))
+    from .page_border import validate_page_border
+    validate_page_border(settings.get('pageBorder'))
+    from .columns import validate_columns
+    validate_columns(settings.get('columns'),page_geometry(settings))
+    if not isinstance(settings.get('mirrorMargins', False), bool):
+        raise ValueError('Mirrored margins must be true or false.')
     for key in PAGE_FIELDS:
         if key not in settings or settings[key] is None:
             continue
@@ -70,8 +80,24 @@ def docx_page_settings(document, warnings, section=None):
         settings[f"margin{edge.title()}Mm"] = value.mm if value is not None else PAGE_FORMAT["defaultMargin"]
     settings['gutterMm'] = section.gutter.mm if section.gutter is not None else 0
     from docx.oxml.ns import qn
-    if document.settings.element.find(qn('w:mirrorMargins')) is not None or document.settings.element.find(qn('w:gutterAtTop')) is not None:
-        warnings.append("DOCX mirrored margins or top binding are converted to ordinary margins with a left binding gutter.")
+    from .columns import read_columns
+    from .page_border import read_page_border
+    border=read_page_border(section,warnings)
+    if border is not None:settings['pageBorder']=border
+    from .watermark import read_watermark
+    watermark=read_watermark(section,warnings)
+    if watermark is not None:settings['watermark']=watermark
+    from .line_numbering import read_line_numbering
+    line_numbering=read_line_numbering(section,warnings)
+    if line_numbering is not None:settings['lineNumbering']=line_numbering
+    columns=read_columns(section,warnings)
+    if columns is not None: settings['columns']=columns
+    mirror = document.settings.element.find(qn('w:mirrorMargins'))
+    if first:
+        settings['mirrorMargins'] = mirror is not None and mirror.get(qn('w:val'), '1') not in ('0', 'false', 'off')
+    top_gutter = document.settings.element.find(qn('w:gutterAtTop'))
+    if top_gutter is not None and top_gutter.get(qn('w:val'),'1') not in ('0','false','off'):
+        warnings.append("DOCX top binding is converted to a side binding gutter.")
     try:
         validate_page_settings(settings)
     except ValueError:
@@ -81,7 +107,7 @@ def docx_page_settings(document, warnings, section=None):
         settings = {"pageSize": "Custom", "orientation": "portrait",
                     "pageWidthMm": resolved['width'], "pageHeightMm": resolved['height'],
                     **{f'margin{edge.title()}Mm': value for edge, value in resolved['margins'].items()},
-                    "gutterMm": 0}
+                    "gutterMm": 0, **({'mirrorMargins':settings.get('mirrorMargins',False)} if first else {})}
         warnings.append("DOCX page dimensions or margins exceed Alder's supported range and were adjusted to retain a usable writing area.")
     if first:
         from .page_numbering import read_docx_numbering
@@ -91,3 +117,28 @@ def docx_page_settings(document, warnings, section=None):
         if 'numberingFormat' in numbering:
             settings['pageNumberFormat'] = numbering['numberingFormat']
     return settings
+
+
+def html_page_metadata(settings):
+    import html
+    fields = (*PAGE_FIELDS, 'pageSize', 'orientation', 'marginMm', 'mirrorMargins', 'firstPageNumber', 'pageNumberFormat', 'columns', 'noteOptions', 'pageBorder', 'watermark', 'lineNumbering')
+    value = {key:settings[key] for key in fields if key in settings}
+    return '<meta name="alder-page-settings" content="'+html.escape(json.dumps(value),quote=True)+'"/>'
+
+
+def read_html_page_metadata(text):
+    from bs4 import BeautifulSoup
+    from .page_numbering import validate_numbering
+    head = BeautifulSoup(text,'html.parser').head
+    entry = head.find('meta', attrs={'name':'alder-page-settings'}) if head else None
+    if entry is None:return {}
+    value = json.loads(entry.get('content','{}'))
+    allowed = {*PAGE_FIELDS, 'pageSize','orientation','marginMm','mirrorMargins','firstPageNumber','pageNumberFormat','columns','noteOptions','pageBorder','watermark','lineNumbering'}
+    if not isinstance(value,dict) or set(value)-allowed:raise ValueError('Invalid HTML page settings.')
+    if value.get('pageSize','A4') not in (*PAGE_FORMAT['sizes'],'Custom') or value.get('orientation','portrait') not in ('portrait','landscape'):raise ValueError('Invalid HTML page geometry.')
+    if 'marginMm' in value and (type(value['marginMm']) not in (int,float) or not 0<=value['marginMm']<=100):raise ValueError('Invalid HTML margin.')
+    validate_page_settings(value)
+    from .note_options import note_options
+    note_options(value.get('noteOptions'))
+    validate_numbering(value.get('firstPageNumber'),value.get('pageNumberFormat'))
+    return value

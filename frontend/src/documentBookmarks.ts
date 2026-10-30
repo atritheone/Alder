@@ -90,7 +90,7 @@ export function copiedBookmarkTargets(fragment: Fragment) {
   const complete = new Set<string>();
   fragment.descendants((node) => {
     if (
-      !["bookmark", "heading", "image", "inline_image", "table"].includes(
+      !["bookmark", "heading", "image", "inline_image", "table", "index_entry", "document_note"].includes(
         node.type.name,
       ) &&
       !node.attrs.captionLabel

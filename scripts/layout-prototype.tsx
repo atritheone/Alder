@@ -138,6 +138,7 @@ function Prototype() {
       pages.current = null;
       editor.current!.replaceRange(start, end, text);
     },
+    select: (start: number, end: number) => editor.current!.selectRange(start,end),
     clipboardRoundTrip: (value: DocNode, images?: Record<string, string>) => {
       const parsed = schema.nodeFromJSON(value);
       const container = window.document.createElement("div");

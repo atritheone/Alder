@@ -6,6 +6,7 @@ import { styleDeclarations } from "./styleResolution";
 import type { StyleProperties } from "./types";
 import ParagraphAppearanceFields from "./ParagraphAppearanceFields";
 import TabStopsEditor from "./TabStopsEditor";
+import HyphenationFields from "./HyphenationFields";
 import type { TabStop } from "./tabStops";
 import "./word-processing.css";
 
@@ -33,11 +34,13 @@ export default function ParagraphDialog({
     dialog.current?.showModal();
   }, []);
   useEffect(() => {
-    if (preview.current)
+    if (preview.current) {
       preview.current.style.cssText = styleDeclarations({
         ...initial,
         ...changed,
       } as StyleProperties);
+      preview.current.dir=String(changed.textDirection??initial.textDirection??'ltr');
+    }
   }, [initial, changed]);
   const edit = (key: string, value: string) => {
     setValues((old) => ({ ...old, [key]: value }));
@@ -50,6 +53,7 @@ export default function ParagraphDialog({
             ? value
             : [
                   "keepWithNext",
+                  'suppressLineNumbers',
                   "headingNumbered",
                   "keepTogether",
                   "widowOrphan",
@@ -165,6 +169,7 @@ export default function ParagraphDialog({
           {(
             [
               ["keepWithNext", "Keep with next paragraph"],
+              ['suppressLineNumbers','Suppress line numbers'],
               ["headingNumbered", "Number headings (1, 1.1, 1.1.1)"],
               ["keepTogether", "Keep lines together"],
               ["widowOrphan", "Widow and orphan control"],
@@ -200,6 +205,10 @@ export default function ParagraphDialog({
           </label>
         )}
         <ParagraphAppearanceFields
+          value={{ ...initial, ...changed } as StyleProperties}
+          onChange={(patch) => setChanged((old) => ({ ...old, ...patch }))}
+        />
+        <HyphenationFields
           value={{ ...initial, ...changed } as StyleProperties}
           onChange={(patch) => setChanged((old) => ({ ...old, ...patch }))}
         />

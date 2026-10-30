@@ -2,11 +2,17 @@ import { documentCanvasWidth, pageAtY, pageFrame } from "./sectionLayout";
 import type { PageLayout, FlowPage } from "./pageFlow";
 import { pageInsets, pageGeometryCSS } from "./pageGeometry";
 import { pageFurnitureDOM } from "./pageFurniture";
-import { copyParagraphPaint } from "./paragraphPaint";
+import {lineNumbersHTML} from './lineNumberLayout';
+import { copyParagraphPaint, copyProjectedPaint } from "./paragraphPaint";
 import { copyExactLeading } from "./exactLeading";
 import { freezeTablesInCopy } from "./tableSnapshotLayout";
+import {wrappingExclusions,freezeImageWrapping} from './imageWrapping';
+import { mirrorShiftToPage } from "./mirroredMargins";
+import { columnParagraphRects } from "./columnLayout";
+import { columnRulesHTML } from "./columns";
 import type { EditorView } from "prosemirror-view";
 import { documentUnits, type ArrangementUnit } from "./arrangementUnits";
+import { freezeFormFields } from "./formFields";
 
 /** Copy the measured page geometry, rather than reflowing a text excerpt.
  * Only blocks intersecting a page are copied. A split paragraph/table keeps its
@@ -28,6 +34,7 @@ export function pageSnapshots(
   const scope = root.closest<HTMLElement>("[data-alder-editor]")!.dataset
     .alderEditor!;
   const typography = getComputedStyle(root);
+  const wrappedImages=wrappingExclusions(root,scale);
   const blocks = Array.from(root.children, (element) => {
     const rect = element.getBoundingClientRect();
     return {
@@ -59,21 +66,28 @@ export function pageSnapshots(
           view.state.doc.nodesBetween(unit.from, unit.to, (node, pos) => {
             if (!node.isTextblock) return;
             const element = view.nodeDOM(pos) as HTMLElement | null;
-            if (element) blocks.push(element.getBoundingClientRect());
+            if (element)
+              blocks.push(
+                ...(columnParagraphRects(view, node, pos) || [
+                  element.getBoundingClientRect(),
+                ]),
+              );
             return false;
           });
           const left = Math.min(...blocks.map((r) => r.left));
           const top = Math.min(...blocks.map((r) => r.top));
-          rects = blocks.length
-            ? [
-                new DOMRect(
-                  left,
-                  top,
-                  Math.max(...blocks.map((r) => r.right)) - left,
-                  Math.max(...blocks.map((r) => r.bottom)) - top,
-                ),
-              ]
-            : [];
+          rects = view.dom.hasAttribute("data-column-layout")
+            ? blocks
+            : blocks.length
+              ? [
+                  new DOMRect(
+                    left,
+                    top,
+                    Math.max(...blocks.map((r) => r.right)) - left,
+                    Math.max(...blocks.map((r) => r.bottom)) - top,
+                  ),
+                ]
+              : [];
         } else {
           const start = view.domAtPos(unit.from),
             end = view.domAtPos(unit.to);
@@ -119,7 +133,9 @@ export function pageSnapshots(
               (line) =>
                 Math.min(line.bottom, rect.bottom) -
                   Math.max(line.top, rect.top) >
-                Math.min(line.height, rect.height) * 0.5,
+                  Math.min(line.height, rect.height) * 0.5 &&
+                Math.max(line.left, rect.left) <=
+                  Math.min(line.right, rect.right) + 2 * scale,
             );
             if (at < 0) lines.push(rect);
             else {
@@ -179,6 +195,13 @@ export function pageSnapshots(
     for (const [key, value] of Object.entries(pageGeometryCSS(current)))
       wrapper.style.setProperty(key, value);
     const documentCopy = document.createElement("div");
+    const paint = view && copyProjectedPaint(view, frame);
+    if (paint) wrapper.append(paint);
+    if (pages[page].columnRules) {
+      const rules = document.createElement("div");
+      rules.innerHTML = columnRulesHTML(pages[page]);
+      wrapper.append(rules);
+    }
     documentCopy.className = "ProseMirror";
     documentCopy.style.cssText =
       "position:absolute;inset:0;width:100%;height:100%;min-height:0;padding:0;";
@@ -204,6 +227,7 @@ export function pageSnapshots(
     for (const block of blocks) {
       if (block.bottom <= top || block.top >= top + current.height) continue;
       const copy = block.element.cloneNode(true) as HTMLElement;
+      freezeFormFields(block.element, copy, scale);
       const painted = [
         block.element,
         ...block.element.querySelectorAll("p,h1,h2,h3,h4,h5,h6,pre,table"),
@@ -253,7 +277,7 @@ export function pageSnapshots(
         for (const [original, cloned] of pairs) {
           if (
             original.parentElement?.closest(
-              ".structure-marker,.pagination-spacer,.write-caret",
+              ".structure-marker,.pagination-spacer,.write-caret,.discretionary-hyphen",
             )
           )
             continue;
@@ -282,6 +306,7 @@ export function pageSnapshots(
         });
       }
       freezeTablesInCopy(block.element, copy, scale);
+      freezeImageWrapping(block.element,copy,scale,wrappedImages);
       copy.style.setProperty("position", "absolute");
       copy.style.setProperty("top", `${block.top - top}px`);
       copy.style.setProperty("left", `${block.left - frame.left}px`);
@@ -296,6 +321,8 @@ export function pageSnapshots(
           "tabindex",
           "aria-label",
           "data-help",
+          "data-document-citation",
+          "data-document-bibliography",
         ])
           node.removeAttribute(attribute);
         if (node.tagName === "A") node.setAttribute("tabindex", "-1");
@@ -314,8 +341,12 @@ export function pageSnapshots(
       documentCopy.append(copy);
     }
     wrapper.append(documentCopy);
-    if (pages[page].from !== pages[page].to)
-      wrapper.append(pageFurnitureDOM(current, page, view.state.schema, pages.length));
+    if(pages[page].lineNumbers?.length){const numbers=document.createElement('div');numbers.innerHTML=lineNumbersHTML(pages[page]);wrapper.append(numbers);}
+    if(pages[page].noteHTML){const notes=document.createElement('div');notes.innerHTML=pages[page].noteHTML!;wrapper.append(notes);}
+    if (pages[page].from !== pages[page].to||pages[page].noteHTML)
+      wrapper.prepend(
+        pageFurnitureDOM(current, page, view.state.schema, pages.length),
+      );
     if (headers?.[page]) {
       const header = document.createElement("div");
       header.innerHTML = headers[page];
@@ -344,7 +375,11 @@ export function pageSnapshots(
         if (bottom <= start) continue;
         const box = document.createElement("span");
         box.className = "unit-outline";
-        box.style.cssText = `left:${(rect.left - origin.left) / scale - frame.left - inset}px;top:${start - verticalInset}px;width:${rect.width / scale + inset * 2}px;height:${bottom - start + verticalInset * 2}px;`;
+        const shift =
+          unit.kind === "paragraph"
+            ? mirrorShiftToPage(view, unit.from + 1, page)
+            : 0;
+        box.style.cssText = `left:${(rect.left - origin.left) / scale - frame.left - inset + shift}px;top:${start - verticalInset}px;width:${rect.width / scale + inset * 2}px;height:${bottom - start + verticalInset * 2}px;`;
         layer.append(box);
       }
       if (layer.childElementCount) wrapper.append(layer);

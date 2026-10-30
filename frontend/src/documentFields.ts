@@ -13,6 +13,7 @@ export const fieldLabels = {
   subject: "Subject",
   page: "Page number",
   pageCount: "Total pages",
+  merge: "Merge field",
   ...headingFieldLabels,
 } as const;
 export type DocumentField = keyof typeof fieldLabels;
@@ -42,6 +43,7 @@ export function documentFieldValues(
     subject: text(project.settings.subject),
     page: "—",
     pageCount: "—",
+    merge: "",
     heading1: "—",
     heading2: "—",
     heading3: "—",
@@ -57,6 +59,7 @@ export const documentFieldSpec: NodeSpec = {
   atom: true,
   attrs: {
     fieldKind: { default: "date" },
+    mergeKey: { default: null },
     blockId: { default: null },
     unresolved: { default: false },
   },
@@ -67,6 +70,7 @@ export const documentFieldSpec: NodeSpec = {
         isDocumentField(dom.getAttribute("data-document-field"))
           ? {
               fieldKind: dom.getAttribute("data-document-field"),
+              mergeKey: dom.getAttribute("data-merge-key"),
               unresolved: dom.getAttribute("data-field-unresolved") === "true",
             }
           : false,
@@ -76,10 +80,11 @@ export const documentFieldSpec: NodeSpec = {
     "span",
     {
       "data-document-field": node.attrs.fieldKind,
+      "data-merge-key": node.attrs.mergeKey,
       "data-field-unresolved": node.attrs.unresolved ? "true" : null,
       class: "document-field",
       contenteditable: "false",
-      title: node.attrs.unresolved
+      title: node.attrs.fieldKind === "merge" ? `Merge field: ${node.attrs.mergeKey}` : node.attrs.unresolved
         ? isHeadingField(node.attrs.fieldKind)
           ? "No matching heading is available. Add a heading at this level, then update fields."
           : isPageField(node.attrs.fieldKind)
@@ -95,7 +100,7 @@ export function refreshedDocumentFields(
   values: Record<DocumentField, string>,
 ): DocNode {
   if (document.type === "document_field") {
-    if (isLayoutField(document.attrs?.fieldKind)) return document;
+    if (isLayoutField(document.attrs?.fieldKind) || document.attrs?.fieldKind === "merge") return document;
     const kind = document.attrs!.fieldKind as DocumentField,
       value = values[kind];
     const text = value || `[${fieldLabels[kind]} not set]`,
@@ -124,13 +129,16 @@ export function insertDocumentField(
   kind: DocumentField,
   text: string,
   blockId = `block_${crypto.randomUUID()}`,
+  mergeKey?: string,
 ) {
+  if(kind === "merge" && (!mergeKey || mergeKey !== mergeKey.trim() || !/^[\p{L}\p{N}_ .-]{1,100}$/u.test(mergeKey)))
+    throw new Error("Name the merge field using letters, numbers, spaces, dots, underscores or hyphens.");
   if (!isDocumentField(kind) || typeof text!=="string" || (!text&&!isHeadingField(kind)) || text.length > 10000)
     throw new Error("Choose a field with an available value.");
   return closeHistory(state.tr)
     .replaceSelectionWith(
       state.schema.nodes.document_field.create(
-        { fieldKind: kind, blockId },
+        { fieldKind: kind, blockId, ...(kind === "merge" ? {mergeKey} : {}) },
         text ? state.schema.text(text) : undefined,
       ),
       true,

@@ -70,7 +70,7 @@ export function imageResize() {
                   ? image.closest("p,h1,h2,h3,h4,h5,h6")
                   : figure) || v.dom,
               align: selection.node.isInline
-                ? "left"
+                ? selection.node.attrs.wrap === 'right' ? 'right' : "left"
                 : selection.node.attrs.align,
               image,
             }

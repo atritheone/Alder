@@ -120,15 +120,15 @@ describe("document file identities", () => {
     ).toBe(file);
     expect(await fs.readFile(file, "utf8")).toBe("Original");
   });
-  it("does not overwrite an imported file with incomplete format support", async () => {
+  it.each(["docx", "odt", "rtf"])("does not overwrite an imported %s with incomplete format support", async (format) => {
     const { store, file } = await setup();
-    await store.bind("project", file, "docx", false);
+    await store.bind("project", file, format, false);
     let suggested = "";
-    await store.destination("project", "docx", "save", async (name) => {
+    await store.destination("project", format, "save", async (name) => {
       suggested = name!;
       return null;
     });
-    expect(suggested).toContain("Alder copy.docx");
+    expect(suggested).toContain("Alder copy." + format);
     expect(await fs.readFile(file, "utf8")).toBe("Original");
   });
   it("detects a modification during export and preserves the newer file", async () => {

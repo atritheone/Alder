@@ -78,7 +78,7 @@ export default function FieldDialog({
               onChange={(event) => setKind(event.target.value as DocumentField)}
             >
               {Object.entries(fieldLabels)
-                .filter(([value]) => allowPageFields || !isLayoutField(value))
+                .filter(([value]) => value !== "merge" && (allowPageFields || !isLayoutField(value)))
                 .map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}

@@ -9,12 +9,58 @@ import {
   setListTemplate,
   selectedOutlineList,
   nextListLabel,
+  listNumber,
+  applyListOptions,
+  ordinaryListLabels,
 } from "./outlineLists";
 const p = (text: string) => schema.node("paragraph", null, schema.text(text));
 const item = (text: string, child?: any) =>
   schema.node("list_item", null, [p(text), ...(child ? [child] : [])]);
 const list = (items: any[], attrs = {}) =>
   schema.node("ordered_list", attrs, items);
+it("keeps ordinary list labels consistent with Word beyond Z and Roman 3999", () => {
+  const doc = schema.node("doc", null, [
+    list([item("one"), item("two"), item("three")], {
+      order: 26,
+      listStyle: "upper-alpha",
+    }),
+    list([item("roman")], { order: 4000, listStyle: "lower-roman" }),
+    list([item("outline")], {
+      listTemplate: defaultListTemplate(),
+      listStyle: "upper-alpha",
+    }),
+  ]);
+  expect(ordinaryListLabels(doc).map((item) => item.label)).toEqual([
+    "Z. ",
+    "AA. ",
+    "BB. ",
+    "mmmm. ",
+  ]);
+});
+it("retains a bulleted root's outline start and continuation and matches Word's extended numbers", () => {
+  const template = defaultListTemplate();
+  const doc = schema.node("doc", null, [
+    schema.node("bullet_list", { listTemplate: template, order: 27 }, [
+      item("A"),
+    ]),
+    p("Gap"),
+    schema.node(
+      "bullet_list",
+      { listTemplate: template, continuePrevious: true },
+      [item("B")],
+    ),
+  ]);
+  expect(outlineListLayout(doc).markers.map((m) => m.label)).toEqual([
+    "27.",
+    "28.",
+  ]);
+  expect([26, 27, 28].map((n) => listNumber(n, "upper-alpha"))).toEqual([
+    "Z",
+    "AA",
+    "BB",
+  ]);
+  expect(listNumber(4000, "upper-roman")).toBe("MMMM");
+});
 it("formats every level using its own format and Word restart rules", () => {
   const template = defaultListTemplate(),
     counts = Array<number | null>(9).fill(null);
@@ -140,6 +186,37 @@ it("updates linked continuation templates in one undo event, stopping at a resta
     "8.",
     "9.",
   ]);
+  undo(state, (tr) => {
+    state = state.apply(tr);
+  });
+  expect(state.doc.eq(doc)).toBe(true);
+});
+
+it("removes outline numbering and applies ordinary formatting in one undo", () => {
+  const doc = schema.node("doc", null, [
+    list([item("A", list([item("a")]))], {
+      listTemplate: defaultListTemplate(),
+    }),
+  ]);
+  let state = EditorState.create({
+    doc,
+    selection: TextSelection.create(doc, 3),
+    plugins: [history()],
+  });
+  expect(
+    applyListOptions(
+      "upper-roman",
+      5,
+      false,
+      false,
+      null,
+    )(state, (tr) => {
+      state = state.apply(tr);
+    }),
+  ).toBe(true);
+  expect(outlineListLayout(state.doc).markers).toHaveLength(0);
+  expect(state.doc.firstChild?.attrs.order).toBe(5);
+  expect(state.selection.from).toBe(3);
   undo(state, (tr) => {
     state = state.apply(tr);
   });

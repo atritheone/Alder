@@ -27,11 +27,22 @@ export const emptyStory = (): DocNode => ({
 });
 export function validStory(node: DocNode): boolean {
   return (
-    ["doc", "paragraph", "text", "hard_break", "document_field"].includes(
-      node.type,
-    ) &&
+    [
+      "doc",
+      "paragraph",
+      "text",
+      "hard_break",
+      "document_field",
+      "table",
+      "table_row",
+      "table_cell",
+      "table_header",
+      "image",
+      "inline_image",
+    ].includes(node.type) &&
     !node.attrs?.revisionProperties &&
     !node.attrs?.captionLabel &&
+    (!['image','inline_image'].includes(node.type) || !node.attrs?.wrap || node.attrs.wrap === 'none') &&
     (!node.marks ||
       node.marks.every((m) =>
         [
@@ -43,6 +54,7 @@ export function validStory(node: DocNode): boolean {
           "superscript",
           "text_style",
           "link",
+          "highlight",
         ].includes(m.type),
       )) &&
     (!node.content || node.content.every(validStory))
@@ -195,7 +207,7 @@ export function runningMatterDOM(
           }
         : m,
     );
-    if (node.type === "document_field") {
+    if (node.type === "document_field" && attrs.fieldKind !== "merge") {
       const value =
         fields[attrs.fieldKind as DocumentField] ??
         (isHeadingField(attrs.fieldKind) ? "—" : documentText(node) || "—");
@@ -224,6 +236,7 @@ export function runningMatterDOM(
         node.type === "paragraph"
           ? {
               fontSize: 9,
+              textLanguage: layout.language || "en",
               lineHeight: 1.2,
               spaceBefore: 0,
               spaceAfter: 0,
@@ -348,6 +361,16 @@ export function assertRunningMatterFits(
           `[data-running-story=${part}]`,
         );
         if (!element) continue;
+        if (
+          [...element.querySelectorAll("table")].some(
+            (table) =>
+              table.getBoundingClientRect().width >
+              element.getBoundingClientRect().width + 1,
+          )
+        )
+          throw new Error(
+            `The ${part} table is wider than the writing area. Reduce its column widths, reduce the side margins, or use wider paper.`,
+          );
         const distance =
           ((selected[
             part === "header" ? "headerDistanceMm" : "footerDistanceMm"

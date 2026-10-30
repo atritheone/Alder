@@ -9,6 +9,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { api, download, mediaUrl } from "./api";
 import type { Project } from "./types";
 import "./publication-preview.css";
+import { stationeryPrintHint } from './stationery';
 
 type Props = {
   project: Project;
@@ -453,6 +454,7 @@ export default function PublicationPreview({
         )}
         {rendering && mode === "print" && <span>Rendering page…</span>}
       </div>
+      {mode === 'print' && project.settings.stationeryPreset && <p className="quiet">{stationeryPrintHint(project.settings.stationeryPreset)}</p>}
       {error && (
         <div className="publication-error" role="alert">
           <span>{error}</span>

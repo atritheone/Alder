@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { Annotation, Project } from "./types";
 import type { ProofreadingResult } from "./useProofreading";
+import { proofreadingLanguages } from "./proofreadingLanguages";
 
 /** Scan chapter snapshots sequentially; open a chapter for source-validated edits. */
 export default function BookProofreading({
@@ -28,6 +29,7 @@ export default function BookProofreading({
       warnings: string[];
       status: string;
       configuration: string;
+      languages: string;
     }[]
   >([]);
   const run = useRef<{ cancelled: boolean; job?: string } | null>(null);
@@ -82,6 +84,7 @@ export default function BookProofreading({
             projectId: snapshot.id,
             targetId: `${snapshot.id}:book-review:${chapter.id}`,
             advanced,
+            languageRanges: proofreadingLanguages(chapter.document, snapshot),
           },
         );
         token.job = job.id;
@@ -106,6 +109,9 @@ export default function BookProofreading({
             warnings: job.warnings,
             status: job.status,
             configuration: identity,
+            languages: JSON.stringify(
+              proofreadingLanguages(chapter.document, snapshot),
+            ),
           },
         ]);
       }
@@ -150,6 +156,15 @@ export default function BookProofreading({
       <ul className="book-proofreading-results">
         {results.map((result) => {
           const stale =
+            result.languages !==
+              JSON.stringify(
+                proofreadingLanguages(
+                  project.book?.chapters.find(
+                    (chapter) => chapter.id === result.id,
+                  )?.document,
+                  project,
+                ),
+              ) ||
             result.configuration !== configuration(project) ||
             project.book?.chapters.find((chapter) => chapter.id === result.id)
               ?.text !== result.text;

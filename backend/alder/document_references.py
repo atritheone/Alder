@@ -18,6 +18,9 @@ def reference_values(documents):
             if any(mark.get('type') == 'revision_deletion' for mark in node.get('marks', [])): return
             kind, attrs, at = node['type'], node.get('attrs') or {}, len(tape)
             if kind == 'text': tape.append(node.get('text', ''))
+            elif kind == 'document_note':
+                number=attrs.get('_noteLabel','1')
+                put(attrs.get('blockId'),[number]);put((attrs.get('blockId'),'number'),[number])
             elif kind == 'cross_reference': tape.append(document_text(node) if attrs.get('referenceFormat') == 'page' else ('ref', attrs['targetId'], attrs.get('referenceFormat', 'text')))
             elif kind == 'bookmark': starts[attrs.get('blockId')] = (at, bool(attrs.get('range')))
             elif kind == 'bookmark_end': ends.setdefault(attrs['targetId'], []).append(at)
@@ -66,8 +69,10 @@ def publication_references(sections, warnings):
     values = reference_values(documents)
     referenced = set()
     heading_ids = set()
+    note_ids = set()
     def collect_headings(node):
         if node['type'] == 'heading': heading_ids.add(node.get('attrs', {}).get('blockId'))
+        if node['type'] == 'document_note':note_ids.add(node.get('attrs',{}).get('blockId'))
         for child in node.get('content', []): collect_headings(child)
     for document in documents: collect_headings(document)
     def formatted_target(identifier, format):
@@ -78,7 +83,10 @@ def publication_references(sections, warnings):
             value = (document_text(node) or '—') if format == 'page' and target in values else values.get(target if format == 'text' else (target,format))
             # Export ranges are real Word bookmark ranges. HTML keeps their
             # corresponding range too, so later numbering remains live.
-            if format not in ('text','page') and not (target in heading_ids and format == 'number'):
+            if target in note_ids:
+                attrs['targetId']='note_reference_'+hashlib.sha256(target.encode()).hexdigest()[:32]
+                attrs['_noteReference']=True
+            elif format not in ('text','page') and not (target in heading_ids and format == 'number'):
                 attrs['targetId'] = formatted_target(target, format)
                 attrs['referenceFormat'] = 'text'
             attrs['unresolved'] = not bool(value)
@@ -124,7 +132,14 @@ def publication_references(sections, warnings):
             if (identifier,'text') in referenced or (identifier,'page') in referenced or (node['type'] == 'heading' and (identifier,'number') in referenced):
                 start,end = markers('text');content = [start,*content,end]
             node['content'] = content
-        for child in node.get('content', []): anchor(child)
+        content=[]
+        for child in node.get('content', []):
+            anchor(child)
+            if child['type']=='document_note' and any((child['attrs']['blockId'],format) in referenced for format in ('number','page','text')):
+                original=child['attrs']['blockId'];target='note_reference_'+hashlib.sha256(original.encode()).hexdigest()[:32];name='AlderNote_'+hashlib.sha256(original.encode()).hexdigest()[:24]
+                content.extend([{'type':'bookmark','attrs':{'blockId':target,'name':name,'range':True}},child,{'type':'bookmark_end','attrs':{'targetId':target,'name':name}}])
+            else:content.append(child)
+        if 'content' in node:node['content']=content
     for document in documents: anchor(document)
     for section in sections: section['text'] = document_text({'type':'doc', 'content':section['blocks']})
 

@@ -9,6 +9,9 @@ import { advanceHeading } from "./headingNumbering";
 import { resolveStyles } from "./styleResolution";
 import type { NamedStyle } from "./types";
 import { refreshedContents } from "./documentContents";
+import type { IndexSource } from "./documentIndex";
+import { noteCounter, type NoteContext, type NoteOptions } from "./noteOptions";
+import { formatPageNumber } from "./pageNumbering";
 
 export type ReferenceFormat = "text" | "labelNumber" | "number" | "page";
 export const referenceFormat = (value: unknown): ReferenceFormat =>
@@ -66,7 +69,7 @@ type Piece = string | { reference: string; format: ReferenceFormat };
 export type ReferenceTarget = {
   id: string;
   label: string;
-  kind: "heading" | "bookmark" | "caption";
+  kind: "heading" | "bookmark" | "caption" | "note";
   chapter?: string;
   level?: number;
   captionLabel?: string;
@@ -75,6 +78,7 @@ export type ReferenceTarget = {
   number?: Piece[];
   page?: Piece[];
   valid: boolean;
+  layoutDependent?: boolean;
 };
 export type ReferenceIndex = ReturnType<typeof referenceIndex>;
 
@@ -87,17 +91,24 @@ export function referenceIndex(
     resetNumbering?: boolean;
   }[],
   styles: NamedStyle[] = [],
+  noteSettings?: NoteOptions,
+  noteContext?: NoteContext,
 ) {
+  let notes = noteCounter(noteSettings, noteContext);
   const headingCounts = [0, 0, 0, 0, 0, 0],
     resolvedStyles = resolveStyles(styles);
   const targets = new Map<string, ReferenceTarget>();
+  const indexEntries: IndexSource[] = [];
   const put = (target: ReferenceTarget) => {
     if (!target.id) return;
     if (targets.has(target.id)) targets.get(target.id)!.valid = false;
     else targets.set(target.id, target);
   };
   for (const source of documents) {
-    if (source.resetNumbering) headingCounts.fill(0);
+    if (source.resetNumbering) {
+      headingCounts.fill(0);
+      notes = noteCounter(noteSettings);
+    }
     const tape: Piece[] = [],
       starts = new Map<string, { at: number; name: string; range: boolean }>(),
       ends = new Map<string, number[]>();
@@ -106,6 +117,35 @@ export function referenceIndex(
       if (node.marks?.some((mark) => mark.type === "revision_deletion")) return;
       const attrs = node.attrs || {},
         at = tape.length;
+      if (node.type === "section_break") notes.section(attrs.noteOptions);
+      if (node.type === "document_note") {
+        const kind = attrs.kind as "footnote" | "endnote",
+          next = notes.next(kind),
+          layoutDependent = next.layoutDependent,
+          number = layoutDependent
+            ? "—"
+            : formatPageNumber(next.value, next.format);
+        put({
+          id: attrs.blockId,
+          label: `${kind === "footnote" ? "Footnote" : "Endnote"} ${number} · ${documentText(attrs.body).slice(0, 100)}`,
+          kind: "note",
+          chapter: source.chapter,
+          pieces: [],
+          number: [number],
+          valid: true,
+          layoutDependent,
+        });
+        return;
+      }
+      if (node.type === "index_entry") {
+        indexEntries.push({
+          id: attrs.blockId,
+          terms: attrs.terms,
+          see: attrs.see,
+          chapter: source.chapter,
+        });
+        return;
+      }
       if (node.type === "text") tape.push(node.text || "");
       else if (node.type === "cross_reference")
         tape.push(
@@ -213,7 +253,7 @@ export function referenceIndex(
     return result;
   };
   for (const id of targets.keys()) resolve(id);
-  return { targets, resolve };
+  return { targets, resolve, indexEntries };
 }
 
 export function projectReferenceIndex(project: Project, local?: DocNode) {
@@ -232,6 +272,7 @@ export function projectReferenceIndex(project: Project, local?: DocNode) {
         })),
     ],
     project.styles,
+    project.settings?.noteOptions,
   );
 }
 
@@ -247,6 +288,7 @@ export function projectContentsIndex(project: Project) {
         title: c.title,
       })),
     project.styles,
+    project.settings?.noteOptions,
   );
 }
 
@@ -256,7 +298,11 @@ export function refreshedReferences(
 ): DocNode {
   if (document.type === "cross_reference") {
     // Page values are refreshed from the complete publication's page map.
-    if (document.attrs?.referenceFormat === "page") return document;
+    if (
+      document.attrs?.referenceFormat === "page" ||
+      index.targets.get(document.attrs?.targetId)?.layoutDependent
+    )
+      return document;
     const text = index.resolve(
         document.attrs!.targetId,
         referenceFormat(document.attrs?.referenceFormat),
@@ -349,6 +395,8 @@ export function referenceRefreshTransaction(
         "sequence",
         "document_field",
         "table_of_contents",
+        "citation",
+        "bibliography",
       ].includes(before.type.name) &&
       before.attrs.targetId === after.attrs.targetId &&
       before.attrs.blockId === after.attrs.blockId

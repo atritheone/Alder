@@ -33,6 +33,9 @@ def test_table_appearance_survives_exchange(tmp_path, format):
     if format == 'docx':
         doc = Document(exported['path'])
         assert doc.tables[0].rows[0]._tr.trPr.find(qn('w:trHeight')).get(qn('w:hRule')) == 'atLeast'
+        # Word adds the 2pt/4pt padding and collapsed 1.5pt border outside
+        # its at-least height. The rendered row must still be 42pt overall.
+        assert doc.tables[0].rows[0].height.pt == 34.5
 
 
 def test_table_pdf_contains_all_text_and_custom_shading(tmp_path):
@@ -44,6 +47,39 @@ def test_table_pdf_contains_all_text_and_custom_shading(tmp_path):
     text = pdf.pages[0].extract_text()
     for word in ('One', 'Two', 'Three', 'Four'): assert text.count(word) == 1
     assert b'.866667 .933333 1 rg' in pdf.pages[0].get_contents().get_data()
+
+
+def test_external_word_minimum_height_includes_native_cell_insets(tmp_path):
+    from docx.shared import Pt
+    from docx.enum.table import WD_ROW_HEIGHT_RULE
+    from alder.table_formatting import write_docx_cell
+    document = Document()
+    table = document.add_table(rows=1, cols=2)
+    for cell in table.rows[0].cells:
+        cell.text = 'Row content'
+        write_docx_cell(cell, dict(paddingTop=2, paddingBottom=4, borderWidth=1.5))
+    table.rows[0].height = Pt(30)
+    table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+    source = tmp_path / 'external.docx'
+    document.save(source)
+    imported = import_document(source)
+    row = next(node for node in imported['document']['content'] if node['type'] == 'table')['content'][0]
+    assert row['attrs']['minHeight'] == 37.5
+
+
+def test_word_unequal_vertical_margins_use_each_rows_largest_edges(tmp_path):
+    project, _ = fixture()
+    cells = project['book']['chapters'][0]['document']['content'][0]['content'][0]['content']
+    cells[0]['attrs'].update(paddingTop=10, paddingBottom=0)
+    cells[1]['attrs'].update(paddingTop=0, paddingBottom=10)
+    exported = build_export(project, 'docx', tmp_path)
+    document = Document(exported['path'])
+    assert document.tables[0].rows[0].height.pt == 20.5
+    imported = import_document(Path(exported['path']))
+    row = next(node for node in imported['document']['content'] if node['type'] == 'table')['content'][0]
+    assert row['attrs']['minHeight'] == 42
+    assert all(cell['attrs']['paddingTop'] == cell['attrs']['paddingBottom'] == 10 for cell in row['content'])
+    assert any('unequal vertical cell padding' in warning for warning in exported['warnings'])
 
 
 @pytest.mark.parametrize('format', ['docx', 'html', 'epub'])

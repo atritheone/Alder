@@ -110,7 +110,13 @@ import LinkDialog from "./LinkDialog";
 import { bookmarkTargets, bookBookmarkTargets } from "./bookmarkTargets";
 import ReferenceDialog from "./ReferenceDialog";
 import FieldDialog from "./FieldDialog";
+import MailMergeDialog from "./MailMergeDialog";
 import ContentsDialog from "./ContentsDialog";
+import SourcesDialog from './SourcesDialog';
+import AccessibilityDialog from './AccessibilityDialog';
+import {accessibilityIssues,projectAccessibilitySources,type AccessibilityIssue} from './documentAccessibility';
+import { refreshProjectCitations, documentCitationSources, replaceCitationSources } from './documentCitations';
+import type { CitationItem, CitationStyle, CitationSource } from './citationTypes';
 import {
   hasPageReferences,
   updatePageReferences,
@@ -514,17 +520,20 @@ export default function App() {
     source: string;
   } | null>(null);
   const fieldRefresh = useRef(0);
+  const [mailMergeDialog,setMailMergeDialog]=useState<{project:Project;origin:EditorHandle;identity:string;source:string}|null>(null);
   const [runningDialog, setRunningDialog] = useState<{
     projectId: string;
     sectionId?: string;
     initial: RunningMatter;
     previous: RunningMatter;
     part: StoryPart;
+    variant?: import('./runningMatter').StoryVariant;
     source: string;
   } | null>(null);
   const openRunningMatter = (
     sectionId?: string,
     part: StoryPart = "header",
+    variant?: import('./runningMatter').StoryVariant,
   ) => {
     if (!project) return;
     const base = defaultRunningMatter(project.settings),
@@ -535,6 +544,7 @@ export default function App() {
         initial: structuredClone(project.settings.runningMatter || base),
         previous: base,
         part,
+        variant,
         source,
       });
       return;
@@ -560,11 +570,17 @@ export default function App() {
         initial: structuredClone(found.attrs?.runningMatter || {}),
         previous,
         part,
+        variant,
         source,
       });
   };
   const fieldInsertRequest = useRef(0);
   const contentsRequest = useRef(0);
+  const [sourcesDialog,setSourcesDialog]=useState<{origin:EditorHandle;identity:string;initial?:DocNode;projectId:string}|null>(null);
+  const [accessibilityDialog,setAccessibilityDialog]=useState<{origin:EditorHandle;identity:string;projectId:string;issues:AccessibilityIssue[];scope:string}|null>(null);
+  const sourcesRequest=useRef(0);
+  const sourcesAbort=useRef<AbortController|null>(null);
+  useEffect(()=>{sourcesRequest.current++;sourcesAbort.current?.abort();setSourcesDialog(null);},[project?.id]);
   const [contentsDialog, setContentsDialog] = useState<{
     origin: EditorHandle;
     identity: string;
@@ -574,6 +590,41 @@ export default function App() {
   } | null>(null);
   const targetEditor = () =>
     writingFocus ? bookEditor.current : editor.current;
+  const citationProjectSignature=(value:Project)=>JSON.stringify([value.id,value.book,value.clips,value.settings.citationStyle]);
+  const applyCitationProject=(draft:Project,snapshot:Project)=>{draft.book=snapshot.book;draft.clips=snapshot.clips;draft.settings.citationStyle=snapshot.settings.citationStyle||'apa';};
+  const sourcesAction=async(action:'insert'|'bibliography'|'update',style:CitationStyle,items:CitationItem[]=[],title='References',entryStyle:string|null=null,sources:CitationSource[]=[])=>{
+    if(!sourcesDialog)throw new Error('Open Sources again.');
+    const request=++sourcesRequest.current,{origin,identity,projectId}=sourcesDialog;
+    sourcesAbort.current?.abort();const abort=new AbortController();sourcesAbort.current=abort;
+    if(origin.getIdentity()!==identity)throw new Error('The document changed. Open Sources again.');
+    let snapshot:Project|undefined;change(draft=>{snapshot=structuredClone(draft);});
+    if(!snapshot||snapshot.id!==projectId)throw new Error('The document is no longer open.');
+    const current=snapshot.book?.chapters.find(chapter=>identity===`${projectId}:${chapter.id}:formatted`);
+    if(!current)throw new Error('Select a chapter in Write before opening Sources.');
+    const before=citationProjectSignature(snapshot);
+    const bibliography={type:'bibliography',attrs:{blockId:'block_'+crypto.randomUUID(),title,entryStyle,entryIds:[],renderedStyle:style},content:[{type:'paragraph'}]};
+    const preparedCitation=action==='insert'?origin.prepareCitation({type:'citation',attrs:{items,renderedStyle:style},content:[{type:'text',text:'[Citation]'}]}):null;
+    const preparedBibliography=action==='bibliography'?origin.prepareContents(bibliography):null;
+    if(action!=='update'&&!preparedCitation&&!preparedBibliography)throw new Error('The document is unavailable.');
+    current.document=preparedCitation?.document||preparedBibliography?.document||current.document;
+    if(action==='update')for(const chapter of snapshot.book?.chapters||[])chapter.document=replaceCitationSources(chapter.document,new Map(sources.map(source=>[source.id,source])));
+    snapshot.settings.citationStyle=style;
+    await refreshProjectCitations(snapshot,abort.signal);
+    let unchanged=false;change(draft=>{unchanged=citationProjectSignature(draft)===before;});
+    if(request!==sourcesRequest.current)return;
+    if(!unchanged||origin.getIdentity()!==identity)throw new Error('The document changed while citations were formatting. Try again.');
+    const commit=(document:DocNode,text:string)=>{current.document=document;current.text=text;change(draft=>applyCitationProject(draft,snapshot!));};
+    if(preparedCitation){if(!preparedCitation.apply(current.document,commit))throw new Error('The citation could not be applied. Check the current review settings and reopen Sources.');}
+    else if(preparedBibliography){const find=(node:DocNode):DocNode|undefined=>node.attrs?.blockId===bibliography.attrs.blockId?node:node.content?.map(find).find(Boolean);const generated=find(current.document);if(!generated||!preparedBibliography.apply(generated,commit,current.document))throw new Error('The bibliography could not be applied. Reopen Sources.');}
+    else change(draft=>applyCitationProject(draft,snapshot!));
+  };
+  const refreshCitationsBeforeSave=async()=>{
+    let snapshot:Project|undefined;change(draft=>{snapshot=structuredClone(draft);});if(!snapshot)return;
+    const before=citationProjectSignature(snapshot);await refreshProjectCitations(snapshot);
+    if(citationProjectSignature(snapshot)===before)return;
+    let applied=false;change(draft=>{if(citationProjectSignature(draft)===before){applyCitationProject(draft,snapshot!);applied=true;}});
+    if(!applied)throw new Error('The document changed while citations were formatting. Save again.');
+  };
   const openLink = (inWrite: boolean) => {
     const origin = inWrite ? bookEditor.current : editor.current;
     if (!origin || !project) return;
@@ -619,6 +670,16 @@ export default function App() {
       if (origin)
         setFieldDialog({ origin, identity, source: origin.getText() });
     };
+    const openMailMerge=(event:Event)=>{
+      const identity=(event as CustomEvent<{identity:string}>).detail.identity,origin=bookEditor.current;
+      if(!project||origin?.getIdentity()!==identity)return;
+      void (async()=>{
+        await flush();
+        const saved=await api<Project>(`/api/projects/${project.id}`);
+        if(origin.getIdentity()===identity)setMailMergeDialog({project:saved,origin,identity,source:origin.getText()});
+      })().catch(cause=>setError((cause as Error).message));
+    };
+    window.addEventListener('alder-mail-merge',openMailMerge);
     const open = (event: Event) => {
       if (!project) return;
       const identity = (event as CustomEvent<{ identity: string }>).detail
@@ -648,6 +709,7 @@ export default function App() {
         const signature = (p: Project) =>
           JSON.stringify([p.id, p.name, p.book, p.clips, p.styles, p.settings]);
         const before = signature(snapshot);
+        await refreshProjectCitations(snapshot);
         updateProjectReferences(snapshot);
         let pages: PageReferenceValues | undefined;
         if (hasPageReferences(snapshot)) {
@@ -662,6 +724,7 @@ export default function App() {
         let applied = false;
         change((draft) => {
           if (signature(draft) !== before) return;
+          applyCitationProject(draft,snapshot!);
           updateProjectReferences(draft);
           if (pages) {
             updatePageReferences(draft, pages);
@@ -681,10 +744,12 @@ export default function App() {
         event as CustomEvent<{ projectId: string; target: string }>
       ).detail;
       if (!project || project.id !== detail.projectId) return;
-      const item = projectReferenceIndex(
+      const index = projectReferenceIndex(
         project,
         content?.document,
-      ).targets.get(detail.target);
+      );
+      const entry=index.indexEntries.find(entry=>entry.id===detail.target);
+      const item=index.targets.get(detail.target)||(entry?{id:entry.id,chapter:entry.chapter,valid:true}:undefined);
       if (!item?.valid) {
         setHint("This reference target is no longer available.");
         return;
@@ -704,6 +769,17 @@ export default function App() {
       if (detail.projectId === project?.id)
         openRunningMatter(detail.sectionId, detail.part);
     };
+    const openSources=(event:Event)=>{const identity=(event as CustomEvent<{identity:string}>).detail.identity;const origin=bookEditor.current;if(project&&origin?.getIdentity()===identity)setSourcesDialog({origin,identity,initial:origin.citationSelection(),projectId:project.id});};
+    window.addEventListener('alder-sources-dialog',openSources);
+    const openAccessibility=(event:Event)=>{
+      const {identity,document}=(event as CustomEvent<{identity:string;document:DocNode}>).detail;
+      const origin=[bookEditor.current,editor.current].find(value=>value?.getIdentity()===identity);
+      if(!project||!origin)return;
+      const writing=origin===bookEditor.current;
+      const sources=writing?projectAccessibilitySources(project).map(source=>source.chapterId===chapter?.id?{...source,document}:source):[{document,title:'Sandbox draft'}];
+      setAccessibilityDialog({origin,identity,projectId:project.id,scope:writing?'Included document content':'Current Sandbox draft',issues:accessibilityIssues(sources,writing?project.settings.runningMatter:undefined)});
+    };
+    window.addEventListener('alder-accessibility-check',openAccessibility);
     window.addEventListener("alder-running-matter", openRunning);
     window.addEventListener("alder-reference-dialog", open);
     window.addEventListener("alder-field-dialog", openField);
@@ -711,6 +787,9 @@ export default function App() {
     window.addEventListener("alder-update-references", update);
     window.addEventListener("alder-reference-navigate", navigate);
     return () => {
+      window.removeEventListener('alder-mail-merge',openMailMerge);
+      window.removeEventListener('alder-sources-dialog',openSources);
+      window.removeEventListener('alder-accessibility-check',openAccessibility);
       window.removeEventListener("alder-reference-dialog", open);
       window.removeEventListener("alder-running-matter", openRunning);
       window.removeEventListener("alder-field-dialog", openField);
@@ -718,12 +797,14 @@ export default function App() {
       window.removeEventListener("alder-update-references", update);
       window.removeEventListener("alder-reference-navigate", navigate);
     };
-  }, [project, content, change]);
+  }, [project, content, chapter?.id, change, flush]);
   const proofreading = useProofreading(
     activeContent?.text,
     `${project?.id || ""}:${writingFocus ? "chapter:" + chapter?.id : "clip:" + clip?.id + ":" + clip?.activeVariantId}`,
     project,
     flush,
+    activeContent?.document,
+    writingFocus ? project?.language : clip?.language || project?.language,
   );
   const analysis = proofreading.result;
   const [proofreadingOpen, setProofreadingOpen] = useState(false);
@@ -1056,6 +1137,7 @@ export default function App() {
   };
   const saveProject = async (mode: "save" | "saveAs" | "copy" = "save") => {
     if (!project) return;
+    await refreshCitationsBeforeSave();
     await flush();
     if (window.alder?.saveDocument) {
       const format = ["txt", "docx"].includes(project.settings.documentKind)
@@ -1566,6 +1648,7 @@ export default function App() {
     setBusy(`Building ${format.toUpperCase()}…`);
     setExportResult(null);
     try {
+      await refreshCitationsBeforeSave();
       await flush();
       const result = await api(`/api/projects/${project.id}/export`, "POST", {
         format,
@@ -1591,6 +1674,12 @@ export default function App() {
     if (!target) return;
     imageDestination.current = { book, identity: target.getIdentity() };
     imageFile.current?.click();
+  };
+  const collectStoryImage = async (file:File) => {
+    if(!project)throw new Error('Open a document before collecting an image.');
+    const projectId=project.id,asset=await upload(`/api/projects/${projectId}/assets?register=false`,file);
+    change(draft=>{if(draft.id!==projectId)throw new Error('The active document changed while the image was loading.');draft.assets.push(asset);});
+    await flush();return asset;
   };
   const onImage = async (file: File) => {
     if (!project) return;
@@ -2002,12 +2091,8 @@ export default function App() {
             {
               label: "Chapter",
               action: () => {
-                const c = newChapter(
-                  `Chapter ${(project.book?.chapters.length || 0) + 1}`,
-                );
-                change((p) => p.book!.chapters.push(c));
-                setChapterId(c.id);
                 setView("Write");
+                window.dispatchEvent(new Event('alder-add-chapter'));
               },
             },
           ]
@@ -2306,6 +2391,7 @@ export default function App() {
                 .catch((e) => setError(e.message))
             }
             onImage={() => chooseImage(true)}
+            onCollectImage={collectStoryImage}
             onLink={() => openLink(true)}
             onRead={(c) =>
               void run(() => startSpeech(undefined, "selection", c.text))
@@ -2621,6 +2707,7 @@ export default function App() {
                     </label>
                   </aside>
                   <Editor
+                    language={clip.language || project.language}
                     key={project.id}
                     review={{
                       tracking: project.settings.trackChanges === true,
@@ -2704,6 +2791,7 @@ export default function App() {
                     showStructure={structure}
                     onToggleStructure={() => setStructure((v) => !v)}
                     onImage={() => chooseImage(false)}
+                    onCollectImage={collectStoryImage}
                     onComplete={() => {
                       api<{ suggestions: string[] }>(
                         `/api/complete?prefix=${encodeURIComponent(word)}&projectId=${project.id}`,
@@ -3585,6 +3673,15 @@ export default function App() {
           }}
         />
       )}
+      {sourcesDialog&&project&&sourcesDialog.projectId===project.id&&<SourcesDialog initial={sourcesDialog.initial?.attrs?.items} style={project.settings.citationStyle||'apa'} styles={project.styles} documentSources={(project.book?.chapters||[]).flatMap(chapter=>documentCitationSources(chapter.document))} onClose={()=>{sourcesRequest.current++;sourcesAbort.current?.abort();const {origin,identity}=sourcesDialog;setSourcesDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}} onInsert={(items,style)=>sourcesAction('insert',style,items)} onBibliography={(title,entryStyle,style)=>sourcesAction('bibliography',style,[],title,entryStyle)} onUpdate={(sources,style)=>sourcesAction('update',style,[],undefined,undefined,sources)}/>}
+      {accessibilityDialog&&project?.id===accessibilityDialog.projectId&&<AccessibilityDialog issues={accessibilityDialog.issues} scope={accessibilityDialog.scope} onClose={()=>{const {origin,identity}=accessibilityDialog;setAccessibilityDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}} onGo={issue=>{
+        const {origin,identity}=accessibilityDialog;
+        setAccessibilityDialog(null);
+        if(issue.story){openRunningMatter(issue.sectionId,issue.story,issue.variant);return;}
+        const jump=(target:EditorHandle)=>target.accessibilityTarget(issue.blockId||issue.noteId||'',issue.noteId);
+        if(issue.chapterId)withOutlineEditor(issue.chapterId,jump);
+        else if(origin.getIdentity()===identity)jump(origin);
+      }}/>}
       {contentsDialog && project && (
         <ContentsDialog
           initial={
@@ -3675,10 +3772,27 @@ export default function App() {
       {runningDialog && project && project.id === runningDialog.projectId && (
         <RunningMatterDialog
           project={project}
+          onCollect={async (file) => {
+            const projectId = project.id;
+            const asset = await upload(
+              `/api/projects/${projectId}/assets?register=false`,
+              file,
+            );
+            change((draft) => {
+              if (draft.id !== projectId)
+                throw new Error(
+                  "The active document changed while the image was loading.",
+                );
+              draft.assets.push(asset);
+            });
+            await flush();
+            return asset;
+          }}
           initial={runningDialog.initial}
           previous={runningDialog.previous}
           section={!!runningDialog.sectionId}
           initialPart={runningDialog.part}
+          initialVariant={runningDialog.variant}
           onClose={() => {
             setRunningDialog(null);
             requestAnimationFrame(() => bookEditor.current?.focus());
@@ -3710,6 +3824,21 @@ export default function App() {
           }}
         />
       )}
+      {mailMergeDialog && project?.id===mailMergeDialog.project.id && <MailMergeDialog project={mailMergeDialog.project} schema={editorSchema}
+        onClose={()=>{const {origin,identity}=mailMergeDialog;setMailMergeDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}}
+        onInsert={name=>{
+          const {origin,identity,source}=mailMergeDialog;
+          if(origin.getIdentity()!==identity||origin.getText()!==source)throw new Error('The source changed. Open Mail merge again.');
+          origin.field('merge',`«${name}»`,name);setMailMergeDialog(null);
+        }}
+        onCreate={async(rows,mapping,records)=>{
+          const {project:snapshot,origin,identity}=mailMergeDialog;
+          if(origin.getIdentity()!==identity)throw new Error('The source changed. Open Mail merge again.');
+          const result=await api<{projects:{id:string;name:string}[]}>(`/api/projects/${snapshot.id}/mail-merge`,'POST',{rows,mapping,records,expectedRevision:snapshot.revision});
+          return result.projects;
+        }}
+        onOpen={async id=>{const next=await api<Project>(`/api/projects/${id}`);await load(next);setMailMergeDialog(null);}}
+      />}
       {fieldDialog && project && (
         <FieldDialog
           project={project}
@@ -3762,7 +3891,9 @@ export default function App() {
               const value = values.fields?.[prepared.fieldId];
               if (value == null)
                 throw new Error(
-                  isHeadingField(kind) ? "No matching heading was found. Add a heading at this level and include its chapter before inserting this field." : "This field is outside the included publication. Include its chapter before inserting it.",
+                  isHeadingField(kind)
+                    ? "No matching heading was found. Add a heading at this level and include its chapter before inserting this field."
+                    : "This field is outside the included publication. Include its chapter before inserting it.",
                 );
               if (!unchanged || !prepared.apply(value))
                 throw new Error(
@@ -4016,6 +4147,8 @@ export default function App() {
                       },
                       { format: "html", label: "HTML", sub: "Styled document" },
                       { format: "docx", label: "Word", sub: ".docx document" },
+                      { format: "odt", label: "OpenDocument", sub: ".odt document" },
+                      { format: "rtf", label: "Rich text", sub: ".rtf document" },
                       { format: "pdf", label: "PDF", sub: "Fixed pages" },
                       {
                         format: "epub",

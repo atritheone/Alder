@@ -53,7 +53,7 @@ export class DocumentFiles {
           !binding ||
           typeof binding.path !== "string" ||
           !path.isAbsolute(binding.path) ||
-          !["alder", "docx", "txt", "md"].includes(binding.format) ||
+          !["alder", "docx", "odt", "rtf", "txt", "md"].includes(binding.format) ||
           typeof binding.digest !== "string" ||
           !/^[a-f0-9]{64}$/.test(binding.digest) ||
           typeof binding.direct !== "boolean"

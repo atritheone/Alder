@@ -8,6 +8,11 @@ import {
 import type { PageLayout, FlowPage } from "./pageFlow";
 import { validNumberFormat, type PageNumberFormat } from "./pageNumbering";
 import { validRunningMatter, type RunningMatter } from "./runningMatter";
+import { validColumns, columnMeasurement } from "./columns";
+import { validPageBorder } from "./pageBorder";
+import { validWatermark } from "./watermark";
+import { validLineNumbering } from "./lineNumbering";
+import { validNoteOptions, type NoteOptions } from "./noteOptions";
 
 export type SectionSettings = {
   kind: "nextPage" | "continuous" | "oddPage" | "evenPage";
@@ -15,6 +20,7 @@ export type SectionSettings = {
   numberingStart?: number | null;
   numberingFormat?: PageNumberFormat | null;
   runningMatter?: RunningMatter | null;
+  noteOptions?: NoteOptions | null;
 };
 export const sectionBreakSpec: NodeSpec = {
   atom: true,
@@ -25,6 +31,7 @@ export const sectionBreakSpec: NodeSpec = {
     numberingStart: { default: null },
     numberingFormat: { default: null },
     runningMatter: { default: null },
+    noteOptions: { default: null },
   },
   toDOM: (node) => [
     "div",
@@ -36,6 +43,7 @@ export const sectionBreakSpec: NodeSpec = {
         numberingStart: node.attrs.numberingStart,
         numberingFormat: node.attrs.numberingFormat,
         runningMatter: node.attrs.runningMatter,
+        noteOptions: node.attrs.noteOptions,
       }),
       "aria-label": "Section break",
     },
@@ -60,7 +68,8 @@ export const sectionBreakSpec: NodeSpec = {
 export function validSection(value: unknown): value is SectionSettings {
   if (!value || typeof value !== "object") return false;
   const v = value as SectionSettings;
-  if (!validRunningMatter(v.runningMatter,true))return false;
+  if (!validRunningMatter(v.runningMatter, true)) return false;
+  if (!validNoteOptions(v.noteOptions)) return false;
   if (
     v.numberingStart != null &&
     (!Number.isInteger(v.numberingStart) ||
@@ -79,18 +88,28 @@ export function validSection(value: unknown): value is SectionSettings {
     return false;
   if (pageGeometry(v.page).adjusted) return false;
   return Object.entries(v.page).every(([key, value]) =>
-    key === "pageSize"
-      ? ["A4", "A5", "Letter", "Legal", "6x9", "Custom"].includes(String(value))
-      : key === "orientation"
-        ? ["portrait", "landscape"].includes(String(value))
-        : /^(pageWidthMm|pageHeightMm|marginMm|marginTopMm|marginRightMm|marginBottomMm|marginLeftMm|gutterMm)$/.test(
-            key,
-          ) &&
-          typeof value === "number" &&
-          Number.isFinite(value) &&
-          (key.startsWith("page")
-            ? value >= 50 && value <= 1000
-            : value >= 0 && value <= (key === "gutterMm" ? 50 : 100)),
+    key === "lineNumbering"
+      ? validLineNumbering(value)
+      : key === "watermark"
+        ? validWatermark(value)
+        : key === "pageBorder"
+          ? validPageBorder(value)
+          : key === "columns"
+            ? validColumns(value, v.page)
+            : key === "pageSize"
+              ? ["A4", "A5", "Letter", "Legal", "6x9", "Custom"].includes(
+                  String(value),
+                )
+              : key === "orientation"
+                ? ["portrait", "landscape"].includes(String(value))
+                : /^(pageWidthMm|pageHeightMm|marginMm|marginTopMm|marginRightMm|marginBottomMm|marginLeftMm|gutterMm)$/.test(
+                    key,
+                  ) &&
+                  typeof value === "number" &&
+                  Number.isFinite(value) &&
+                  (key.startsWith("page")
+                    ? value >= 50 && value <= 1000
+                    : value >= 0 && value <= (key === "gutterMm" ? 50 : 100)),
   );
 }
 export function settingsForLayout(layout: PageLayout): PageSettings {
@@ -105,13 +124,30 @@ export function settingsForLayout(layout: PageLayout): PageSettings {
     marginRightMm: mm(margins.right),
     marginBottomMm: mm(margins.bottom),
     marginLeftMm: mm(margins.left),
+    ...(layout.columns ? { columns: layout.columns } : {}),
+    ...(layout.pageBorder !== undefined
+      ? { pageBorder: layout.pageBorder }
+      : {}),
+    ...(layout.watermark !== undefined ? { watermark: layout.watermark } : {}),
+    ...(layout.lineNumbering !== undefined
+      ? { lineNumbering: layout.lineNumbering }
+      : {}),
   };
 }
 export function sectionLayout(
   base: PageLayout,
   page: PageSettings,
 ): PageLayout {
-  return { ...base, ...screenPageGeometry(page) };
+  if (base.columnSource)
+    return columnMeasurement(sectionLayout(base.columnSource, page));
+  return {
+    ...base,
+    ...screenPageGeometry(page),
+    columns: page.columns,
+    pageBorder: page.pageBorder,
+    watermark: page.watermark,
+    lineNumbering: page.lineNumbering,
+  };
 }
 export function documentCanvasWidth(
   doc: PMNode | undefined,

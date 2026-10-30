@@ -1,6 +1,7 @@
 import type { NodeSpec } from "prosemirror-model";
 import { mediaUrl } from "./api";
 import { croppedImageSource, cropFromDOM } from "./imageCrop";
+import { imageWrapping, imageWrapStyle } from "./imageWrapping";
 
 /** Both placements share authored properties; only their place in the tree differs. */
 export function imageSpec(inline: boolean, portable = false): NodeSpec {
@@ -19,6 +20,8 @@ export function imageSpec(inline: boolean, portable = false): NodeSpec {
       align: { default: "left" },
       blockId: { default: null },
       crop: { default: null },
+      wrap: { default: "none" },
+      wrapGap: { default: 12 },
     },
     parseDOM: [
       {
@@ -30,6 +33,18 @@ export function imageSpec(inline: boolean, portable = false): NodeSpec {
               dom.parentElement?.tagName === "FIGURE");
           if (inline === block) return false;
           return {
+            wrap: ["left", "right"].includes(
+              dom.getAttribute("data-image-wrap") || "",
+            )
+              ? dom.getAttribute("data-image-wrap")
+              : "none",
+            wrapGap: Math.max(
+              0,
+              Math.min(
+                192,
+                Number(dom.getAttribute("data-image-wrap-gap") ?? 12) || 0,
+              ),
+            ),
             blockId: /^[A-Za-z0-9_.-]{1,128}$/.test(
               dom.getAttribute("data-object-id") || "",
             )
@@ -62,6 +77,7 @@ export function imageSpec(inline: boolean, portable = false): NodeSpec {
     ],
     toDOM: (node) => {
       const a = node.attrs;
+      const wrapping = imageWrapping(a);
       const source = croppedImageSource(a.src, a.crop);
       const image: [string, Record<string, unknown>] = [
         "img",
@@ -81,11 +97,18 @@ export function imageSpec(inline: boolean, portable = false): NodeSpec {
           "data-image-title": a.decorative ? a.title : null,
           "data-image-decorative": a.decorative ? "true" : null,
           "data-image-placement": inline ? "inline" : "block",
+          "data-image-wrap": wrapping.side === "none" ? null : wrapping.side,
+          "data-image-wrap-gap": wrapping.side === "none" ? null : wrapping.gap,
           width: a.width,
           style:
-            a.width && Number.isFinite(Number(a.width))
-              ? `width:${Number(a.width)}px`
-              : null,
+            [
+              a.width && Number.isFinite(Number(a.width))
+                ? `width:${Number(a.width)}px`
+                : "",
+              inline ? imageWrapStyle(a) : "",
+            ]
+              .filter(Boolean)
+              .join(";") || null,
           "data-asset-id": a.assetId,
           "data-image-align": a.align,
         },

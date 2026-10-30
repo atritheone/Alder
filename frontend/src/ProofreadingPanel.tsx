@@ -108,7 +108,9 @@ export default function ProofreadingPanel({
               aria-label="Proofreading dialect"
               value={
                 project.settings.proofreadingDialect ||
-                (project.language === "en" ? "en-GB" : project.language)
+                (["en-AU", "en-GB", "en-US"].includes(project.language)
+                  ? project.language
+                  : "en-GB")
               }
               onChange={(e) =>
                 change((p) => {
@@ -121,6 +123,10 @@ export default function ProofreadingPanel({
               <option value="en-US">US</option>
             </select>
           </label>
+          <p className="muted">
+            Paragraph and style languages determine which local rules are used.
+            Unsupported languages are reported as unchecked.
+          </p>
           <label>
             <input
               type="checkbox"

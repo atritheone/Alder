@@ -177,8 +177,45 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     def projects():
         return {"projects": store.list_projects()}
 
+    from .citation_sources import CitationSources
+    source_library = CitationSources(store)
+
+    @app.get('/api/citation-sources')
+    def citation_sources():
+        return {'sources':source_library.list()}
+
+    @app.post('/api/citation-sources')
+    async def save_citation_source(request: Request):
+        data = await body(request)
+        return await run_in_threadpool(source_library.save, data.get('source'), data.get('revision'))
+
+    @app.post('/api/citation-sources/import')
+    async def import_citation_sources(request: Request):
+        data = await body(request)
+        return await run_in_threadpool(source_library.import_items, data.get('items'))
+
+    @app.post('/api/citation-sources/{identity}/remove')
+    async def remove_citation_source(identity: str, request: Request):
+        data = await body(request)
+        return await run_in_threadpool(source_library.remove, identity, data.get('revision'))
+
     from .templates import Templates
     templates = Templates(store)
+
+    @app.get('/api/stationery')
+    def stationery_templates():
+        from .stationery import PRESETS
+        return {'presets': PRESETS}
+
+    @app.post('/api/stationery/{identity}/create')
+    async def create_stationery_document(identity: str, request: Request):
+        from .stationery import create_stationery
+        data = await body(request)
+        try:
+            project = create_stationery(identity, data.get('name'))
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return await run_in_threadpool(store.insert, project)
 
     @app.get('/api/document-templates')
     def document_templates():
@@ -243,6 +280,17 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     def history(project_id: str):
         return store.history_status(project_id)
 
+    @app.post('/api/mail-merge/csv')
+    async def mail_merge_csv(request: Request):
+        from .mail_merge import read_csv
+        data=await body(request)
+        return await run_in_threadpool(read_csv,data.get('text'),data.get('delimiter',','))
+
+    @app.post('/api/projects/{project_id}/mail-merge')
+    async def mail_merge_create(project_id: str, request: Request):
+        from .mail_merge import create_documents
+        return await run_in_threadpool(create_documents,store,project_id,await body(request))
+
     @app.get("/api/projects/{project_id}/versions")
     def versions(project_id: str):
         return store.versions(project_id)
@@ -281,6 +329,12 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     @app.get("/api/language/capabilities")
     def language_capabilities():
         return language.capabilities()
+
+    @app.post('/api/hyphenation')
+    def hyphenate(payload: dict):
+        from .hyphenation import break_words
+        try:return break_words(payload)
+        except ValueError as exc:raise HTTPException(status_code=422,detail=str(exc)) from exc
 
     @app.get("/api/proofreading/capabilities")
     def proofreading_capabilities():
@@ -380,6 +434,13 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             raise HTTPException(422, str(exc)) from exc
         finally:
             Path(file_path).unlink(missing_ok=True)
+        if imported.get('chapters') and not p.get('book'):
+            # Existing legacy prose remains in order when a structured book is
+            # imported. Only the untouched blank-project placeholder is omitted.
+            existing=publication().project_document(p)
+            empty_placeholder=len(existing)==1 and len(existing[0]['blocks'])==1 and existing[0]['blocks'][0].get('type')=='paragraph' and not existing[0]['blocks'][0].get('content') and existing[0].get('title')=='Section 1'
+            chapters=[] if empty_placeholder else [{'id':uid('chapter_'),'title':section.get('navigationTitle') or section.get('title') or 'Untitled chapter','role':section.get('role','chapter'),'matter':section.get('matter'),'showTitle':section.get('showTitle',True),'document':{'type':'doc','content':section['blocks'] or [{'type':'paragraph'}]},'include':True,'voiceId':None} for section in existing]
+            p['book']={'version':1,'chapters':chapters}
         for asset in imported.get("assets", []):
             raw = base64.b64decode(asset["data"], validate=True)
             saved = await run_in_threadpool(store.store_asset, project_id, asset["name"], raw, asset.get("mime"), asset.get("id"))
@@ -398,8 +459,11 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         p["placements"].append({"id": uid("placement_"), "clipId": clip_id, "sectionId": section["id"],
                                 "order": max((x["order"] for x in p["placements"] if x["sectionId"] == section["id"]), default=-1) + 1})
         p["lastImport"] = {"name": file.filename, "warnings": imported.get("warnings", []), "clipId": clip_id, "createdAt": now(), **({"pageSettings": imported["settings"]} if imported.get("settings") else {})}
+        if imported.get('chapters'):p['lastImport']['bookStructure']=True
         if p.get("book"):
-            p["book"]["chapters"].append({"id": uid("chapter_"), "title": imported.get("title") or Path(file.filename).stem,
+            if imported.get('chapters'):
+                p['book']['chapters'].extend({**chapter,'id':uid('chapter_'),'include':True,'voiceId':None} for chapter in imported['chapters'])
+            else:p["book"]["chapters"].append({"id": uid("chapter_"), "title": imported.get("title") or Path(file.filename).stem,
                 "document": p["clips"][-1]["document"], "text": "", "include": True, "role": "chapter", "voiceId": None, **({"rawSource":imported["rawSource"], "rawFormat":imported["rawFormat"]} if imported.get("rawSource") else {})})
         return await run_in_threadpool(store.update, project_id, p, p["revision"])
 
@@ -458,7 +522,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             raise ValidationError('The rendered document does not match its frozen publication snapshot.')
         data = await file.read(100 * 1024 * 1024 + 1)
         try:
-            validation = await run_in_threadpool(validate_rendered_pdf, data, details.get('pages'))
+            validation = await run_in_threadpool(validate_rendered_pdf, data, details.get('pages'), details.get('tagged') is True)
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         renderer_warnings = details.get('warnings', [])
@@ -481,6 +545,8 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     async def export(project_id: str, request: Request):
         data = await body(request)
         p = store.get(project_id)
+        if data.get('expectedRevision') is not None and data['expectedRevision'] != p['revision']:
+            raise HTTPException(409, 'The document changed during export preparation. Export the current version again.')
         export_id = uid("export_")
         directory = store.data_dir / "exports" / export_id
         directory.mkdir(parents=True)

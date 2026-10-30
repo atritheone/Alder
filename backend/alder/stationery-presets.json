@@ -1,0 +1,5 @@
+[
+  {"id":"envelope-dl","name":"Envelope · DL","paper":[220,110],"margins":[10,15,10,15],"columns":[80,110],"rows":[35,45],"fields":[["Return address",null],[null,"Delivery address"]]},
+  {"id":"envelope-c5","name":"Envelope · C5","paper":[229,162],"margins":[15,15,15,15],"columns":[85,114],"rows":[50,65],"fields":[["Return address",null],[null,"Delivery address"]]},
+  {"id":"labels-a4-21","name":"Labels · A4 · 21 per sheet","paper":[210,297],"margins":[15.15,7.25,10,7.25],"columns":[63.5,2.5,63.5,2.5,63.5],"rows":[38.1,38.1,38.1,38.1,38.1,38.1,38.1],"labelColumns":[0,2,4]}
+]

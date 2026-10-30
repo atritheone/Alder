@@ -21,11 +21,15 @@ export default function InsertTableDialog({
       className="word-dialog"
       ref={dialog}
       aria-label="Insert table"
-      onCancel={onClose}
+      onCancel={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
     >
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          e.stopPropagation();
           onInsert(rows, columns);
         }}
       >

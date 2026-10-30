@@ -11,6 +11,7 @@ import {
 import "./styles-manager.css";
 import ParagraphAppearanceFields from "./ParagraphAppearanceFields";
 import TabStopsEditor from "./TabStopsEditor";
+import HyphenationFields from "./HyphenationFields";
 
 type Props = {
   project: Project;
@@ -497,6 +498,7 @@ export default function StylesManager({
                 {(
                   [
                     ["keepWithNext", "Keep with next paragraph"],
+                    ['suppressLineNumbers','Suppress line numbers'],
                     ["keepTogether", "Keep lines together"],
                     ["widowOrphan", "Widow and orphan control"],
                     ["pageBreakBefore", "Page break before"],
@@ -642,9 +644,15 @@ export default function StylesManager({
               onChange={(patch) => setEditing({ ...editing, ...patch })}
             />
           )}
+          {editing.kind !== "character" && (
+            <HyphenationFields
+              value={editing}
+              onChange={(patch) => setEditing({ ...editing, ...patch })}
+            />
+          )}
           <div className="style-preview">
             <small>Style preview</small>
-            <p style={preview}>
+            <p style={preview} dir={resolved?.textDirection||undefined} lang={resolved?.textLanguage||undefined}>
               The words found their shape in the quiet of the morning.
             </p>
           </div>

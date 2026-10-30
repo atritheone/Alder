@@ -1,9 +1,12 @@
 import { pageInsets } from "./pageGeometry";
+import { mirroredPageLayout } from "./mirroredMargins";
 import type { PageLayout } from "./pageFlow";
 import { memo } from "react";
 import { formatPageNumber } from "./pageNumbering";
 import type { Schema } from "prosemirror-model";
 import { runningMatterDOM } from "./runningMatter";
+import { pageBorderDOM } from "./pageBorder";
+import { watermarkDOM } from './watermark';
 
 const fittedHeaders = new Map<string, string>();
 if (typeof document !== "undefined")
@@ -78,6 +81,7 @@ export const PageFurniture = memo(function PageFurniture({
   pageCount: number;
   fontVersion?: number;
 }) {
+  layout = mirroredPageLayout(layout, page);
   if (layout.runningMatter)
     return (
       <div
@@ -85,13 +89,16 @@ export const PageFurniture = memo(function PageFurniture({
         aria-hidden="true"
         style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
         dangerouslySetInnerHTML={{
-          __html: runningMatterDOM(
-            layout,
-            page,
-            pageCount,
-            schema,
-            layout.runningStyles,
-          ).innerHTML,
+          __html:
+            (watermarkDOM(layout)?.outerHTML || '') +
+            (pageBorderDOM(layout, page)?.outerHTML || "") +
+            runningMatterDOM(
+              layout,
+              page,
+              pageCount,
+              schema,
+              layout.runningStyles,
+            ).innerHTML,
         }}
       />
     );
@@ -109,6 +116,13 @@ export const PageFurniture = memo(function PageFurniture({
         overflow: "hidden",
       }}
     >
+      <g className="page-watermark" dangerouslySetInnerHTML={{__html:watermarkDOM(layout)?.innerHTML||''}}/>
+      <g
+        className="page-border"
+        dangerouslySetInnerHTML={{
+          __html: pageBorderDOM(layout, page)?.innerHTML || "",
+        }}
+      />
       {items(layout, page).map((item, i) => (
         <text
           key={i}
@@ -132,14 +146,20 @@ export function pageFurnitureDOM(
   schema: Schema,
   pageCount: number,
 ) {
-  if (layout.runningMatter)
-    return runningMatterDOM(
+  layout = mirroredPageLayout(layout, page);
+  if (layout.runningMatter) {
+    const result = runningMatterDOM(
       layout,
       page,
       pageCount,
       schema,
       layout.runningStyles,
     );
+    const border = pageBorderDOM(layout, page);
+    if (border) result.prepend(border);
+    const watermark=watermarkDOM(layout);if(watermark)result.prepend(watermark);
+    return result;
+  }
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("class", "page-furniture");
@@ -148,6 +168,9 @@ export function pageFurnitureDOM(
   svg.setAttribute("height", String(layout.height));
   svg.style.cssText =
     "position:absolute;inset:0;pointer-events:none;user-select:none;overflow:hidden";
+  const border = pageBorderDOM(layout, page);
+  if (border) svg.append(border);
+  const watermark=watermarkDOM(layout);if(watermark)svg.prepend(watermark);
   for (const item of items(layout, page)) {
     const text = document.createElementNS(ns, "text");
     for (const [key, value] of Object.entries({

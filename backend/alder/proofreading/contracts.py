@@ -33,7 +33,9 @@ def configuration(project: dict, supplied: dict | None = None) -> dict:
     if not isinstance(supplied, dict):
         raise ValidationError("Proofreading configuration must be an object.")
     settings = project.get("settings", {})
-    dialect = supplied.get("dialect", settings.get("proofreadingDialect", project.get("language", "en")))
+    fallback=project.get('language','en')
+    if fallback not in DIALECTS:fallback='en-GB'
+    dialect = supplied.get("dialect", settings.get("proofreadingDialect", fallback))
     if dialect == "en":
         dialect = "en-GB"
     if dialect not in DIALECTS:
@@ -50,6 +52,35 @@ def configuration(project: dict, supplied: dict | None = None) -> dict:
         raise ValidationError("The style-check setting must be a boolean.")
     return {"dialect": dialect, "acceptedWords": sorted(set(words)),
             "ignoredRuleIds": sorted(set(ignored)), "style": style}
+
+
+def language_segments(text, ranges, default, selected=None):
+    """Validate UTF-16 language ranges once, then clip without shifting source offsets."""
+    if ranges is None:ranges=[]
+    if not isinstance(ranges,list):raise ValidationError('Proofreading language ranges must be a list.')
+    encoded=text.encode('utf-16-le');length=len(encoded)//2
+    low,high=(selected['start'],selected['end']) if selected else (0,length)
+    result=[];cursor=0
+    def append(start,end,language):
+        start=max(start,low);end=min(end,high)
+        if end<=start:return
+        passage=encoded[start*2:end*2].decode('utf-16-le')
+        if result and result[-1]['language']==language and result[-1]['end']==start:
+            result[-1]['text']+=passage;result[-1]['end']=end
+        else:result.append({'text':passage,'start':start,'end':end,'language':language})
+    try:
+        for row in ranges:
+            if not isinstance(row,dict) or set(row)!={'start','end','language'}:raise ValueError()
+            start,end,language=row['start'],row['end'],row['language']
+            if type(start) is not int or type(end) is not int or not cursor<=start<end<=length:raise ValueError()
+            if not isinstance(language,str) or len(language)>40 or not re.fullmatch(r'[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*',language):raise ValueError()
+            # Check both boundaries even when this range is outside selection.
+            for at in (start,end):
+                if 0<at<length and 0xdc00<=int.from_bytes(encoded[at*2:at*2+2],'little')<=0xdfff:raise ValueError()
+            append(cursor,start,default);append(start,end,language);cursor=end
+        append(cursor,length,default)
+    except (ValueError,UnicodeError) as exc:raise ValidationError('Proofreading languages need ordered, non-overlapping Unicode text ranges.') from exc
+    return result
 
 
 def blocks(text: str):

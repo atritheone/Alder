@@ -87,6 +87,7 @@ class RuleEngine:
         self.port = None
         self.lock = threading.Lock()
         self.cache = OrderedDict()
+        self.languages = {}
 
     def _request(self, method, path, body=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
@@ -115,12 +116,20 @@ class RuleEngine:
         deadline = time.monotonic() + 25
         while time.monotonic() < deadline and self.process and self.process.poll() is None:
             try:
-                self._request("GET", "/v2/languages")
+                languages=self._request("GET", "/v2/languages")
+                self.languages={item.get('longCode',item['code']).lower():item.get('longCode',item['code']) for item in languages}
+                for item in languages:self.languages.setdefault(item['code'].lower(),item['code'])
                 return
             except (OSError, ValueError, RuntimeError, http.client.HTTPException):
                 time.sleep(.1)
         self.close()
         raise RuntimeError("The local grammar engine did not start. Repair the proofreading pack.")
+
+    def resolve_language(self,language):
+        with self.lock:
+            self._start()
+            tag=language.lower()
+            return self.languages.get(tag) or self.languages.get(tag.split('-')[0])
 
     def check(self, text, config):
         key = fingerprint([text, config["dialect"], config["style"]])

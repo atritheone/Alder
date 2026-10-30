@@ -1,3 +1,4 @@
+import { originalPaintProperty } from "./paragraphPaint";
 /** Freeze measured cells for read-only page copies. Native collapsed borders
  * snap differently when Chromium switches from a scaled screen to print. An
  * absolute cell grid avoids accumulating that rounding across hundreds of rows.
@@ -6,6 +7,7 @@ export function freezeTableLayout(
   source: HTMLTableElement,
   target: HTMLTableElement,
   scale: number,
+  originalPaint = false,
 ) {
   const origin = source.getBoundingClientRect();
   const rows = [...source.rows].filter(
@@ -97,7 +99,7 @@ export function freezeTableLayout(
         const paintWidth = outer ? width : width / 2;
         if (paintWidth)
           shadows.push(
-            `inset ${x * paintWidth}px ${y * paintWidth}px 0 ${style.getPropertyValue(`border-${edge}-color`)}`,
+            `inset ${x * paintWidth}px ${y * paintWidth}px 0 ${(originalPaint && originalPaintProperty(original, `border-${edge}-color`)) || style.getPropertyValue(`border-${edge}-color`)}`,
           );
       }
       cell.style.border = "0";

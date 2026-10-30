@@ -3,6 +3,7 @@ import json
 import math
 import re
 from .list_formatting import NUMBER_FORMATS, BULLETS, list_marker
+from .page_numbering import format_page_number
 
 
 def validate_list_template(template):
@@ -26,7 +27,10 @@ def next_label(template,counts,level):
         if template[i]['restart'] and level<template[i]['restart']:counts[i]=None
     def number(match):
         index=int(match[1])-1
-        return list_marker(counts[index] if counts[index] is not None else template[index]['start'],template[index]['format']) if index<=level else ''
+        if index>level:return ''
+        value=counts[index] if counts[index] is not None else template[index]['start']
+        fmt=template[index]['format']
+        return BULLETS[fmt] if fmt in BULLETS else format_page_number(value,NUMBER_FORMATS[fmt])
     return re.sub(r'%([1-9])',number,spec['pattern'])
 
 

@@ -1,5 +1,6 @@
 import type { Node as PMNode } from "prosemirror-model";
-import { projectText } from "./textProjection";
+import { projectText, documentText, selectionOffsets } from "./textProjection";
+import { documentNotes } from "./documentNotes";
 import {
   referenceSpans,
   type TextSpan,
@@ -10,7 +11,34 @@ export type SpeechText = {
   text: string;
   offsets: number[];
   endOffsets: number[];
+  notes?: { id: string; from: number; to: number; offsets: number[] }[];
 };
+export type ReadingRange = {
+  start: number;
+  end: number;
+  note?: { id: string; start: number; end: number };
+};
+export function spokenNoteRange(
+  notes: SpeechText["notes"],
+  from: number,
+  to: number,
+): ReadingRange["note"] {
+  if (!notes?.length) return;
+  let low = 0,
+    high = notes.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (notes[mid].to <= from) low = mid + 1;
+    else high = mid;
+  }
+  const note = notes[low];
+  if (note && from >= note.from && to <= note.to)
+    return {
+      id: note.id,
+      start: note.offsets[from - note.from],
+      end: note.offsets[to - note.from],
+    };
+}
 const inputs = new WeakMap<PMNode, Map<string, SpeechText>>();
 const omitted = new WeakMap<PMNode, TextSpan[]>();
 
@@ -48,7 +76,10 @@ export function speechText(
     };
     doc.descendants((node, pos) => {
       const span = { start: offset(pos), end: offset(pos + node.nodeSize) };
-      if (node.type.name === "table_of_contents") { marked.push(span); return false; }
+      if (["table_of_contents", "citation", "bibliography"].includes(node.type.name)) {
+        marked.push(span);
+        return false;
+      }
       if (
         node.type.name === "code_block" ||
         node.marks.some((mark) => mark.type.name === "code")
@@ -104,7 +135,43 @@ export function speechText(
   };
   let i = start,
     spanIndex = 0;
-  while (i < end) {
+  const notes = readReferences
+    ? documentNotes(doc)
+        .map((note) => ({
+          ...note,
+          at: selectionOffsets(doc, note.pos, note.pos).start,
+        }))
+        .filter(
+          (note) =>
+            note.at >= start &&
+            note.at <= end &&
+            (note.at > start || start === 0),
+        )
+    : [];
+  let nextNote = 0;
+  while (i <= end) {
+    while (nextNote < notes.length && notes[nextNote].at === i) {
+      const note = notes[nextNote++],
+        body = documentText(note.value.body);
+      if (!body.trim()) continue;
+      append("\n", i, i);
+      const from = result.offsets.length,
+        offsets = [0];
+      let bodyAt = 0;
+      for (const char of body) {
+        append(char, i, i);
+        bodyAt += char.length;
+        offsets.push(bodyAt);
+      }
+      (result.notes ||= []).push({
+        id: note.id,
+        from,
+        to: result.offsets.length,
+        offsets,
+      });
+      append("\n", i, i);
+    }
+    if (i === end) break;
     while (spans && spanIndex < spans.length && spans[spanIndex].end <= i)
       spanIndex++;
     const span = filter && spans?.[spanIndex];

@@ -20,7 +20,10 @@ def finish(service, identifier, timeout=3):
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, monkeypatch):
+    # These tests intentionally construct absent/damaged packs. A developer's
+    # installed model override must not turn the unit fixture into a real job.
+    monkeypatch.delenv('ALDER_PROOFREADING_RESOURCES', raising=False)
     instance = ProofreadingService(tmp_path / 'resources', tmp_path / 'data')
     yield instance
     instance.shutdown()
@@ -270,9 +273,50 @@ def test_model_checksum_failure_does_not_launch(tmp_path, monkeypatch):
         ModelEngine(resources).check('Test.', configuration({}), lambda: False)
 
 
-def test_malformed_pack_metadata_does_not_stop_alder(tmp_path):
+def test_malformed_pack_metadata_does_not_stop_alder(tmp_path, monkeypatch):
     from alder.proofreading.engines import Resources
+    monkeypatch.delenv('ALDER_PROOFREADING_RESOURCES', raising=False)
     directory = tmp_path / 'proofreading'; directory.mkdir()
     for data in ('[]', '{"model": null}', '{"model": {"file": 3, "sha256": null}}', '{broken'):
         (directory / 'manifest.json').write_text(data)
         assert Resources(tmp_path).capabilities()['model']['available'] is False
+
+def test_language_ranges_preserve_selected_unicode_offsets_and_engine_dialects(service,monkeypatch):
+    monkeypatch.setattr(service.resources,'capabilities',lambda:{'rules':{'available':True},'model':{'available':True}})
+    monkeypatch.setattr(service.rules,'resolve_language',lambda tag:{'fr-FR':'fr','de-DE':'de-DE'}.get(tag))
+    rules=[];model=[]
+    def check(text,config):
+        rules.append((text,config['dialect']))
+        return [diagnostic(text,0,u16(text),'spelling','test','Fix',['changed'],'rules')]
+    monkeypatch.setattr(service.rules,'check',check)
+    monkeypatch.setattr(service.model,'check',lambda text,config,cancelled:model.append((text,config['dialect'])) or text)
+    text='😀 Intro\nBonjour\ncolour\nDeutsch\n日本語\nCITATION'
+    ranges=[]
+    for word,tag in [('Bonjour','fr-FR'),('colour','en-US'),('Deutsch','de-DE'),('日本語','ja'),('CITATION','zxx')]:
+        start=u16(text,text.index(word));ranges.append({'start':start,'end':start+u16(word),'language':tag})
+    request={'text':text,'targetId':'mixed','advanced':True,'languageRanges':ranges,'range':{'start':9,'end':u16(text)}}
+    job=finish(service,service.start(request)['id'])
+    assert rules==[('Bonjour','fr'),('colour','en-US'),('Deutsch','de-DE')]
+    assert model==[('colour','en-US')]
+    assert job['status']=='partial' and any('ja' in w for w in job['warnings'])
+    assert job['coverage']=={'totalBlocks':5,'checkedBlocks':3,'advancedBlocks':1,'skippedBlocks':2}
+    for item in job['annotations']:assert slice16(text,item['start'],item['end'])==item['originalText']
+    request['languageRanges'][0]['language']='de-DE';request['advanced']=False
+    revised=finish(service,service.start(request)['id'])
+    assert revised['sourceHash']==job['sourceHash']
+    assert revised['configurationHash']!=job['configurationHash']
+
+@pytest.mark.parametrize('ranges',[
+    'fr',[{'start':0,'end':1,'language':'fr'}],[{'start':0,'end':3,'language':'fr'},{'start':2,'end':4,'language':'de'}],
+    [{'start':True,'end':3,'language':'fr'}],[{'start':0,'end':3,'language':'invalid_language'}],
+    [{'start':0,'end':50,'language':'fr'}],[{'start':0,'end':3,'language':'fr','x':1}],
+])
+def test_language_ranges_are_validated_before_workers(service,ranges):
+    with pytest.raises(ValidationError):service.start({'text':'😀 Words','targetId':'bad','languageRanges':ranges})
+    assert not service.jobs
+
+def test_missing_pack_does_not_spellcheck_foreign_passages_as_english(service):
+    text='mispelled\nbonjourr\nFRENCH'
+    ranges=[{'start':10,'end':18,'language':'fr'},{'start':19,'end':25,'language':'zxx'}]
+    result=finish(service,service.start({'text':text,'targetId':'a','languageRanges':ranges})['id'])
+    assert [a['originalText'] for a in result['annotations'] if a['type']=='spelling']==['mispelled']

@@ -1,8 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { EditorState } from "prosemirror-state";
 import { schema, parseEditorDocument } from "./Editor";
-import { projectText, projectedRange, wordAtPosition } from "./textProjection";
+import {
+  projectText,
+  projectedRange,
+  wordAtPosition,
+  documentText,
+  generatedTextSpans,
+  intersectsTextSpans,
+} from "./textProjection";
 import type { DocNode } from "./types";
+import type { Node as PMNode } from "prosemirror-model";
 
 const paragraph = (text = ""): DocNode => ({
   type: "paragraph",
@@ -16,6 +24,206 @@ const cell = (text = ""): DocNode => ({
 });
 
 describe("canonical document text and source boundaries", () => {
+  it("keeps every packed boundary identical through mixed structure edits and undo", () => {
+    // Independent recursive reference: concatenate child projections, including
+    // the right-affinity boundary of empty objects and deleted wording.
+    const separated = new Set([
+      "doc",
+      "blockquote",
+      "bullet_list",
+      "ordered_list",
+      "list_item",
+      "table",
+      "table_cell",
+      "table_header",
+    ]);
+    const silent = new Set([
+      "bookmark",
+      "bookmark_end",
+      "document_note",
+      "image",
+      "inline_image",
+      "page_break",
+    ]);
+    const reference = (
+      node: PMNode,
+      position = 0,
+      root = true,
+    ): { text: string; map: number[] } => {
+      if (
+        node.marks.some((mark) => mark.type.name === "revision_deletion") ||
+        silent.has(node.type.name)
+      )
+        return { text: "", map: [position + node.nodeSize] };
+      if (node.isText)
+        return {
+          text: node.text!,
+          map: Array.from(
+            { length: node.text!.length + 1 },
+            (_, i) => position + i,
+          ),
+        };
+      if (node.type.name === "hard_break")
+        return { text: "\n", map: [position, position + 1] };
+      const start = root ? 0 : position + 1,
+        parts: { text: string; map: number[] }[] = [];
+      node.forEach((child, offset) =>
+        parts.push(reference(child, start + offset, false)),
+      );
+      const separator =
+        node.type.name === "table_row"
+          ? "\t"
+          : separated.has(node.type.name)
+            ? "\n"
+            : "";
+      const result = parts.shift() || { text: "", map: [start] };
+      for (const part of parts) {
+        result.text += separator + part.text;
+        if (!separator) result.map.pop();
+        result.map.push(...part.map);
+      }
+      return node.type.name === "text_box"
+        ? {
+            text: "\n" + result.text + "\n",
+            map: [position, ...result.map, position + node.nodeSize],
+          }
+        : result;
+    };
+    let seed = 137;
+    const random = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed;
+    };
+    const atoms: DocNode[] = [
+      { type: "text", text: "A😀e\u0301 ไทย" },
+      { type: "text", text: "marked", marks: [{ type: "strong" }] },
+      { type: "hard_break" },
+      { type: "bookmark", attrs: { name: "point", blockId: "point" } },
+      { type: "text_box", content: [{ type: "text", text: "inside" }] },
+      { type: "inline_image", attrs: { src: "/image" } },
+      {
+        type: "text",
+        text: "deleted",
+        marks: [
+          {
+            type: "revision_deletion",
+            attrs: { id: "change", author: "Author", date: "" },
+          },
+        ],
+      },
+    ];
+    for (let iteration = 0; iteration < 80; iteration++) {
+      const paragraphs: DocNode[] = Array.from({ length: 12 }, () => ({
+        type: "paragraph",
+        content: Array.from(
+          { length: random() % 8 },
+          () => atoms[random() % atoms.length],
+        ),
+      }));
+      const doc = document(
+        paragraphs[0],
+        {
+          type: "table",
+          content: [
+            {
+              type: "table_row",
+              content: paragraphs
+                .slice(1, 5)
+                .map((p) => ({ type: "table_cell", content: [p] })),
+            },
+          ],
+        },
+        {
+          type: "bullet_list",
+          content: paragraphs
+            .slice(5, 9)
+            .map((p) => ({ type: "list_item", content: [p] })),
+        },
+        ...paragraphs.slice(9),
+      );
+      const edited = EditorState.create({ doc }).tr.insertText("new ", 1).doc;
+      for (const value of [doc, edited, doc]) {
+        const actual = projectText(value),
+          expected = reference(value);
+        expect(actual.text).toBe(expected.text);
+        expect([...actual.map]).toEqual(expected.map);
+        expect(actual.map.length).toBe(actual.text.length + 1);
+      }
+    }
+  });
+  it("excludes generated corrections without shifting Unicode, table or note offsets", () => {
+    const doc: DocNode = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "😀 Before " },
+            {
+              type: "document_note",
+              attrs: {
+                body: { type: "doc", content: [paragraph("silent note")] },
+              },
+            },
+            {
+              type: "citation",
+              content: [{ type: "text", text: "(Source, 2020)" }],
+            },
+            { type: "text", text: " after." },
+          ],
+        },
+        {
+          type: "table",
+          content: [
+            {
+              type: "table_row",
+              content: [
+                cell("first"),
+                {
+                  type: "table_cell",
+                  content: [
+                    {
+                      type: "paragraph",
+                      content: [
+                        {
+                          type: "text",
+                          text: "hidden",
+                          marks: [{ type: "revision_deletion" }],
+                        },
+                        {
+                          type: "citation",
+                          content: [{ type: "text", text: "[2]" }],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: "bibliography",
+          content: [paragraph("Sources"), paragraph("Author. Title.")],
+        },
+        paragraph("Last ordinary sentence."),
+      ],
+    };
+    const text = documentText(doc),
+      spans = generatedTextSpans(doc);
+    expect(spans.map(({ start, end }) => text.slice(start, end))).toEqual([
+      "(Source, 2020)",
+      "[2]",
+      "Sources\nAuthor. Title.",
+    ]);
+    expect(generatedTextSpans(doc)).toBe(spans);
+    for (const span of spans) {
+      expect(intersectsTextSpans(spans, span.start, span.end)).toBe(true);
+      expect(intersectsTextSpans(spans, span.end, span.end + 1)).toBe(false);
+    }
+    const start = text.indexOf("ordinary");
+    expect(intersectsTextSpans(spans, start, start + 8)).toBe(false);
+  });
   it("finds the caret word across silent bookmarks and hard breaks", () => {
     const doc = document({
       type: "paragraph",

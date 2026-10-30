@@ -4,6 +4,9 @@ import re
 
 VERSION = 2
 BLOCKS = {
+    "citation", "bibliography",
+    "document_note", "text_box", "form_field", "form_block", "equation",
+    "index_entry", "index_reference",
     "table_of_contents",
     "revision_break",
     "comment_anchor",
@@ -11,7 +14,7 @@ BLOCKS = {
     "paragraph", "heading", "blockquote", "codeBlock", "code_block", "image", "inline_image",
     "bulletList", "bullet_list", "orderedList", "ordered_list", "listItem", "list_item",
     "table", "tableRow", "table_row", "tableCell", "table_cell", "tableHeader", "table_header",
-    "horizontalRule", "horizontal_rule", "pageBreak", "page_break", "section_break",
+    "horizontalRule", "horizontal_rule", "pageBreak", "page_break", "column_break", "section_break",
 }
 
 
@@ -49,6 +52,7 @@ def migrate_project(project):
                 reserved.add(identifier)
             for child in node.get("content", []):
                 reserve(child)
+            if node['type']=='document_note':reserve(node['attrs']['body'])
         reserve(root)
 
         def walk(node, path):
@@ -72,7 +76,7 @@ def migrate_project(project):
                 if identifier and (not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", identifier)):
                     raise ValueError("Invalid document block identity.")
                 old_identifier = identifier
-                destination = node['type'] in ('bookmark', 'heading', 'image', 'inline_image', 'table') or bool(attrs.get('captionLabel'))
+                destination = node['type'] in ('bookmark', 'heading', 'image', 'inline_image', 'table', 'index_entry', 'document_note') or bool(attrs.get('captionLabel'))
                 if not identifier or identifier in occupied or (destination and identifier in bookmark_ids):
                     # Old snapshots and copied subtrees acquire fresh identities;
                     # existing unique identifiers survive moves and normal edits.
@@ -101,12 +105,14 @@ def migrate_project(project):
                 if target:
                     attrs.update(targetId=target[0], name=target[1])
                 range_ends.append(attrs)
-            elif node['type'] == 'cross_reference': fields.append(node['attrs'])
+            elif node['type'] in ('cross_reference','index_reference'): fields.append(node['attrs'])
+            elif node['type']=='index_entry' and node['attrs'].get('rangeId'):fields.append(node['attrs'])
             for mark in node.get('marks',[]):
                 if mark.get('type')=='link' and mark.get('attrs',{}).get('href','').startswith('#'):
                     link_marks.append(mark)
             for index, child in enumerate(node.get("content", [])):
                 walk(child, f"{path}/{index}")
+            if node['type']=='document_note':walk(node['attrs']['body'],f'{path}/note')
         walk(root, "")
         for attrs in range_ends:
             target = attrs['targetId']
@@ -130,12 +136,16 @@ def migrate_project(project):
         for attrs in captions:
             attrs['captionTargetId'] = remap.get(attrs['captionTargetId'], attrs['captionTargetId'])
         for attrs in fields:
-            target = attrs['targetId']
+            if 'targetIds' in attrs:
+                attrs['targetIds']=[remap.get(target,target) for target in attrs['targetIds']]
+                continue
+            key='rangeId' if 'rangeId' in attrs else 'targetId'
+            target = attrs[key]
             if target in remap: target = remap[target]
             elif target not in bookmark_ids:
                 candidates = all_names.get(target, set())
                 target = local.get(target) or (next(iter(candidates)) if len(candidates) == 1 else target)
-            attrs['targetId'] = target
+            attrs[key] = target
         for mark in marks:
             target=mark['attrs']['href'][1:]
             if target in remap: target=remap[target]

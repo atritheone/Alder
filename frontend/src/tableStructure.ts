@@ -15,7 +15,8 @@ function context(state: EditorState) {
 }
 const rows = (table: PMNode) =>
   Array.from({ length: table.childCount }, (_, index) => table.child(index));
-/** A rowspan is indivisible: its rows travel together, and cannot be split. */
+/** Structural row moves/splits keep a rowspan's connected rows together.
+ * Physical pagination may still divide the independent cell stories. */
 export function tableRowBoundary(map: TableMap, row: number) {
   if (row <= 0 || row >= map.height) return true;
   for (let column = 0; column < map.width; column++)
@@ -35,12 +36,55 @@ export function parallelTableRows(table: PMNode): boolean {
     Array.from({ length: row.childCount }, (_, i) => row.child(i)).every(
       (cell) =>
         Number(cell.attrs.rowspan || 1) === 1 &&
-        (cell.attrs.verticalAlign || "top") === "top" &&
         Array.from({ length: cell.childCount }, (_, i) => cell.child(i)).every(
-          (child) => child.isTextblock,
+          (child) => child.isTextblock || child.type.name === 'image',
         ),
     ),
   );
+}
+/** A vertical merge keeps one cell story across its row group. */
+export function parallelMergedRows(table: PMNode): boolean {
+  let eligible = true;
+  table.forEach((row) =>
+    row.forEach((cell) => {
+      cell.forEach((child) => {
+        if (!child.isTextblock && child.type.name !== 'image') eligible = false;
+      });
+    }),
+  );
+  return eligible;
+}
+const parallelStories = new WeakMap<PMNode, boolean>();
+/** Container stories retain their nested table/list structure during flow. */
+export function parallelCellStories(table: PMNode): boolean {
+  const cached = parallelStories.get(table);
+  if (cached !== undefined) return cached;
+  if (parallelMergedRows(table)) {
+    parallelStories.set(table, true);
+    return true;
+  }
+  let eligible = true;
+  const block = (node: PMNode): boolean =>
+    node.isTextblock || node.type.name === 'image' ||
+    (node.type.name === "table"
+      ? parallelCellStories(node)
+      : ["blockquote", "bullet_list", "ordered_list", "list_item"].includes(
+          node.type.name,
+        ) &&
+        Array.from({ length: node.childCount }, (_, i) => node.child(i)).every(
+          block,
+        ));
+  table.forEach((row) =>
+    row.forEach((cell) => {
+      if (![null, undefined, "top"].includes(cell.attrs.verticalAlign))
+        eligible = false;
+      cell.forEach((child) => {
+        if (!block(child)) eligible = false;
+      });
+    }),
+  );
+  parallelStories.set(table, eligible);
+  return eligible;
 }
 export function moveTableRows(direction: -1 | 1): Command {
   return (state, dispatch) => {

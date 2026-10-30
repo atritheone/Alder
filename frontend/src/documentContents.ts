@@ -4,9 +4,10 @@ import { closeHistory, isHistoryTransaction } from "prosemirror-history";
 import type { DocNode } from "./types";
 import { documentText } from "./textProjection";
 import type { ReferenceIndex } from "./documentReferences";
+import {refreshedIndex} from './documentIndex';
 
 export type ContentsOptions = {
-  kind?: "headings" | "figures" | "tables";
+  kind?: "headings" | "figures" | "tables" | "index";
   title: string;
   depth: number;
   entryStyle: string | null;
@@ -57,7 +58,7 @@ export const contentsSpec: NodeSpec = {
 export function validContentsOptions(value: ContentsOptions) {
   return (
     (value.kind == null ||
-      ["headings", "figures", "tables"].includes(value.kind)) &&
+      ["headings", "figures", "tables", "index"].includes(value.kind)) &&
     (value.pageNumbers == null || typeof value.pageNumbers === "boolean") &&
     typeof value.title === "string" &&
     value.title.length <= 200 &&
@@ -95,6 +96,7 @@ export function refreshedContents(
   const options = node.attrs as ContentsOptions;
   if (!validContentsOptions(options))
     throw new Error("Invalid table of contents settings.");
+  if(options.kind==='index')return refreshedIndex(node,index.indexEntries);
   const previous = new Map(
     (node.content || []).flatMap((entry) => {
       const target = entry.content?.find((n) => n.type === "cross_reference")
@@ -194,7 +196,7 @@ export function selectedContents(state: EditorState): PMNode | null {
 export function insertContents(state: EditorState, node: DocNode) {
   const tr = state.tr;
   for (let depth = state.selection.$from.depth; depth > 0; depth--)
-    if (state.selection.$from.node(depth).type.name === "table_of_contents") {
+    if (state.selection.$from.node(depth).type.name === node.type) {
       tr.setSelection(
         NodeSelection.create(state.doc, state.selection.$from.before(depth)),
       );
@@ -218,14 +220,14 @@ export const protectContents = () =>
         return true;
       let allowed = true;
       state.doc.descendants((node, pos) => {
-        if (node.type.name !== "table_of_contents") return;
+        if (!["table_of_contents", "bibliography", "citation"].includes(node.type.name)) return;
         const from = tr.mapping.mapResult(pos, 1),
           to = tr.mapping.mapResult(pos + node.nodeSize, -1);
         if ((from.deletedAcross && to.deletedAcross) || to.pos <= from.pos)
           return false;
         const after = tr.doc.nodeAt(from.pos);
         if (
-          after?.type.name === "table_of_contents" &&
+          after?.type === node.type &&
           after.attrs.blockId === node.attrs.blockId &&
           !after.eq(node)
         )

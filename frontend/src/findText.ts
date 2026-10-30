@@ -1,6 +1,7 @@
 import type { EditorState } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
 import { projectText, projectedRange } from "./textProjection";
+import { formFieldTextEdit } from "./formFields";
 
 export type FindOptions = {
   caseSensitive: boolean;
@@ -75,10 +76,12 @@ export function replaceMatches(
       undefined,
       projection,
     );
-    state.doc.nodesBetween(range.from, range.to, (node) => {
-      if (node.type.name === "table_of_contents")
+    state.doc.nodesBetween(range.from, range.to, (node, pos) => {
+      if (formFieldTextEdit(node, range.from, range.to, pos)) return;
+      if(node.type.name === "text_box" && range.from > pos && range.to < pos + node.nodeSize) return;
+      if (["equation", "table_of_contents", "citation", "bibliography"].includes(node.type.name))
         throw new Error(
-          "This text is generated contents. Edit its source heading, then update fields.",
+          "This text is generated. Edit its source, then update fields.",
         );
       if (node.marks.some((mark) => mark.type.name === "revision_deletion"))
         throw new Error(

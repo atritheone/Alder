@@ -165,7 +165,11 @@ export default function ContextMenus() {
       }
     };
     const dismiss = (event: Event) => {
-      if (!popup.current?.contains(event.target as Node)) close();
+      if (
+        !(event.target instanceof Node) ||
+        !popup.current?.contains(event.target)
+      )
+        close();
     };
     const key = (event: KeyboardEvent) => {
       if (!active.current) return;

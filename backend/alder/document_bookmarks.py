@@ -60,6 +60,13 @@ def publication_bookmarks(sections, warnings):
         message = 'An incomplete bookmark range was exported as a point destination where possible; all passage text is retained.'
         if message not in warnings: warnings.append(message)
     for node in nodes:
+        if node.get('type')=='index_entry' and node.get('attrs',{}).get('rangeId'):
+            attrs=node['attrs'];attrs.pop('rangeName',None)
+            name=by_id.get(attrs['rangeId']) or by_name.get(attrs['rangeId'])
+            if name and starts[name][1]['attrs'].get('range'):attrs['rangeName']=name
+            else:
+                message='An index page range has a missing, excluded or incomplete bookmark. Repair the range and update fields.'
+                if message not in warnings:warnings.append(message)
         if node.get('type') == 'cross_reference':
             attrs = node['attrs']
             name = by_id.get(attrs['targetId']) or by_name.get(attrs['targetId'])

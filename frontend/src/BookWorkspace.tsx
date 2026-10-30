@@ -2,6 +2,7 @@ import { screenPageGeometry } from "./pageGeometry";
 import { chapterRunningMatter } from "./runningMatter";
 import { chapterHeadingContext } from "./runningHeadings";
 import { chapterCaptionStarts } from "./documentCaptions";
+import { chapterNoteStarts } from "./documentNotes";
 import { chapterHeadingStarts } from "./headingNumbering";
 import {
   documentPositionKey,
@@ -16,6 +17,7 @@ import {
   ArrowUp,
   BookOpen,
   FilePlus2,
+  Ellipsis,
   Plus,
   Trash2,
   Volume2,
@@ -24,6 +26,13 @@ import Editor, { type EditorHandle } from "./Editor";
 import PageArrangement from "./PageArrangement";
 import PublicationPreview from "./PublicationPreview";
 import { newChapter } from "./book";
+import ChapterDialog from "./ChapterDialog";
+import {
+  chapterMatter,
+  chapterRoleLabel,
+  matterLabels,
+  insertStructuredChapter,
+} from "./bookStructure";
 import { words } from "./api";
 import {
   indexWords,
@@ -56,6 +65,7 @@ type Props = {
   onSelection: (word: string, selection: string) => void;
   onFocus: () => void;
   onImage: () => void;
+  onCollectImage: (file:File)=>Promise<Project["assets"][number]>;
   onLink: () => void;
   onComplete?: () => void;
   onRead: (chapter: Chapter) => void;
@@ -86,6 +96,20 @@ export default function BookWorkspace(p: Props) {
     [chapters, p.project.styles, chapter?.id],
   );
   const [rawActive, setRawActive] = useState(false);
+  const [chapterDialog, setChapterDialog] = useState<{
+    initial: Chapter;
+    creating: boolean;
+  } | null>(null);
+  useEffect(() => {
+    const add = () =>
+      setChapterDialog({
+        initial: newChapter(`Chapter ${chapters.length + 1}`),
+        creating: true,
+      });
+    window.addEventListener("alder-add-chapter", add);
+    return () => window.removeEventListener("alder-add-chapter", add);
+  }, [chapters.length]);
+  useEffect(() => setChapterDialog(null), [p.project.id]);
   const [rawOpenError, setRawOpenError] = useState("");
   useEffect(() => {
     const showFormatted = () => setRawActive(false);
@@ -250,7 +274,10 @@ export default function BookWorkspace(p: Props) {
       readingPosition.chapterId !== chapter?.id
     )
       return;
-    const page = p.editorRef.current?.pageAtTextOffset(readingPosition.offset);
+    const page = p.editorRef.current?.pageAtTextOffset(
+      readingPosition.offset,
+      readingPosition.note,
+    );
     if (page !== null && page !== undefined) setPageNumber(String(page + 1));
   }, [speechPlaying, readingPosition, pages, chapter?.id, showRaw]);
   const layout = useMemo(() => {
@@ -258,6 +285,7 @@ export default function BookWorkspace(p: Props) {
     return {
       ...screenPageGeometry(p.project.settings),
       lineHeight: p.project.settings.lineHeight,
+      language: p.project.language,
       header: p.project.settings.header,
       footer: p.project.settings.footer,
       runningMatter:
@@ -266,6 +294,8 @@ export default function BookWorkspace(p: Props) {
           : undefined,
       runningSectionId: running.sectionId,
       headingContext: chapterHeadingContext(p.project, chapter?.id || ""),
+      noteStarts: chapterNoteStarts(p.project, chapter?.id || ""),
+      noteOptions: p.project.settings.noteOptions,
       runningStyles: p.project.styles,
       firstPageNumber: p.project.settings.firstPageNumber || 1,
       pageNumberFormat: p.project.settings.pageNumberFormat,
@@ -274,6 +304,7 @@ export default function BookWorkspace(p: Props) {
     };
   }, [
     p.project.settings.orientation,
+    p.project.language,
     p.project.settings.pageSize,
     p.project.settings.marginMm,
     p.project.settings.marginTopMm,
@@ -281,12 +312,18 @@ export default function BookWorkspace(p: Props) {
     p.project.settings.marginBottomMm,
     p.project.settings.marginLeftMm,
     p.project.settings.gutterMm,
+    p.project.settings.mirrorMargins,
+    p.project.settings.columns,
+    p.project.settings.pageBorder,
+    p.project.settings.watermark,
+    p.project.settings.lineNumbering,
     p.project.settings.pageWidthMm,
     p.project.settings.pageHeightMm,
     p.project.settings.lineHeight,
     p.project.settings.header,
     p.project.settings.footer,
     p.project.settings.runningMatter,
+    p.project.settings.noteOptions,
     chapters,
     chapter?.id,
     p.project.styles,
@@ -344,8 +381,7 @@ export default function BookWorkspace(p: Props) {
   };
   const add = () => {
     const next = newChapter(`Chapter ${chapters.length + 1}`);
-    p.change((project) => project.book!.chapters.push(next));
-    p.onChapter(next.id);
+    setChapterDialog({ initial: next, creating: true });
   };
   const moveChapter = (id: string, offset: number) =>
     p.change((project) => {
@@ -395,12 +431,22 @@ export default function BookWorkspace(p: Props) {
                   <span>
                     {item.title || p.project.name}
                     <small>
+                      {item.role !== "chapter" &&
+                        `${chapterRoleLabel(item.role)} · `}
                       {wordCounts[index]} words
                       {!item.include ? " · excluded" : ""}
                     </small>
                   </span>
                 </button>
                 <div className="chapter-actions">
+                  <button
+                    aria-label={`Properties for ${item.title}`}
+                    onClick={() =>
+                      setChapterDialog({ initial: item, creating: false })
+                    }
+                  >
+                    <Ellipsis size={13} />
+                  </button>
                   <button
                     aria-label={`Move ${item.title} earlier`}
                     disabled={index === 0}
@@ -468,6 +514,15 @@ export default function BookWorkspace(p: Props) {
                 })
               }
             />
+            <button
+              aria-label="Chapter properties"
+              title={`${matterLabels[chapterMatter(chapter)]} · ${chapterRoleLabel(chapter.role)}`}
+              onClick={() =>
+                setChapterDialog({ initial: chapter, creating: false })
+              }
+            >
+              <Ellipsis size={14} />
+            </button>
             <label>
               <input
                 type="checkbox"
@@ -533,6 +588,7 @@ export default function BookWorkspace(p: Props) {
             }
           >
             <Editor
+              language={p.project.language}
               ref={p.editorRef}
               review={{
                 tracking: p.project.settings.trackChanges === true,
@@ -631,6 +687,7 @@ export default function BookWorkspace(p: Props) {
               showStructure={p.showStructure}
               onToggleStructure={p.onToggleStructure}
               onImage={p.onImage}
+              onCollectImage={p.onCollectImage}
               onLink={p.onLink}
               onComplete={p.onComplete}
               fontFamily={showRaw ? "monospace" : p.project.settings.fontFamily}
@@ -767,6 +824,35 @@ export default function BookWorkspace(p: Props) {
           )}
         </>
       </div>
+      {chapterDialog && (
+        <ChapterDialog
+          key={chapterDialog.initial.id}
+          initial={chapterDialog.initial}
+          creating={chapterDialog.creating}
+          onClose={() => setChapterDialog(null)}
+          onApply={(value) => {
+            p.change((project) => {
+              if (chapterDialog.creating)
+                insertStructuredChapter(project.book!.chapters, value);
+              else {
+                const target = project.book!.chapters.find(
+                  (item) => item.id === value.id,
+                );
+                if (target)
+                  Object.assign(target, {
+                    title: value.title,
+                    role: value.role,
+                    matter: value.matter,
+                    showTitle: value.showTitle,
+                    include: value.include,
+                  });
+              }
+            });
+            p.onChapter(value.id);
+            setChapterDialog(null);
+          }}
+        />
+      )}
     </section>
   );
 }

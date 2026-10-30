@@ -468,29 +468,35 @@ function registerIPC() {
       flushRequests.delete(id);
     }
   });
-  ipcMain.handle("alder:request", async (e, method, p, body) => {
-    trusted(e);
+  const publicationRequest = async (method:string,p:string,body:any) => {
     const fieldsOnly = /^\/api\/projects\/[^/?#]+\/layout-fields$/.test(p);
+    const word = /^\/api\/projects\/[^/?#]+\/export$/.test(p) && body?.format === 'docx';
     if (
       method === "POST" &&
       (fieldsOnly ||
         (/^\/api\/projects\/[^/?#]+\/export$/.test(p) &&
-          body?.format === "pdf"))
+          (body?.format === "pdf" || word)))
     ) {
       const snapshot = await request(
         "POST",
         p.replace(/\/(?:export|layout-fields)$/, "/publication-layout"),
         {
-          options: body.options,
+          options: word ? {...body.options,reviewView:body.options?.reviewView==='original'?'original':'final'} : body.options,
+          ...(word ? {ephemeral:true} : {}),
           ...(fieldsOnly ? { project: body.project, ephemeral: true } : {}),
         },
       );
+      if(word){
+        const needsWordLayout=(node:any):boolean=>(node.type==='table_row'&&!node.attrs?.allowSplit)||node.type==='text_box'||node.type==='equation'||node.type==='document_note'||!!node.content?.some(needsWordLayout);
+        if(!needsWordLayout(snapshot.document))return request(method,p,{...body,expectedRevision:snapshot.sourceRevision,options:{...body.options,measuredRowSplits:[]}});
+      }
       const rendered = await renderPublicationPdf(
         snapshot,
         path.join(__dirname, "preload.cjs"),
-        !fieldsOnly,
+        !fieldsOnly && !word,
       );
       if (fieldsOnly) return rendered.metadata.referenceValues;
+      if(word)return request(method,p,{...body,expectedRevision:snapshot.sourceRevision,options:{...body.options,measuredRowSplits:rendered.metadata.overflowingRows||[],measuredTextBoxes:rendered.metadata.textBoxes||{},measuredNoteGeometry:!!rendered.metadata.mixedNoteGeometry}});
       const form = new FormData();
       form.append(
         "file",
@@ -524,6 +530,10 @@ function registerIPC() {
     )
       await documentFiles.bind(result.id, body.path, "alder", true);
     return result;
+  };
+  ipcMain.handle("alder:request", async (e,method,p,body) => {
+    trusted(e);
+    return publicationRequest(method,p,body);
   });
   ipcMain.handle("alder:upload", async (e, p, name, bytes, fields) => {
     trusted(e);
@@ -610,7 +620,7 @@ function registerIPC() {
     "alder:bind-document-file",
     async (e, id, filename, format, direct) => {
       trusted(e);
-      if (!["txt", "md", "docx", "alder"].includes(format)) return;
+      if (!["txt", "md", "docx", "odt", "rtf", "alder"].includes(format)) return;
       await documentFiles.bind(
         String(id),
         String(filename),
@@ -625,7 +635,7 @@ function registerIPC() {
       trusted(e);
       if (
         !/^[\w.-]+$/.test(id) ||
-        !["txt", "md", "docx", "alder"].includes(requestedFormat) ||
+        !["txt", "md", "docx", "odt", "rtf", "alder"].includes(requestedFormat) ||
         !["save", "saveAs", "copy"].includes(mode)
       )
         throw new Error("Invalid document save request.");
@@ -664,7 +674,7 @@ function registerIPC() {
           });
           written = result.path;
         } else {
-          const result = await request("POST", `/api/projects/${id}/export`, {
+          const result = await publicationRequest("POST", `/api/projects/${id}/export`, {
             format,
           });
           if (result.warnings?.length) {

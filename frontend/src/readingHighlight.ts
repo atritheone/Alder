@@ -2,8 +2,11 @@ import type { Node as PMNode } from "prosemirror-model";
 import { Plugin } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { projectedRange, projectText } from "./textProjection";
+import type { ReadingRange } from "./speechText";
+import { documentNotes } from "./documentNotes";
+import { noteReadingRanges } from "./noteReading";
 
-type ReadingRange = { start: number; end: number };
+let highlightSerial = 0;
 type WordBox = { left: number; right: number; top: number; height: number };
 
 /** Find actual upcoming text lines, skipping blank paragraphs and page spacers. */
@@ -73,6 +76,7 @@ export function readingHighlight(
     from: number;
     to: number;
     decorations: DecorationSet;
+    note?: ReadingRange["note"];
   } | null = null;
   return new Plugin({
     props: {
@@ -85,22 +89,26 @@ export function readingHighlight(
         if (
           cache?.doc === state.doc &&
           cache.start === range.start &&
-          cache.end === range.end
+          cache.end === range.end &&
+          cache.note?.id === range.note?.id &&
+          cache.note?.start === range.note?.start &&
+          cache.note?.end === range.note?.end
         )
           return cache.decorations;
         try {
-          const { from, to } = projectedRange(
-            state.doc,
-            range.start,
-            range.end,
-          );
+          const reference =
+            range.note &&
+            documentNotes(state.doc).find((note) => note.id === range.note!.id);
+          const { from, to } = reference
+            ? { from: reference.pos, to: reference.pos + 1 }
+            : projectedRange(state.doc, range.start, range.end);
           cache = {
             doc: state.doc,
             ...range,
             from,
             to,
             decorations:
-              to > from
+              to > from && !range.note
                 ? DecorationSet.create(state.doc, [
                     Decoration.inline(from, to, { class: "reading-word" }),
                   ])
@@ -129,6 +137,12 @@ export function readingHighlight(
         "position:absolute;left:0;top:0;width:100px;height:100px;visibility:hidden;pointer-events:none;";
       host.append(release, ink, basis);
       const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const noteRanges = noteReadingRanges(),
+        noteHighlight = `alder-note-reading-${++highlightSerial}`;
+      const noteStyle = document.createElement("style");
+      noteStyle.textContent = `::highlight(${noteHighlight}) { background-color:#e5c59a; color:#111; }`;
+      document.head.append(noteStyle);
+      const registry = (CSS as any).highlights;
       let arrival: Animation | undefined;
       let departure: Animation | undefined;
       let previous: {
@@ -136,6 +150,7 @@ export function readingHighlight(
         end: number;
         time: number;
         doc: PMNode;
+        note?: ReadingRange["note"];
       } | null = null;
       let last = cache;
       let wasVisible = false;
@@ -144,6 +159,7 @@ export function readingHighlight(
         departure?.cancel();
         arrival = departure = undefined;
         ink.style.opacity = "0";
+        registry?.delete(noteHighlight);
         host.classList.remove("reading-ink-active");
       };
       const reset = () => {
@@ -199,9 +215,19 @@ export function readingHighlight(
           const range = document.createRange();
           range.setStart(start.node, start.offset);
           range.setEnd(end.node, end.offset);
-          const rects = Array.from(range.getClientRects()).filter(
-            (r) => r.width && r.height,
-          );
+          const ranges = next.note
+            ? noteRanges(host.closest<HTMLElement>(".flow-canvas")!, next.note)
+            : [range];
+          registry?.delete(noteHighlight);
+          if (next.note && ranges.length)
+            registry?.set(
+              noteHighlight,
+              new (window as any).Highlight(...ranges),
+            );
+          const equation=(start.node instanceof Element?start.node:start.node.parentElement)?.closest<HTMLElement>('[data-equation]');
+          const rects = equation ? [equation.getBoundingClientRect()] : ranges
+            .flatMap((value) => Array.from(value.getClientRects()))
+            .filter((r) => r.width && r.height);
           if (!rects.length) {
             reset();
             return;
@@ -225,7 +251,9 @@ export function readingHighlight(
             const scale = bounds.height / viewport.offsetHeight || 1;
             const top = bounds.top + viewport.clientTop * scale;
             const bottom = top + viewport.clientHeight * scale;
-            const futureBottom = lookaheadBottom(view.dom, end, final);
+            const futureBottom = next.note
+              ? final.bottom + final.height * 4
+              : equation ? final.bottom + final.height * 4 : lookaheadBottom(view.dom, end, final);
             // Keep the spoken line visible if four future lines plus a page
             // gap cannot all fit in a small viewport.
             // Start following a little early so the next four lines have
@@ -278,6 +306,11 @@ export function readingHighlight(
           }
           if (motion.matches) {
             reset();
+            if (next.note && ranges.length)
+              registry?.set(
+                noteHighlight,
+                new (window as any).Highlight(...ranges),
+              );
             return;
           }
           const origin = basis.getBoundingClientRect();
@@ -300,14 +333,26 @@ export function readingHighlight(
           // A single surface must never cover the unread space between lines.
           if (Math.abs(first.top - final.top) > first.height * 0.4) {
             reset();
+            if (next.note && ranges.length)
+              registry?.set(
+                noteHighlight,
+                new (window as any).Highlight(...ranges),
+              );
             return;
           }
           const continuous =
             old &&
             time - old.time < 1600 &&
-            next.start >= old.end &&
-            next.start - old.end <= 8 &&
-            !/\S/.test(projectText(next.doc).text.slice(old.end, next.start));
+            (next.note
+              ? next.note.id === old.note?.id &&
+                next.note.start >= old.note.end &&
+                next.note.start - old.note.end <= 8
+              : !old.note &&
+                next.start >= old.end &&
+                next.start - old.end <= 8 &&
+                !/\S/.test(
+                  projectText(next.doc).text.slice(old.end, next.start),
+                ));
           const sameLine =
             continuous &&
             Math.abs(target.top - old.box.top) < target.height * 0.4;
@@ -327,7 +372,13 @@ export function readingHighlight(
           arrival?.cancel();
           departure?.cancel();
           arrival = departure = undefined;
-          previous = { box: target, end: next.end, time, doc: next.doc };
+          previous = {
+            box: target,
+            end: next.end,
+            time,
+            doc: next.doc,
+            note: next.note,
+          };
           const place = (element: HTMLElement, bounds: WordBox) => {
             element.style.left = `${bounds.left}px`;
             element.style.top = `${bounds.top}px`;
@@ -337,6 +388,7 @@ export function readingHighlight(
           place(ink, target);
           ink.style.opacity = "1";
           host.classList.add("reading-ink-active");
+          registry?.delete(noteHighlight);
           // No tween ever delays the current word. The incoming ink starts
           // slightly outside its bounds and settles inward, covering it fully.
           const width = target.right - target.left;
@@ -437,6 +489,7 @@ export function readingHighlight(
           ink.remove();
           release.remove();
           basis.remove();
+          noteStyle.remove();
           host.classList.remove("reading-highlight-host");
         },
       };

@@ -17,6 +17,15 @@ def manuscript(nodes):
     return validate_project(project)
 
 
+def test_native_word_document_without_a_numbering_part_opens(tmp_path):
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    doc=Document();doc.add_paragraph('A genuine unnumbered document.')
+    for relationship in list(doc.part.rels.values()):
+        if relationship.reltype==RT.NUMBERING:doc.part.drop_rel(relationship.rId)
+    file=tmp_path/'without-numbering.docx';doc.save(file)
+    assert import_document(file)['text']=='A genuine unnumbered document.'
+
+
 @pytest.mark.parametrize('alignment', ['left', 'center', 'right'])
 def test_image_dimensions_alignment_and_description_round_trip(tmp_path, alignment):
     import base64
@@ -212,7 +221,7 @@ def test_invalid_paragraph_flow_is_rejected(attrs):
         manuscript([paragraph('Invalid flow', **attrs)])
 
 
-@pytest.mark.parametrize('marker, start, label', [('decimal', 4, '4'), ('lower-alpha', 27, 'aa'), ('upper-alpha', 2, 'B'), ('lower-roman', 9, 'ix'), ('upper-roman', 12, 'XII'), ('disc', 1, '\u2022'), ('circle', 1, '\u25cb'), ('square', 1, '\u25aa')])
+@pytest.mark.parametrize('marker, start, label', [('decimal', 4, '4'), ('lower-alpha', 27, 'aa'), ('upper-alpha', 28, 'BB'), ('upper-alpha', 2, 'B'), ('lower-roman', 9, 'ix'), ('upper-roman', 4000, 'MMMM'), ('upper-roman', 12, 'XII'), ('disc', 1, '\u2022'), ('circle', 1, '\u25cb'), ('square', 1, '\u25aa')])
 def test_editable_list_markers_round_trip_and_pdf(tmp_path, marker, start, label):
     from pypdf import PdfReader
     ordered = marker not in ('disc', 'circle', 'square')

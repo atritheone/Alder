@@ -44,6 +44,24 @@ export function tablePageFragments(
     );
   for (const table of tables)
     view.state.doc.nodesBetween(table.from, table.to, (node, pos) => {
+      if (node.isBlock && node.isLeaf) {
+        const element = view.nodeDOM(pos) as HTMLElement | null;
+        const page = element
+          ? Math.max(
+              0,
+              Math.min(
+                pages.length - 1,
+                pageAtY(
+                  pages,
+                  (element.getBoundingClientRect().top - origin.top) / scale,
+                  layout,
+                ),
+              ),
+            )
+          : physical(pos);
+        ranges[page].push({ from: pos, to: pos + node.nodeSize });
+        return false;
+      }
       if (!node.isTextblock) return;
       const start = pos + 1,
         end = pos + node.nodeSize - 1;

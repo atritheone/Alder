@@ -58,6 +58,8 @@ export function migrateBook(project: Project): Project {
           content: blocks.length ? blocks : [{ type: "paragraph" }],
         }),
         role: section.role,
+        ...(section.matter ? { matter: section.matter } : {}),
+        ...(section.showTitle === false ? { showTitle: false } : {}),
         ...(meaningfulSources === 1 && rawSource
           ? { rawSource, rawFormat: rawSource.format }
           : {}),

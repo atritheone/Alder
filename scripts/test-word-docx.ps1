@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$FixtureDirectory, [switch]$OpenProbe, [switch]$RenderPdf, [switch]$RoundTrip, [switch]$UpdateFields, [switch]$Worker, [ValidateRange(5,120)][int]$TimeoutSeconds=30)
+param([Parameter(Mandatory=$true)][string]$FixtureDirectory, [switch]$OpenProbe, [switch]$RenderPdf, [switch]$RoundTrip, [switch]$OpenDocumentRoundTrip, [switch]$RtfRoundTrip, [switch]$UpdateFields, [switch]$Worker, [ValidateRange(5,120)][int]$TimeoutSeconds=30)
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath($FixtureDirectory)
 $taskExports = Get-Content -LiteralPath (Join-Path $taskRoot 'fixture-exports.json') -Raw | ConvertFrom-Json
@@ -9,6 +9,8 @@ if (-not $Worker) {
     if ($OpenProbe) { $taskArguments += '-OpenProbe' }
     if ($RenderPdf) { $taskArguments += '-RenderPdf' }
     if ($RoundTrip) { $taskArguments += '-RoundTrip' }
+    if ($OpenDocumentRoundTrip) { $taskArguments += '-OpenDocumentRoundTrip' }
+    if ($RtfRoundTrip) { $taskArguments += '-RtfRoundTrip' }
     if ($UpdateFields) { $taskArguments += '-UpdateFields' }
     $taskProcessRecord = Join-Path $taskRoot 'word-process.json'
     Remove-Item -LiteralPath $taskProcessRecord -Force -ErrorAction SilentlyContinue
@@ -52,15 +54,43 @@ try {
     [uint32]$taskWordPid = 0
     [void][AlderWordProcess]::GetWindowThreadProcessId([IntPtr]$taskDocument.ActiveWindow.Hwnd, [ref]$taskWordPid)
     @{processId=$taskWordPid} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-process.json') -Encoding utf8
+    if ($taskExports.watermarkProbe) {
+        $taskShape = $taskDocument.Sections.Item(1).Headers.Item(1).Shapes.AddTextEffect(0, 'DRAFT', 'Cambria', 48, $false, $false, 0, 0)
+        $taskShape.Name = 'PowerPlusWaterMarkObjectAlder'
+        $taskShape.Rotation = 315
+        $taskShape.Fill.ForeColor.RGB = 13684944
+        $taskShape.Line.Visible = 0
+        $taskShape.RelativeHorizontalPosition = 1
+        $taskShape.RelativeVerticalPosition = 1
+        $taskShape.Left = -999995
+        $taskShape.Top = -999995
+        $taskShape.WrapFormat.Type = 3
+        $taskShape.ZOrder(5)
+        @{width=$taskShape.Width;height=$taskShape.Height;fontSize=$taskShape.TextEffect.FontSize} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'watermark-shape.json') -Encoding utf8
+    }
     if ($OpenProbe) {
         @{ status='passed'; stage='Basic DOCX opened'; wordVersion=$taskWord.Version } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
         return
     }
     @{ status='pending'; stage='Repaginating' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
     $taskDocument.Repaginate()
+    if ($taskExports.equationsExpected -and $taskDocument.OMaths.Count -ne $taskExports.equationsExpected) { throw 'Word did not retain every editable equation.' }
+    if ($taskExports.formControlsExpected) {
+        $taskControls = @()
+        foreach ($taskControl in $taskDocument.ContentControls) {
+            $taskControls += @{title=$taskControl.Title; tag=$taskControl.Tag; type=$taskControl.Type; lockContent=$taskControl.LockContents; lockDelete=$taskControl.LockContentControl; text=$taskControl.Range.Text}
+        }
+        $taskControls | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $taskRoot 'word-form-fields.json') -Encoding utf8
+        if ($taskControls.Count -ne $taskExports.formControlsExpected) { throw 'Word did not retain every native form control.' }
+    }
     if ($UpdateFields) {
         # Only explicitly requested, trusted local fixtures use this path.
-        if ($taskDocument.Fields.Update() -ne 0) { throw 'Word could not update every fixture field.' }
+        if ($taskDocument.Fields.Update() -ne 0) {
+            $taskFields = @()
+            foreach ($taskField in $taskDocument.Fields) { $taskFields += @{code=$taskField.Code.Text; result=$taskField.Result.Text; type=$taskField.Type} }
+            $taskFields | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $taskRoot 'word-fields.json') -Encoding utf8
+            throw 'Word could not update every fixture field.'
+        }
         if ($taskExports.runningMatterExpected) {
             foreach ($taskSection in $taskDocument.Sections) {
                 foreach ($taskStory in @($taskSection.Headers.Item(1),$taskSection.Headers.Item(2),$taskSection.Headers.Item(3),$taskSection.Footers.Item(1),$taskSection.Footers.Item(2),$taskSection.Footers.Item(3))) {
@@ -76,8 +106,17 @@ try {
             if ($taskDocument.TablesOfFigures.Count -ne $taskExports.figuresExpected) { throw 'Word did not recognise the native figure/table lists.' }
             foreach ($taskFigures in $taskDocument.TablesOfFigures) { $taskFigures.Update() }
         }
+        if ($taskExports.indexesExpected) {
+            if ($taskDocument.Indexes.Count -ne $taskExports.indexesExpected) { throw 'Word did not recognise the native index.' }
+            foreach ($taskIndex in $taskDocument.Indexes) { $taskIndex.Update() }
+            $taskFields = @()
+            foreach ($taskField in $taskDocument.Fields) { $taskFields += @{code=$taskField.Code.Text; result=$taskField.Result.Text; type=$taskField.Type} }
+            $taskFields | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $taskRoot 'word-fields.json') -Encoding utf8
+        }
     }
     $taskText = $taskDocument.Content.Text
+    if ($taskExports.footnotesExpected -and $taskDocument.Footnotes.Count -ne $taskExports.footnotesExpected) { throw "Word did not recognise every footnote: expected $($taskExports.footnotesExpected), found $($taskDocument.Footnotes.Count); endnotes $($taskDocument.Endnotes.Count)." }
+    if ($taskExports.endnotesExpected -and $taskDocument.Endnotes.Count -ne $taskExports.endnotesExpected) { throw 'Word did not recognise every endnote.' }
     $taskExpectedText = if ($taskExports.expectedText) { $taskExports.expectedText } else { @('Structured editing', 'First numbered item', 'Nested bullet', 'Second numbered item', 'Tall', 'Upper', 'Lower', 'Wide', 'final paragraph') }
     foreach ($taskExpected in $taskExpectedText) {
         if (-not $taskText.Contains($taskExpected)) { throw "Word lost expected wording: $taskExpected" }
@@ -113,7 +152,19 @@ try {
         $taskDocxFormat = 16
         $taskDocument.SaveAs2([ref]$taskSavedPath, [ref]$taskDocxFormat)
     }
-    @{ status='passed'; wordVersion=$taskWord.Version; pages=$taskDocument.ComputeStatistics(2); listNumbers=$taskNumbers; tables=$taskDocument.Tables.Count; renderedPdf=[bool]$RenderPdf; resavedDocx=[bool]$RoundTrip } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
+    if ($OpenDocumentRoundTrip) {
+        @{ status='pending'; stage='Saving ODT' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
+        [string]$taskOdtPath = Join-Path $taskRoot 'word-resaved.odt'
+        $taskOdtFormat = 23
+        $taskDocument.SaveAs2([ref]$taskOdtPath, [ref]$taskOdtFormat)
+    }
+    if ($RtfRoundTrip) {
+        @{ status='pending'; stage='Saving RTF' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
+        [string]$taskRtfPath = Join-Path $taskRoot 'word-resaved.rtf'
+        $taskRtfFormat = 6
+        $taskDocument.SaveAs2([ref]$taskRtfPath, [ref]$taskRtfFormat)
+    }
+    @{ status='passed'; wordVersion=$taskWord.Version; pages=$taskDocument.ComputeStatistics(2); listNumbers=$taskNumbers; tables=$taskDocument.Tables.Count; renderedPdf=[bool]$RenderPdf; resavedDocx=[bool]$RoundTrip; resavedOdt=[bool]$OpenDocumentRoundTrip; resavedRtf=[bool]$RtfRoundTrip } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
 } catch {
     @{ status='failed'; error=$_.Exception.Message } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
     throw

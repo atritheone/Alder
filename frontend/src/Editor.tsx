@@ -1,5 +1,9 @@
 import { headingNumbers, splitNumberedHeading } from "./headingNumbering";
 import {
+  horizontalPagePlacement,
+  layoutMirroredMargins,
+} from "./mirroredMargins";
+import {
   outlineLists,
   outlineListLayout,
   validListTemplate,
@@ -61,7 +65,7 @@ import {
   pageAtY,
   type SectionSettings,
 } from "./sectionLayout";
-import { speechText, type SpeechText } from "./speechText";
+import { speechText, type SpeechText, type ReadingRange } from "./speechText";
 import { pageGeometryCSS, pageInsets } from "./pageGeometry";
 import { tableHeaderHTML } from "./tablePageHeaders";
 import { PageFurniture } from "./pageFurniture";
@@ -90,12 +94,19 @@ import TextColourDialog from "./TextColourDialog";
 import { blockIdentities } from "./blockIdentities";
 import { clipboardSlice, clipboardText, type PasteMode } from "./pasteText";
 import InsertTableDialog from "./InsertTableDialog";
+import TextBoxDialog from "./TextBoxDialog";
+import FormFieldDialog from "./FormFieldDialog";
+import EquationDialog from "./EquationDialog";
+import {equationSpec,equationGuard,validateEquation,putEquation} from "./equations";
+import {formBlockSpec,formFieldSpec,validateFormField,putFormField,formFieldGuards} from "./formFields";
+import {textBoxSpec,textBoxProperties,validTextBoxContent,putTextBox} from "./textBoxes";
 import ImageDialog from "./ImageDialog";
 import TableDialog from "./TableDialog";
 import {
   AlderTableView,
   tableCellAttributes,
   tableSpec,
+  preciseCellSpec,
   rowSpec,
   selectedTableProperties,
   setTableProperties,
@@ -255,6 +266,20 @@ import type {
   StyleProperties,
 } from "./types";
 import { imageSpec } from "./imageNodes";
+import {imageAnchors} from './imageAnchors';
+import {imageWrapping} from './imageWrapping';
+import {paginateColumns,columnPlacementPlugin} from './columnLayout';
+import {numberedLines,lineNumbersHTML} from './lineNumberLayout';
+import {columnRulesHTML} from './columns';
+import {indexEntrySpec,indexReferenceSpec,validIndexEntry,validIndexReference,indexEntries,setIndexEntry} from './documentIndex';
+import {documentNoteSpec,validDocumentNote,documentNotes,noteBodies,noteNumbers,setDocumentNote,sectionNoteOptions} from './documentNotes';
+import {paginateDocumentNotes} from './notePageLayout';
+import NotesDialog from './NotesDialog';
+import { citationSpec, bibliographySpec, validBibliography, selectedCitation } from './documentCitations';
+import { validCitationItems, type CitationItem } from './citationTypes';
+import IndexEntriesDialog from './IndexEntriesDialog';
+import { prepareRunningImages, runningImageVersion } from "./runningImages";
+import { storyDocuments as runningImageStories } from "./runningMatter";
 import {
   projectText,
   projectedRange,
@@ -278,8 +303,19 @@ import {
   paragraphAppearanceFromDOM,
 } from "./paragraphAppearance";
 import { layoutParagraphPaint, disposeParagraphPaint } from "./paragraphPaint";
+import {
+  discretionaryHyphens,
+  hyphenationStatus,
+  hyphenationLayoutChange,
+  validHyphenation,
+  validTextLanguage,
+} from "./hyphenation";
 
 const attrs = {
+  suppressLineNumbers: {default:null},
+  hyphenation: { default: null },
+  textLanguage: { default: null },
+  textDirection: { default: null },
   revisionProperties: { default: null },
   captionLabel: { default: null },
   captionTargetId: { default: null },
@@ -313,6 +349,14 @@ const points = (value: string) =>
     ? parseFloat(value) * (value.endsWith("px") ? 0.75 : 1)
     : null;
 const blockDOMAttrs = (dom: HTMLElement) => ({
+  suppressLineNumbers: dom.style.getPropertyValue('--suppress-line-numbers') ? dom.style.getPropertyValue('--suppress-line-numbers').trim()==='1' : null,
+  hyphenation: dom.hasAttribute("data-hyphenation")
+    ? dom.dataset.hyphenation === "true"
+    : dom.style.hyphens
+      ? dom.style.hyphens === "auto"
+      : null,
+  textLanguage: validTextLanguage(dom.lang) ? dom.lang : null,
+  textDirection: ['ltr','rtl'].includes(dom.getAttribute('dir')||dom.style.direction) ? dom.getAttribute('dir')||dom.style.direction : null,
   headingNumbered: dom.hasAttribute("data-heading-numbered")
     ? dom.getAttribute("data-heading-numbered") === "true"
     : null,
@@ -373,6 +417,10 @@ const blockDOMAttrs = (dom: HTMLElement) => ({
   widowOrphan: dom.style.widows ? Number(dom.style.widows) > 1 : null,
 });
 const blockDOM = (attributes: Record<string, any>) => ({
+  "data-hyphenation":
+    attributes.hyphenation == null ? null : String(attributes.hyphenation),
+  lang: attributes.textLanguage || null,
+  dir: attributes.textDirection || null,
   "data-heading-numbered":
     attributes.headingNumbered == null
       ? null
@@ -408,6 +456,11 @@ const baseSchema = new Schema({
     },
     text: { group: "inline" },
     bookmark: bookmarkSpec,
+    document_note:documentNoteSpec,
+    citation:citationSpec,
+    bibliography:bibliographySpec,
+    index_entry:indexEntrySpec,
+    index_reference:indexReferenceSpec,
     comment_anchor: commentAnchorSpec,
     revision_break: revisionBreakSpec,
     bookmark_end: bookmarkEndSpec,
@@ -465,10 +518,19 @@ const baseSchema = new Schema({
         { class: "page-break", "aria-label": "Page break" },
         "Page break",
       ],
-      parseDOM: [{ tag: "div.page-break" }],
+      parseDOM: [{ tag: "div.page-break:not(.column-break):not(.section-break)" }],
+    },
+    column_break: {
+      group: 'block', atom: true, attrs: {blockId:{default:null}},
+      toDOM:()=>['div',{class:'column-break page-break','aria-label':'Column break'},'Column break'],
+      parseDOM:[{tag:'div.column-break'}],
     },
     image: imageSpec(false),
     inline_image: imageSpec(true),
+    text_box: textBoxSpec,
+    form_field: formFieldSpec,
+    equation: equationSpec,
+    form_block: formBlockSpec,
   },
   marks: {
     strong: {
@@ -532,6 +594,7 @@ nodes = addListNodes(nodes, "paragraph block*", "block").append(
 );
 nodes = nodes.update("table", tableSpec(nodes.get("table")!));
 nodes = nodes.update("table_row", rowSpec(nodes.get("table_row")!));
+for (const cell of ['table_cell','table_header']) nodes = nodes.update(cell, preciseCellSpec(nodes.get(cell)!));
 nodes.forEach((name, spec) => {
   if (!["doc", "text", "hard_break"].includes(name))
     nodes = nodes.update(name, {
@@ -555,7 +618,8 @@ for (const name of ["ordered_list", "bullet_list"]) {
       ...spec.attrs,
       listStyle: { default: null },
       listTemplate: { default: null },
-      ...(ordered ? { continuePrevious: { default: false } } : {}),
+      order: { default: 1 },
+      continuePrevious: { default: false },
     },
     parseDOM: [
       {
@@ -564,13 +628,10 @@ for (const name of ["ordered_list", "bullet_list"]) {
           listTemplate: parseListTemplate(
             dom.getAttribute("data-list-template"),
           ),
-          ...(ordered
-            ? {
-                order: Number(dom.getAttribute("start") || 1),
-                continuePrevious:
-                  dom.getAttribute("data-continue-list") === "true",
-              }
-            : {}),
+          order: Number(
+            dom.getAttribute(ordered ? "start" : "data-list-start") || 1,
+          ),
+          continuePrevious: dom.getAttribute("data-continue-list") === "true",
           listStyle: valid(
             dom.style.listStyleType ||
               (
@@ -593,12 +654,9 @@ for (const name of ["ordered_list", "bullet_list"]) {
         "data-list-template": node.attrs.listTemplate
           ? JSON.stringify(node.attrs.listTemplate)
           : null,
-        ...(ordered
-          ? {
-              start: node.attrs.order,
-              "data-continue-list": node.attrs.continuePrevious ? "true" : null,
-            }
-          : {}),
+        [ordered ? "start" : "data-list-start"]:
+          ordered || node.attrs.listTemplate ? node.attrs.order : null,
+        "data-continue-list": node.attrs.continuePrevious ? "true" : null,
         style: valid(node.attrs.listStyle)
           ? `list-style-type:${node.attrs.listStyle}`
           : null,
@@ -663,11 +721,16 @@ function normaliseDoc(input: DocNode): any {
     sub: "subscript",
     sup: "superscript",
   };
+  let content = input.content?.map(normaliseDoc);
+  if (content && ['paragraph','heading','code_block','codeBlock'].includes(input.type)) {
+    const wrapped = (node:any) => ['inline_image','text_box'].includes(node.type) && ['left','right'].includes(node.attrs?.wrap);
+    content = [...content.filter(wrapped), ...content.filter(node=>!wrapped(node))];
+  }
   return {
     ...input,
     type: aliases[input.type] || input.type,
     marks: input.marks?.map((m) => ({ ...m, type: marks[m.type] || m.type })),
-    content: input.content?.map(normaliseDoc),
+    content,
   };
 }
 export function parseEditorDocument(input: DocNode): {
@@ -677,6 +740,19 @@ export function parseEditorDocument(input: DocNode): {
   try {
     const normalised = normaliseDoc(input);
     const validateAttributes = (node: DocNode) => {
+      if(node.type === "equation") validateEquation(node);
+      if(["form_field","form_block"].includes(node.type)) validateFormField(node);
+      if(node.type === "text_box") { textBoxProperties(node.attrs||{});if(!validTextBoxContent(node.content))throw new Error("Text boxes contain formatted text and line breaks."); }
+      if (['image','inline_image'].includes(node.type)) {
+        const wrapping=imageWrapping(node.attrs||{});
+        if(node.type==='image'&&wrapping.side!=='none')throw new Error('Wrapped pictures must be anchored inside a paragraph.');
+      }
+      if(node.type==='document_note'){
+        if(!validDocumentNote(node.attrs))throw new Error('Invalid note. Notes require formatted paragraphs.');
+        validateAttributes(node.attrs.body);schema.nodeFromJSON(node.attrs.body).check();
+      }
+      if(node.type==='index_entry'&&!validIndexEntry(node.attrs))throw new Error('Invalid index entry.');
+      if(node.type==='index_reference'&&!validIndexReference(node.attrs))throw new Error('Invalid index reference.');
       if (
         node.type === "table_of_contents" &&
         !validContentsOptions(
@@ -701,6 +777,9 @@ export function parseEditorDocument(input: DocNode): {
             attrs: node.attrs.rightAttrs as Record<string, any>,
           });
       }
+      if (node.attrs && !validHyphenation(node.attrs))
+        throw new Error("Invalid paragraph language or hyphenation.");
+      if(node.attrs?.suppressLineNumbers!=null&&typeof node.attrs.suppressLineNumbers!=='boolean')throw new Error('Invalid paragraph line-number setting.');
       if (node.attrs?.tabStops != null && !validTabStops(node.attrs.tabStops))
         throw new Error("Invalid paragraph tab stops.");
       if (
@@ -713,6 +792,8 @@ export function parseEditorDocument(input: DocNode): {
         !validSection({ kind: "nextPage", page: {}, ...node.attrs })
       )
         throw new Error("Invalid section settings.");
+      if(node.type==='citation'&&!validCitationItems(node.attrs?.items))throw new Error('Invalid citation sources.');
+      if(node.type==='bibliography'&&!validBibliography(node.attrs))throw new Error('Invalid bibliography.');
       const supported = schema.nodes[node.type]?.spec.attrs || {};
       if (
         node.attrs?.headingNumbered != null &&
@@ -813,6 +894,7 @@ export type EditorHandle = {
   navigateBookmark: (id: string) => void;
   openComment: (id: string) => void;
   navigateReference: (id: string) => void;
+  accessibilityTarget:(id:string,noteId?:string)=>void;
   moveHeading: (source: string, target: string, after: boolean) => void;
   getFormatting: () => StyleProperties | null;
   format: (name: string) => void;
@@ -833,8 +915,8 @@ export type EditorHandle = {
     end: number,
     readReferences: boolean,
   ) => SpeechText;
-  setReadingRange: (range: { start: number; end: number } | null) => void;
-  pageAtTextOffset: (offset: number) => number | null;
+  setReadingRange: (range: ReadingRange | null) => void;
+  pageAtTextOffset: (offset: number, note?: ReadingRange['note']) => number | null;
   moveUnit: (unit: ArrangementUnit, destination: number) => void;
   getText: () => string;
   replaceAll: (find: string, replacement: string) => void;
@@ -848,7 +930,7 @@ export type EditorHandle = {
   applyProofreading: (edits: ProofreadingEdit[], expectedText: string) => void;
   selectRange: (start: number, end: number) => void;
   image: (src: string, assetId: string, alt: string) => void;
-  field: (kind: DocumentField, text: string) => void;
+  field: (kind: DocumentField, text: string, mergeKey?: string) => void;
   prepareField: (
     kind: DocumentField,
     text: string,
@@ -858,9 +940,11 @@ export type EditorHandle = {
     apply: (text: string) => boolean;
   } | null;
   contents: (document: DocNode) => void;
+  citationSelection: () => DocNode | undefined;
+  prepareCitation: (node: DocNode) => {document:DocNode; nodeId:string; apply:(document:DocNode,commit?:(document:DocNode,text:string)=>void)=>boolean} | null;
   prepareContents: (
     document: DocNode,
-  ) => { document: DocNode; apply: (node: DocNode) => boolean } | null;
+  ) => { document: DocNode; apply: (node: DocNode,commit?:(document:DocNode,text:string)=>void,fullDocument?:DocNode) => boolean } | null;
   resolvePageReferences: () => PageReferenceValues & { changed: boolean };
   link: (text: string, url: string) => void;
   reference: (
@@ -873,6 +957,7 @@ export type EditorHandle = {
   getSelection: () => string;
 };
 type Props = {
+  language?: string;
   review?: ReviewPreferences;
   onReviewPreferences?: (preferences: ReviewPreferences) => void;
   captionStarts?: Record<CaptionLabel, number>;
@@ -909,6 +994,7 @@ type Props = {
   showStructure: boolean;
   onToggleStructure: () => void;
   onImage: () => void;
+  onCollectImage?: (file:File)=>Promise<Project["assets"][number]>;
   onLink: () => void;
   onComplete?: () => void;
   onHistory?: (type: "undo" | "redo") => void;
@@ -918,7 +1004,7 @@ type Props = {
 };
 /** Decoration refreshes must not overwrite a native cursor move that arrived
  * before ProseMirror's asynchronous selectionchange observer. */
-function refreshEditorDecorations(v: EditorView, redraw = true) {
+export function refreshEditorDecorations(v: EditorView, redraw = true) {
   const live = v.dom.ownerDocument.getSelection();
   if (
     v.hasFocus() &&
@@ -988,6 +1074,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       });
   };
   const [ruler] = useRuler();
+  const [indexDialog,setIndexDialog]=useState<{doc:PMNode;identity:string;selection:string}|null>(null);
+  const [notesDialog,setNotesDialog]=useState<{doc:PMNode;identity:string;id?:string}|null>(null);
+  const showNotes=(id?:string)=>{const v=editableView();if(v&&!latest.current.rawMode)setNotesDialog({doc:v.state.doc,identity:latest.current.identity,id:id||documentNotes(v.state.doc).find(note=>note.pos===v.state.selection.from||note.pos+1===v.state.selection.from)?.id});};
   const [paragraphDialog, setParagraphDialog] = useState<Record<
     string,
     unknown
@@ -1003,6 +1092,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     identity: string | undefined;
     items: ReturnType<typeof documentBookmarks>;
   } | null>(null);
+  const [equationDialog,setEquationDialog] = useState<{doc:PMNode;identity:string;node:DocNode;id?:string}|null>(null);
+  const showEquation=(id?:string)=>{const v=editableView();if(!v)return;let node:DocNode={type:"equation"};if(id)v.state.doc.descendants(n=>{if(n.type.name==="equation"&&n.attrs.blockId===id)node=n.toJSON();});setEquationDialog({doc:v.state.doc,identity:latest.current.identity,node,id});};
+  const [formDialog,setFormDialog] = useState<{doc:PMNode;identity:string;node:DocNode;id?:string}|null>(null);
+  const showFormField=(id?:string)=>{const v=editableView();if(!v)return;let node:DocNode={type:"form_field"};if(id)v.state.doc.descendants(n=>{if(["form_field","form_block"].includes(n.type.name)&&n.attrs.blockId===id)node=n.toJSON();});setFormDialog({doc:v.state.doc,identity:latest.current.identity,node,id});};
+  const [textBoxDialog,setTextBoxDialog] = useState<{doc:PMNode;identity:string;node:DocNode;id?:string}|null>(null);
+  const showTextBox=(id?:string)=>{const v=editableView();if(!v)return;let node:DocNode={type:"text_box"};if(id)v.state.doc.descendants(n=>{if(n.type.name==="text_box"&&n.attrs.blockId===id)node=n.toJSON();});setTextBoxDialog({doc:v.state.doc,identity:latest.current.identity,node,id});};
   const [imageDialog, setImageDialog] = useState<Record<string, any> | null>(
     null,
   );
@@ -1026,7 +1121,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   } | null>(null);
   const [colourDialog, setColourDialog] = useState(false);
   const directReadingRange = useRef<
-    { start: number; end: number } | null | undefined
+    ReadingRange | null | undefined
   >(undefined);
   const [caseMode, setCaseMode] = useState<CaseMode>("free");
   const inputCase = useRef<CaseMode>("free");
@@ -1057,7 +1152,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const host = useRef<HTMLDivElement>(null),
     view = useRef<EditorView | null>(null),
     latest = useRef(props),
-    lastJSON = useRef("");
+    lastDocument = useRef<DocNode | null>(null);
   const selection = useRef<{ from: number; to: number; text: string } | null>(
       null,
     ),
@@ -1090,6 +1185,29 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const [pageInset, setPageInset] = useState(0);
   const [pageDisplayScale, setPageDisplayScale] = useState(1);
   const [pageFontVersion, setPageFontVersion] = useState(0);
+  const imageStories = useMemo(()=>[
+    ...noteBodies(props.document),
+    ...runningImageStories(props.pageLayout?.runningMatter),
+    ...(props.document.content || []).flatMap((node) =>
+      runningImageStories(node.attrs?.runningMatter),
+    ),
+  ],[props.document,props.pageLayout?.runningMatter]);
+  const imageStorySignature = useMemo(()=>JSON.stringify(imageStories),[imageStories]);
+  useEffect(() => {
+    let active = true;
+    const before = runningImageVersion;
+    prepareRunningImages(imageStories)
+      .then(() => {
+        if (active && before !== runningImageVersion)
+          window.dispatchEvent(new Event("alder-running-images"));
+      })
+      .catch((error) => {
+        if (active) setRangeWarning(error.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [imageStorySignature]);
   const formatting = view.current
     ? selectionFormatting(view.current.state, props.styles, {
         fontFamily: props.fontFamily || DOCUMENT_FONT,
@@ -1111,6 +1229,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       for (const mark of node.marks || [])
         if (mark.attrs?.fontFamily) families.add(String(mark.attrs.fontFamily));
       for (const child of node.content || []) visit(child);
+      if (node.type === 'document_note') visit(node.attrs!.body);
     };
     visit(props.document);
     for (const family of families)
@@ -1195,6 +1314,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             },
           ]
         : []),
+      ...(v.state.selection instanceof NodeSelection && v.state.selection.node.type.name === "equation" ? [{label:"Equation properties…",run:()=>showEquation((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
+      ...(v.state.selection instanceof NodeSelection && ["form_field","form_block"].includes(v.state.selection.node.type.name) ? [{label:"Form field properties…",run:()=>showFormField((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
+      ...(v.state.selection instanceof NodeSelection && v.state.selection.node.type.name === "text_box" ? [{label:"Text box properties…",run:()=>showTextBox((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
       ...(selectedImage(v.state)
         ? [
             {
@@ -1212,6 +1334,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       { label: "Paragraph…", run: showParagraph },
       { label: "Comments…", run: () => showComments() },
       { label: "Review changes…", run: showReview },
+      {label:'Check accessibility…',run:()=>window.dispatchEvent(new CustomEvent('alder-accessibility-check',{detail:{identity:latest.current.identity,document:v.state.doc.toJSON()}}))},
       ...(latest.current.label === "Chapter text editor"
         ? [
             {
@@ -1239,6 +1362,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             }),
           ),
       },
+      ...(latest.current.pageLayout ? [{label: "Mail merge…", run: () => window.dispatchEvent(new CustomEvent("alder-mail-merge", {detail:{identity:latest.current.identity}}))}] : []),
       ...(selectedList(v.state)
         ? [
             {
@@ -1308,6 +1432,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         label: "Insert image…",
         run: () => latest.current.onImage(),
       },
+      { label: "Insert equation…", run: () => showEquation() },
+      { label: "Insert form field…", run: () => showFormField() },
+      { label: "Insert text box…", run: () => showTextBox() },
       { label: "Insert table…", run: () => setTableDialog(true) },
       {
         label: "Insert cross-reference…",
@@ -1332,6 +1459,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           }),
       },
       {
+        label:'Index entries…',
+        run:()=>setIndexDialog({doc:v.state.doc,identity:latest.current.identity,selection:v.state.doc.textBetween(v.state.selection.from,v.state.selection.to,' ')}),
+      },
+      ...(latest.current.pageLayout?[{label:'Notes…',run:()=>showNotes()}]:[]),
+      ...(latest.current.pageLayout?[{label:'Sources…',run:()=>window.dispatchEvent(new CustomEvent('alder-sources-dialog',{detail:{identity:latest.current.identity}}))}]:[]),
+      {
         label: "Convert tab-separated text to table",
         disabled: !textToTable()(v.state),
         run: () => command(textToTable()),
@@ -1352,6 +1485,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
       ...(latest.current.pageLayout
         ? [
+            {
+              label: "Insert column break",
+              run: () => command((state,dispatch)=>{
+                dispatch?.(state.tr.replaceSelectionWith(schema.nodes.column_break.create()));
+                return true;
+              }),
+            },
             {
               label: "Headers and footers…",
               run: () => {
@@ -1593,10 +1733,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     () => ({
       getPagePublication() {
         const v = editableView();
+        if (v && hyphenationStatus(v).error)
+          throw new Error(hyphenationStatus(v).error);
         const layout = latest.current.pageLayout;
         if (
           !v ||
           !layout ||
+          hyphenationStatus(v).pending ||
+          hyphenationLayoutChange(v) ||
           lastPageMeasurement.current?.doc !== v.state.doc ||
           lastPageMeasurement.current.layout !==
             JSON.stringify([
@@ -1630,7 +1774,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         const tr = pageReferenceTransaction(v.state, values);
         if (tr) v.dispatch(tr);
         const document = v.state.doc.toJSON(),
-          index = referenceIndex([{ document }], latest.current.styles);
+          index = referenceIndex([{ document }], latest.current.styles,layout.noteOptions,layout.noteStarts);
         const refreshed = refreshedReferences(document, index);
         const derived = referenceRefreshTransaction(
           v.state,
@@ -1643,6 +1787,25 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               .setMeta("referenceRefresh", true),
           );
         return { ...values, changed: !!tr || !!derived };
+      },
+      citationSelection() {const v=editableView();return v?selectedCitation(v.state.doc,v.state.selection.from,v.state.selection.to)?.node.toJSON():undefined;},
+      prepareCitation(node) {
+        const v=editableView();if(!v)return null;
+        const before=v.state,identity=latest.current.identity;
+        const current=selectedCitation(before.doc,before.selection.from,before.selection.to);
+        const nodeId=current?.node.attrs.blockId||`block_${crypto.randomUUID()}`;
+        const citation=schema.nodeFromJSON({...node,attrs:{...node.attrs,blockId:nodeId}});
+        const build=()=>{if(current)return closeHistory(v.state.tr).replaceWith(current.pos,current.pos+current.node.nodeSize,citation);const at=v.state.selection.to,previous=v.state.doc.textBetween(Math.max(0,at-1),at,'',''),following=v.state.doc.textBetween(at,Math.min(v.state.doc.content.size,at+1),'','');const nodes=[];if(previous&&!/[\s([{]$/.test(previous))nodes.push(schema.text(' '));nodes.push(citation);if(following&&!/^[\s.,;:!?\])}]/.test(following))nodes.push(schema.text(' '));return closeHistory(v.state.tr).insert(at,Fragment.fromArray(nodes));};
+        const initial=build();
+        return {document:initial.doc.toJSON(),nodeId,apply(document,commit){
+          if(view.current!==v||latest.current.identity!==identity||!v.state.doc.eq(before.doc)||!v.state.selection.eq(before.selection))return false;
+          const tr=build(),next=schema.nodeFromJSON(document),refresh=referenceRefreshTransaction(v.state.apply(tr),next);
+          if(!tr.doc.eq(next)&&!refresh)return false;
+          for(const step of refresh?.steps||[])tr.step(step);
+          let committed=false;
+          if(commit)tr.setMeta('projectCommit',(doc:DocNode,text:string)=>{commit(doc,text);committed=true;});
+          v.dispatch(tr.setMeta('contentsUpdate',true).scrollIntoView());v.dispatch(closeHistory(v.state.tr));v.focus();return commit?committed:true;
+        }};
       },
       contents(document) {
         const v = editableView();
@@ -1660,7 +1823,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           identity = latest.current.identity;
         return {
           document: insertContents(before, document).doc.toJSON(),
-          apply(node) {
+          apply(node,commit,fullDocument) {
             if (
               view.current !== v ||
               latest.current.identity !== identity ||
@@ -1668,19 +1831,20 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               !v.state.selection.eq(before.selection)
             )
               return false;
-            v.dispatch(
-              insertContents(v.state, node).setMeta("contentsUpdate", true),
-            );
+            const tr=insertContents(v.state,node).setMeta('contentsUpdate',true);let committed=false;
+            if(fullDocument){const target=schema.nodeFromJSON(fullDocument),refresh=referenceRefreshTransaction(v.state.apply(tr),target);if(!tr.doc.eq(target)&&!refresh)return false;for(const step of refresh?.steps||[])tr.step(step);}
+            if(commit)tr.setMeta('projectCommit',(doc:DocNode,text:string)=>{commit(doc,text);committed=true;});
+            v.dispatch(tr);
             v.dispatch(closeHistory(v.state.tr));
             v.focus();
-            return true;
+            return commit?committed:true;
           },
         };
       },
-      field(kind, text) {
+      field(kind, text, mergeKey) {
         const v = editableView();
         if (!v) return;
-        v.dispatch(insertDocumentField(v.state, kind, text));
+        v.dispatch(insertDocumentField(v.state, kind, text, undefined, mergeKey));
         v.dispatch(closeHistory(v.state.tr));
         v.focus();
       },
@@ -1749,6 +1913,18 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             );
         }
         v.focus();
+      },
+      accessibilityTarget(id,noteId) {
+        const v=editableView();if(!v)return;
+        let found:{node:PMNode;pos:number}|undefined;
+        v.state.doc.descendants((node,pos)=>{if(node.attrs.blockId===(noteId||id))found={node,pos};});
+        if(!found)return;
+        const {node,pos}=found;
+        const image=['image','inline_image'].includes(node.type.name);
+        v.dispatch(v.state.tr.setSelection(image?NodeSelection.create(v.state.doc,pos):TextSelection.near(v.state.doc.resolve(Math.min(pos+1,v.state.doc.content.size)))).scrollIntoView());
+        v.focus();
+        if(noteId)showNotes(noteId);
+        else if(image)setImageDialog({...node.attrs,placement:node.isInline?'inline':'block'});
       },
       navigateHeading(id) {
         const v = editableView();
@@ -1910,10 +2086,15 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       getText() {
         return view.current ? projectText(view.current.state.doc).text : "";
       },
-      pageAtTextOffset(offset) {
+      pageAtTextOffset(offset,note) {
         const v = view.current;
         if (!v) return null;
         try {
+          if(note){
+            const canvas=v.dom.closest('.flow-canvas'), runs=canvas?.querySelectorAll<HTMLElement>(`[data-note-fragment="${CSS.escape(note.id)}"] [data-note-from]`);
+            const run=runs&&[...runs].find(run=>Number(run.dataset.noteFrom)<=note.start&&Number(run.dataset.noteTo)>note.start), sheet=run?.closest('.page-sheet');
+            if(sheet)return [...sheet.parentElement!.children].indexOf(sheet);
+          }
           const { from } = projectedRange(v.state.doc, offset, offset);
           return pageAtPosition(measuredPages.current, from);
         } catch {
@@ -2116,7 +2297,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     latest.current.onSelection("", "");
     const doc =
       parsed.document || schema.node("doc", null, [schema.node("paragraph")]);
-    lastJSON.current = JSON.stringify(props.document);
+    lastDocument.current = props.document;
     pageDecorations.current = DecorationSet.empty;
     measuredPages.current = [];
     let annotationsCache: {
@@ -2129,7 +2310,23 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       state: EditorState.create({
         doc,
         plugins: [
+          discretionaryHyphens(
+            () => ({
+              styles: latest.current.styles || [],
+              language: latest.current.language || "en",
+              enabled: !latest.current.rawMode,
+              runningMatter: latest.current.pageLayout?.runningMatter,
+            }),
+            (v) => {
+              setPageFontVersion((version) => version + 1);
+              refreshEditorDecorations(v);
+            },
+            setRangeWarning,
+          ),
           protectContents(),
+          formFieldGuards(setRangeWarning),
+          equationGuard,
+          noteNumbers(() => latest.current.pageLayout?.noteStarts,() => latest.current.pageLayout?.noteOptions),
           headingNumbers(() => ({
             styles: latest.current.styles || [],
             initial: latest.current.headingStarts || [0, 0, 0, 0, 0, 0],
@@ -2150,6 +2347,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             () => view.current?.composing || false,
           ),
           new Plugin({ props: { decorations: () => pageDecorations.current } }),
+          horizontalPagePlacement(),
+          columnPlacementPlugin(),
           structureMarks(
             () => latest.current.showStructure && !blocked.current,
           ),
@@ -2158,6 +2357,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             : []),
           history(),
           blockIdentities(),
+          imageAnchors(),
           captionAnchors(),
           commentDecorations(),
           continuedLists(),
@@ -2384,12 +2584,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         ],
       }),
       editable: () => !blocked.current,
-      attributes: {
+      attributes: () => ({
         role: "textbox",
+        lang: latest.current.language || "en",
         "aria-label": props.label || "Sandbox text editor",
         "aria-multiline": "true",
         spellcheck: "false",
-      },
+      }),
       clipboardTextSerializer: (slice) => clipboardText(schema, slice),
       dispatchTransaction(tr) {
         if (blocked.current && tr.docChanged) return;
@@ -2470,7 +2671,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           documentTick((n) => n + 1);
           setRangeWarning("");
           const json = documentJSON(next.doc);
-          lastJSON.current = JSON.stringify(json);
+          lastDocument.current = json;
           withinEditorEdit(
             {
               projectId: latest.current.projectId,
@@ -2479,7 +2680,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               after: portableEditorState(next),
               joined: undoDepth(previous) === undoDepth(next),
             },
-            () => latest.current.onChange(json, projectText(next.doc).text),
+            () => (tr.getMeta('projectCommit') || latest.current.onChange)(json, projectText(next.doc).text),
           );
         }
         const s = next.selection;
@@ -2584,12 +2785,25 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           return true;
         },
         keydown(_view, event) {
+          if (_view.editable && !latest.current.rawMode && _view.state.selection instanceof NodeSelection && _view.state.selection.node.type.name === "equation" && event.key === "Enter" && !event.ctrlKey && !event.metaKey) {event.preventDefault();showEquation(_view.state.selection.node.attrs.blockId);return true;}
+          if (_view.editable && !latest.current.rawMode && _view.state.selection instanceof NodeSelection && ["form_field","form_block"].includes(_view.state.selection.node.type.name)) {
+            const field = _view.state.selection.node;
+            if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) { event.preventDefault();showFormField(field.attrs.blockId);return true; }
+            if (event.key === " " && !event.ctrlKey && !event.metaKey && !event.altKey && field.attrs.kind === "checkbox") {
+              event.preventDefault();
+              if (field.attrs.lockContent) setRangeWarning("This checkbox is locked. Change its restrictions in Form field properties.");
+              else putFormField({...field.attrs,checked:!field.attrs.checked},[],field.attrs.blockId)(_view.state,_view.dispatch);
+              return true;
+            }
+            if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+              const positions:number[]=[];_view.state.doc.descendants((n,pos)=>{if(["form_field","form_block"].includes(n.type.name))positions.push(pos);});
+              const index=positions.indexOf(_view.state.selection.from),next=(index+(event.shiftKey?-1:1)+positions.length)%positions.length;
+              if(positions.length){event.preventDefault();_view.dispatch(_view.state.tr.setSelection(NodeSelection.create(_view.state.doc,positions[next])).scrollIntoView());return true;}
+            }
+          }
           // Enter/list commands must use a just-moved native caret even when
           // selectionchange has not reached ProseMirror yet.
-          if (
-            !_view.composing &&
-            _view.state.selection instanceof TextSelection
-          )
+          if (!_view.composing)
             refreshEditorDecorations(_view, false);
           // AltGr produces Ctrl+Alt on several layouts. Leave its character
           // input to the browser instead of interpreting it as format paste.
@@ -2599,6 +2813,16 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           );
         },
         dblclick(v, event) {
+          const equation=event.target instanceof Element ? event.target.closest<HTMLElement>("[data-equation]") : null;
+          if(equation&&v.editable&&!latest.current.rawMode){event.preventDefault();showEquation(equation.dataset.equationId);return true;}
+          const field=event.target instanceof Element ? event.target.closest<HTMLElement>("[data-form-field]") : null;
+          if(field&&v.editable&&!latest.current.rawMode){event.preventDefault();showFormField(field.dataset.fieldId);return true;}
+          const citation=(event.target as HTMLElement)?.closest<HTMLElement>('[data-document-citation]');
+          if(citation&&v.editable&&!latest.current.rawMode&&latest.current.pageLayout){event.preventDefault();const pos=v.posAtDOM(citation,0);const found=selectedCitation(v.state.doc,pos,pos);if(found)v.dispatch(v.state.tr.setSelection(NodeSelection.create(v.state.doc,found.pos)));window.dispatchEvent(new CustomEvent('alder-sources-dialog',{detail:{identity:latest.current.identity}}));return true;}
+          const note=(event.target as HTMLElement)?.closest<HTMLElement>('[data-note-id]');
+          const box=event.target instanceof Element ? event.target.closest<HTMLElement>("[data-text-box]") : null;
+          if(box&&v.editable&&!latest.current.rawMode){event.preventDefault();showTextBox(box.dataset.objectId);return true;}
+          if(note&&v.editable&&!latest.current.rawMode){event.preventDefault();showNotes(note.dataset.noteId);return true;}
           if (
             !v.editable ||
             latest.current.rawMode ||
@@ -2773,14 +2997,16 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     };
   }, [props.identity]);
   useLayoutEffect(() => {
-    const v = view.current,
-      json = JSON.stringify(props.document);
-    if (v && json !== lastJSON.current) {
+    const v = view.current;
+    // Local edits return the same immutable JSON object through onChange.
+    // Avoid serializing the whole manuscript on both sides of that round trip.
+    // External objects still pass schema parsing and semantic comparison below.
+    if (v && props.document !== lastDocument.current) {
       const parsed = parseEditorDocument(props.document);
       // Source paragraphs omit default attributes. Equivalent parent updates
       // must not recreate editor state, reset the caret or clear undo history.
       if (parsed.document?.eq(v.state.doc) && !blocked.current) {
-        lastJSON.current = json;
+        lastDocument.current = props.document;
         return;
       }
       const referenceUpdate =
@@ -2788,7 +3014,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           ? referenceRefreshTransaction(v.state, parsed.document)
           : null;
       if (referenceUpdate) {
-        lastJSON.current = json;
+        lastDocument.current = props.document;
         pageDecorations.current = pageDecorations.current.map(
           referenceUpdate.mapping,
           referenceUpdate.doc,
@@ -2815,7 +3041,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           : EditorState.create({ doc, plugins: v.state.plugins }),
       );
       v.dispatch(v.state.tr.setSelection(v.state.selection));
-      lastJSON.current = json;
+      lastDocument.current = props.document;
       // Commit the new section canvas width before measuring snapshots. A
       // prop-driven document replacement otherwise measures against the old
       // canvas and offsets mixed-size Arrangement pages incorrectly.
@@ -2834,7 +3060,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   }, [visibleAnnotations, props.annotationText]);
   useLayoutEffect(() => {
     if (view.current) refreshEditorDecorations(view.current);
-  }, [props.showStructure, props.styles, props.headingStarts]);
+  }, [props.showStructure, props.styles, props.headingStarts, props.pageLayout?.noteStarts, props.pageLayout?.noteOptions]);
   useLayoutEffect(() => {
     const v = view.current;
     if (!v) return;
@@ -2883,6 +3109,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         if (!view.current || !v.dom.getBoundingClientRect().width) return;
         const settings = latest.current;
         const flowKey = JSON.stringify([
+          settings.language,
           pageDisplayScale,
           settings.pageLayout?.width,
           settings.pageLayout?.height,
@@ -2911,6 +3138,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         ]);
         if (
           !forceMeasurement &&
+          !hyphenationLayoutChange(v) &&
           lastPageMeasurement.current?.doc === v.state.doc &&
           lastPageMeasurement.current.key === key
         )
@@ -2923,7 +3151,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         const scrollLeft = viewport?.scrollLeft;
         refreshEditorDecorations(v);
         const layout = latest.current.pageLayout!;
-        const pages = paginatePages(
+        let pages:FlowPage[];
+        try{pages = paginateDocumentNotes(
           v,
           layout,
           (decorations) => {
@@ -2931,22 +3160,32 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             v.updateState(v.state);
           },
           invalidateFlow,
-        );
+        );}catch(cause){setRangeWarning(cause instanceof Error?cause.message:String(cause));return;}
         if (viewport && scrollTop !== undefined && scrollLeft !== undefined) {
           viewport.scrollTop = scrollTop;
           viewport.scrollLeft = scrollLeft;
         }
-        layoutParagraphPaint(v, layout, pages, latest.current.styles);
+        const hasColumns=v.dom.hasAttribute('data-column-layout');
+        layoutMirroredMargins(v, hasColumns ? {...layout,mirrorMargins:false} : layout, pages);
+        if (!hasColumns) layoutParagraphPaint(v, layout, pages, latest.current.styles);
+        pages=numberedLines(v,pages,layout,invalidateFlow);
         measuredPages.current = pages;
-        const headerCache = new Map<number, string>();
-        const headers = pages.map((page) => {
+        const headerCache = new Map<string, string>();
+        const headers = pages.map((page, index) => {
+          if(page.columnHeaders)return page.columnHeaders.join('');
           if (!page.header) return "";
-          if (!headerCache.has(page.header.table))
+          const cacheKey = `${JSON.stringify(page.header)}-${layout.mirrorMargins ? index % 2 : 0}`;
+          if (!headerCache.has(cacheKey))
             headerCache.set(
-              page.header.table,
-              tableHeaderHTML(v, page.frame?.layout || layout, page.header),
+              cacheKey,
+              tableHeaderHTML(
+                v,
+                page.frame?.layout || layout,
+                page.header,
+                index,
+              ),
             );
-          return headerCache.get(page.header.table)!;
+          return headerCache.get(cacheKey)!;
         });
         setFlowHeaders((old) =>
           old.length === headers.length &&
@@ -3004,19 +3243,24 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     const viewport = v.dom.closest(".editor-scroll");
     if (viewport) observer.observe(viewport);
     const assetsChanged = () => measure(true);
+    const textLayoutChanged = () => measure();
     const fontsChanged = () => {
       setPageFontVersion((version) => version + 1);
       measure(true);
     };
     v.dom.addEventListener("load", assetsChanged, true);
+    v.dom.addEventListener("alder-text-layout", textLayoutChanged);
     document.fonts.addEventListener("loadingdone", fontsChanged);
     window.addEventListener("alder-fonts-changed", fontsChanged);
+    window.addEventListener("alder-running-images", fontsChanged);
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
       v.dom.removeEventListener("load", assetsChanged, true);
+      v.dom.removeEventListener("alder-text-layout", textLayoutChanged);
       document.fonts.removeEventListener("loadingdone", fontsChanged);
       window.removeEventListener("alder-fonts-changed", fontsChanged);
+      window.removeEventListener("alder-running-images", fontsChanged);
     };
   }, [
     documentVersion,
@@ -3024,6 +3268,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     props.identity,
     props.document,
     props.pageLayout?.width,
+    props.pageLayout?.columns,
+    props.pageLayout?.pageBorder,
+    props.pageLayout?.watermark,
+    props.pageLayout?.lineNumbering,
     props.pageLayout?.height,
     props.pageLayout?.margin,
     props.pageLayout?.margins?.top,
@@ -3038,6 +3286,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     props.pageLayout?.runningSectionId,
     props.pageLayout?.firstPageNumber,
     props.pageLayout?.pageNumberFormat,
+    props.pageLayout?.mirrorMargins,
+    props.pageLayout?.noteStarts,
+    props.pageLayout?.noteOptions,
     pageDisplayScale,
     props.layoutVisible,
     props.capturePages,
@@ -3045,6 +3296,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     props.headingStarts,
     props.fontSize,
     props.fontFamily,
+    props.language,
   ]);
   const mark = (name: string) => formatting?.marks[name] || false;
   useLayoutEffect(() => {
@@ -3284,6 +3536,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           }}
         />
       )}
+      {indexDialog&&<IndexEntriesDialog entries={indexEntries(indexDialog.doc)} ranges={documentBookmarks(indexDialog.doc).filter(b=>b.end!=null&&!b.incomplete)} selection={indexDialog.selection} onClose={()=>{setIndexDialog(null);requestAnimationFrame(()=>view.current?.focus());}} onApply={(value,id)=>{
+        const v=editableView();
+        if(!v||v.state.doc!==indexDialog.doc||latest.current.identity!==indexDialog.identity)return false;
+        return setIndexEntry(value,id)(v.state,tr=>{v.dispatch(tr);v.dispatch(closeHistory(v.state.tr));});
+      }} onGo={id=>{const v=editableView(),entry=indexEntries(indexDialog.doc).find(entry=>entry.id===id);if(v&&entry&&v.state.doc===indexDialog.doc){v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(entry.pos))).scrollIntoView());}setIndexDialog(null);requestAnimationFrame(()=>v?.focus());}}/>}
+      {notesDialog&&<NotesDialog assets={props.assets} projectId={props.projectId} onCollect={props.onCollectImage||(()=>Promise.reject(new Error("Image collection is unavailable in this view.")))} entries={documentNotes(notesDialog.doc,props.pageLayout?.noteStarts,props.pageLayout?.noteOptions)} initialId={notesDialog.id} styles={props.styles||[]} fontFamily={props.fontFamily||'Cambria'} language={props.language||'en'} onClose={()=>{setNotesDialog(null);requestAnimationFrame(()=>view.current?.focus());}} onApply={(value,id)=>{const v=editableView();if(!v||v.state.doc!==notesDialog.doc||latest.current.identity!==notesDialog.identity)return false;return setDocumentNote(value,id)(v.state,tr=>{v.dispatch(tr);v.dispatch(closeHistory(v.state.tr));});}} onGo={id=>{const v=editableView(),note=documentNotes(notesDialog.doc).find(note=>note.id===id);if(v&&note&&v.state.doc===notesDialog.doc)v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(note.pos))).scrollIntoView());}}/>}
       {captionDialog && (
         <CaptionDialog
           label={captionDialog.label}
@@ -3346,9 +3604,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           }}
         />
       )}
+      {equationDialog && <EquationDialog initial={equationDialog.node} onClose={()=>{setEquationDialog(null);view.current?.focus();}} onApply={(attrs,description)=>{const v=editableView();if(!v||v.state.doc!==equationDialog.doc||latest.current.identity!==equationDialog.identity)return false;const before=v.state.doc;putEquation(attrs,description,equationDialog.id)(v.state,v.dispatch);const changed=v.state.doc!==before;if(changed)v.dispatch(closeHistory(v.state.tr));return changed;}}/>}
+      {formDialog && <FormFieldDialog assets={props.assets} styles={props.styles||[]} projectId={props.projectId} onCollect={props.onCollectImage||(()=>Promise.reject(new Error("Image collection is unavailable in this view.")))} initial={formDialog.node} onClose={()=>{setFormDialog(null);view.current?.focus();}} onApply={(attrs,content,block)=>{const v=editableView();if(!v||v.state.doc!==formDialog.doc||latest.current.identity!==formDialog.identity)return false;const before=v.state.doc;putFormField(attrs,content,formDialog.id,block)(v.state,v.dispatch);const changed=v.state.doc!==before;if(changed)v.dispatch(closeHistory(v.state.tr));return changed;}}/>}
+      {textBoxDialog && <TextBoxDialog initial={textBoxDialog.node} onClose={()=>{setTextBoxDialog(null);view.current?.focus();}} onApply={(attrs,content)=>{const v=editableView();if(!v||v.state.doc!==textBoxDialog.doc||latest.current.identity!==textBoxDialog.identity)return false;const result=putTextBox(attrs,content,textBoxDialog.id)(v.state,v.dispatch);if(result)v.dispatch(closeHistory(v.state.tr));return result;}}/>}
       {imageDialog && (
         <ImageDialog
           initial={imageDialog}
+          allowWrapping
           assets={props.assets}
           onClose={() => {
             setImageDialog(null);
@@ -3421,6 +3683,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       {sectionDialog && (
         <SectionDialog
           initial={sectionDialog.initial}
+          inheritedNotes={sectionNoteOptions(sectionDialog.doc,sectionDialog.pos??sectionDialog.selection.from,props.pageLayout?.noteOptions,props.pageLayout?.noteStarts)}
           editing={sectionDialog.pos !== null}
           onRemove={() => {
             const v = editableView();
@@ -3932,6 +4195,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             <div
               className="flow-canvas"
               onDoubleClick={(event) => {
+                const note=(event.target as HTMLElement).closest<HTMLElement>('[data-note-fragment]');
+                if(note){event.preventDefault();showNotes(note.dataset.noteFragment);return;}
                 if (!flowPages.length) return;
                 const rect = event.currentTarget.getBoundingClientRect(),
                   scale = rect.width / canvasWidth;
@@ -3999,12 +4264,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                           .layout.height,
                       }}
                     >
-                      {flowHeaders[i] && (
-                        <div
-                          dangerouslySetInnerHTML={{ __html: flowHeaders[i] }}
-                        />
-                      )}
-                      {flowPages[i]?.from !== flowPages[i]?.to && (
+                      {(flowPages[i]?.from !== flowPages[i]?.to||flowPages[i]?.noteHTML) && (
                         <PageFurniture
                           layout={
                             pageFrame(flowPages, i, props.pageLayout!).layout
@@ -4015,6 +4275,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                           fontVersion={pageFontVersion}
                         />
                       )}
+                      {flowHeaders[i] && (
+                        <div
+                          dangerouslySetInnerHTML={{ __html: flowHeaders[i] }}
+                        />
+                      )}
+                      {flowPages[i]?.columnRules && <div dangerouslySetInnerHTML={{__html:columnRulesHTML(flowPages[i])}}/>}
+                      {flowPages[i]?.lineNumbers?.length ? <div dangerouslySetInnerHTML={{__html:lineNumbersHTML(flowPages[i])}}/> : null}
+                      {flowPages[i]?.noteHTML&&<div dangerouslySetInnerHTML={{__html:flowPages[i].noteHTML!}}/>}
                     </div>
                   ),
                 )}

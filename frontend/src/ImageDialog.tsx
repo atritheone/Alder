@@ -11,11 +11,13 @@ const maximumWidthMm = 2645.833333;
 export default function ImageDialog({
   initial,
   assets,
+  allowWrapping = false,
   onApply,
   onClose,
 }: {
   initial: Record<string, any>;
   assets: Asset[];
+  allowWrapping?: boolean;
   onApply: (values: {
     width: number | null;
     align: string;
@@ -25,6 +27,8 @@ export default function ImageDialog({
     assetId?: string;
     placement: "inline" | "block";
     crop: ImageCrop | null;
+    wrap: "none" | "left" | "right";
+    wrapGap: number;
   }) => void;
   onClose: () => void;
 }) {
@@ -44,9 +48,14 @@ export default function ImageDialog({
   );
   const [widthChanged, setWidthChanged] = useState(false);
   const [align, setAlign] = useState(initial.align || "left");
-  const [placement, setPlacement] = useState<"inline" | "block">(
-    initial.placement || "block",
+  const [placement, setPlacement] = useState<
+    "inline" | "block" | "left" | "right"
+  >(
+    ["left", "right"].includes(initial.wrap)
+      ? initial.wrap
+      : initial.placement || "block",
   );
+  const [wrapGap, setWrapGap] = useState(((initial.wrapGap ?? 12) * 25.4) / 96);
   const close = () => {
     dialog.current?.close();
     onClose();
@@ -73,16 +82,25 @@ export default function ImageDialog({
       className="word-dialog"
       aria-label="Image properties"
       ref={dialog}
-      onCancel={close}
+      onCancel={(e) => {
+        e.stopPropagation();
+        close();
+      }}
     >
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          event.stopPropagation();
           if (cropError) return;
           dialog.current?.close();
           onApply({
             crop: imageCrop(crop),
-            placement,
+            placement: placement === "block" ? "block" : "inline",
+            wrap:
+              placement === "left" || placement === "right"
+                ? placement
+                : "none",
+            wrapGap: (wrapGap * 96) / 25.4,
             width: !widthChanged
               ? initial.width == null
                 ? null
@@ -122,13 +140,35 @@ export default function ImageDialog({
               aria-label="Image placement"
               value={placement}
               onChange={(event) =>
-                setPlacement(event.target.value as "inline" | "block")
+                setPlacement(event.target.value as typeof placement)
               }
             >
               <option value="inline">In line with text</option>
               <option value="block">Own paragraph</option>
+              {(allowWrapping ||
+                placement === "left" ||
+                placement === "right") && (
+                <>
+                  <option value="left">Wrap text · left</option>
+                  <option value="right">Wrap text · right</option>
+                </>
+              )}
             </select>
           </label>
+          {(placement === "left" || placement === "right") && (
+            <label>
+              Text spacing (mm)
+              <input
+                aria-label="Image text spacing (mm)"
+                type="number"
+                min="0"
+                max="50.8"
+                step="any"
+                value={wrapGap}
+                onChange={(event) => setWrapGap(Number(event.target.value))}
+              />
+            </label>
+          )}
           <label>
             Width (mm)
             <input
@@ -149,7 +189,7 @@ export default function ImageDialog({
             Alignment
             <select
               aria-label="Image alignment"
-              disabled={placement === "inline"}
+              disabled={placement !== "block"}
               value={align}
               onChange={(event) => setAlign(event.target.value)}
             >

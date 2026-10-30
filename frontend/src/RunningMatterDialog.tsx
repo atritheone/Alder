@@ -7,12 +7,14 @@ import {
   resolveRunningMatter,
   storyVariants,
   validRunningMatter,
+  storyDocuments,
   runningFieldValues,
   type RunningMatter,
   type StoryPart,
   type StoryVariant,
 } from "./runningMatter";
 import type { Project } from "./types";
+import { prepareRunningImages } from "./runningImages";
 
 export default function RunningMatterDialog({
   project,
@@ -20,27 +22,33 @@ export default function RunningMatterDialog({
   previous,
   section = false,
   initialPart = "header",
+  initialVariant = "default",
   onApply,
   onClose,
+  onCollect,
 }: {
   project: Project;
   initial: RunningMatter;
   previous: RunningMatter;
   section?: boolean;
   initialPart?: StoryPart;
+  initialVariant?: StoryVariant;
   onApply: (value: RunningMatter) => void;
   onClose: () => void;
+  onCollect: (file: File) => Promise<import("./types").Asset>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null),
     [value, setValue] = useState<RunningMatter>(() => structuredClone(initial)),
     [part, setPart] = useState<StoryPart>(initialPart),
-    [variant, setVariant] = useState<StoryVariant>("default"),
+    [variant, setVariant] = useState<StoryVariant>(initialVariant),
     [editorVersion, setEditorVersion] = useState(0);
   useEffect(() => {
     dialog.current?.showModal();
     return () => dialog.current?.close();
   }, []);
   const [error, setError] = useState("");
+  const latestValue = useRef(value);
+  latestValue.current = value;
   const resolved = resolveRunningMatter(previous, value),
     linked = section && !Object.hasOwn(value[part] || {}, variant);
   useEffect(() => {
@@ -60,9 +68,15 @@ export default function RunningMatterDialog({
       onCancel={onClose}
     >
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           try {
+            await prepareRunningImages(storyDocuments(resolved));
+            if (!dialog.current?.open) return;
+            if (latestValue.current !== value)
+              throw new Error(
+                "The header or footer changed while its images were loading. Apply again.",
+              );
             if (validRunningMatter(value, section)) onApply(value);
           } catch (cause) {
             setError(cause instanceof Error ? cause.message : String(cause));
@@ -177,6 +191,10 @@ export default function RunningMatterDialog({
             <p>This {part} uses the previous section’s content.</p>
           ) : (
             <StoryEditor
+              assets={project.assets}
+              projectId={project.id}
+              onCollect={onCollect}
+              language={project.language}
               key={`${part}:${variant}:${editorVersion}`}
               document={resolved[part]?.[variant] || emptyStory()}
               onChange={updateStory}

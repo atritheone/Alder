@@ -38,7 +38,8 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
     );
   };
   doc.descendants((node, pos, parent) => {
-    if (node.type.name === "table_of_contents") { flush(); return false; }
+    if (node.type.name === "form_block") {flush();runs.push([{node,pos}]);return false;}
+    if (["table_of_contents", "bibliography"].includes(node.type.name)) { flush(); return false; }
     if (!node.isTextblock) {
       flush();
       return;
@@ -78,6 +79,9 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
     else groups.push(...run.map((block) => [block]));
   }
   for (const group of groups) {
+    if (group.length === 1 && group[0].node.type.name === "form_block") {
+      const {node,pos}=group[0];units.push({kind:"paragraph",from:pos,to:pos+node.nodeSize,text:node.textContent});continue;
+    }
     let text = "";
     const positions: number[] = [];
     const ends: number[] = [];
@@ -92,6 +96,8 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
         const at = pos + 1 + offset;
         if (
           child.type.name === "bookmark_end" ||
+          child.type.name === "index_entry" ||
+          child.type.name === "document_note" ||
           (child.type.name === "comment_anchor" && child.attrs.edge === "end")
         ) {
           if (ends.length) ends[ends.length - 1] = at + 1;
@@ -105,6 +111,9 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
           return;
         }
         const reference = [
+          "form_field",
+          "equation",
+          "citation",
           "cross_reference",
           "sequence",
           "document_field",
@@ -118,7 +127,7 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
           positions.push(
             i === 0 ? (pendingBookmark ?? at) : reference ? at : at + i,
           );
-          ends.push(reference ? at + child.nodeSize : at + i + 1);
+          ends.push(reference || !child.isText ? at + child.nodeSize : at + i + 1);
         }
         pendingBookmark = null;
         text += part;

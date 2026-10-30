@@ -1,4 +1,5 @@
 import { headingFormatting } from "./documentFormatting";
+import { validHyphenation } from "./hyphenation";
 import { storyDocuments } from "./runningMatter";
 import { tabStopsCSS, validTabStops } from "./tabStops";
 import type {
@@ -20,6 +21,10 @@ import {
   paragraphColour,
 } from "./paragraphAppearance";
 const propertyNames = [
+  'suppressLineNumbers',
+  "hyphenation",
+  "textLanguage",
+  "textDirection",
   "headingNumbered",
   ...paragraphAppearanceKeys,
   "tabStops",
@@ -83,6 +88,10 @@ export function resolveStyles(
     if (visiting.has(id))
       throw new Error(`Style inheritance contains a cycle at “${style.name}”.`);
     visiting.add(id);
+    if (!validHyphenation(style))
+      throw new Error(
+        `“${style.name}” has an invalid language or hyphenation setting.`,
+      );
     const base = style.basedOn ? visit(style.basedOn) : undefined;
     const result: ResolvedStyle = {
       ...base,
@@ -114,6 +123,7 @@ export function resolveStyles(
       } else if (
         [
           "headingNumbered",
+          'suppressLineNumbers',
           "keepWithNext",
           "keepTogether",
           "widowOrphan",
@@ -238,6 +248,7 @@ export function styleDeclarations(
     }
     if (style.keepWithNext != null)
       css.push(`break-after:${style.keepWithNext ? "avoid" : "auto"}`);
+    if(style.suppressLineNumbers!=null)css.push(`--suppress-line-numbers:${style.suppressLineNumbers?1:0}`);
     if (style.keepTogether != null)
       css.push(`break-inside:${style.keepTogether ? "avoid" : "auto"}`);
     if (style.pageBreakBefore != null)
@@ -284,6 +295,7 @@ export function styleSheet(styles: NamedStyle[], scope: string): string {
 
 export function styleUsageCount(project: Project, id: string): number {
   const count = (node: DocNode): number =>
+    (node.type==='document_note'&&node.attrs?.body?count(node.attrs.body):0)+
     (node.attrs?.styleId === id ? 1 : 0) +
     (node.marks || []).filter((mark) => mark.attrs?.styleId === id).length +
     storyDocuments(node.attrs?.runningMatter).reduce(
@@ -346,6 +358,7 @@ export function replaceProjectStyle(
     for (const mark of node.marks || [])
       if (mark.attrs?.styleId === removedId) mark.attrs.styleId = replacementId;
     for (const child of node.content || []) visit(child);
+    if(node.type==='document_note'&&node.attrs?.body)visit(node.attrs.body);
     for (const story of storyDocuments(node.attrs?.runningMatter)) visit(story);
   };
   for (const story of storyDocuments(project.settings?.runningMatter))

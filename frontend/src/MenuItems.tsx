@@ -23,7 +23,11 @@ export default function MenuItems({
       onMouseEnter={() => setOpen(item.submenu ? item.label : null)}
       onMouseLeave={() => setOpen(null)}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(null);
+        if (
+          !(event.relatedTarget instanceof Node) ||
+          !event.currentTarget.contains(event.relatedTarget)
+        )
+          setOpen(null);
       }}
       onKeyDown={(event) => {
         if (item.submenu && event.key === "ArrowRight") {

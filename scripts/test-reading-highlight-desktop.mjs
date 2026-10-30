@@ -14,10 +14,12 @@ const fixture = await build({
       import { EditorState } from 'prosemirror-state';
       import { EditorView } from 'prosemirror-view';
       import { readingHighlight } from './frontend/src/readingHighlight';
+      import { equationSpec, compileEquation } from './frontend/src/equations';
       const schema = new Schema({nodes: {
         doc: {content: 'paragraph+'},
-        paragraph: {content: 'text*', toDOM: () => ['p', 0]},
-        text: {},
+        paragraph: {content: 'inline*', toDOM: () => ['p', 0]},
+        text: {group:'inline'},
+        equation: equationSpec,
       }, marks: {strong: {toDOM: () => ['strong', 0]}}});
       const root = document.createElement('div');
       root.className = 'alder-app';
@@ -32,6 +34,12 @@ const fixture = await build({
       })});
       window.highlightTest = {
         view, root, host,
+        async equation() {
+          const value=await compileEquation('x^2');
+          const formula=schema.nodes.equation.create(value,schema.text('x squared'));
+          view.updateState(EditorState.create({schema,doc:schema.node('doc',null,[schema.node('paragraph',null,[schema.text('Before '),formula,schema.text(' after.')])]),plugins:view.state.plugins}));
+          return {start:7,end:16};
+        },
         load(paragraphs, marked = false) {
           reading = null;
           const content = paragraphs.map((text, i) => schema.node('paragraph', null,
@@ -325,6 +333,16 @@ try {
   expect(stress.nodes).toBe(2);
   expect(stress.sameDoc && stress.sameSelection).toBe(true);
   expect(stress.ms / 1000).toBeLessThan(16);
+  const equationRange=await page.evaluate(()=>highlightTest.equation());
+  await page.evaluate(({start,end})=>highlightTest.word(start,end),equationRange);
+  await page.waitForTimeout(180);
+  const equationInk=await page.evaluate(()=>{
+    const root=highlightTest.host,math=root.querySelector('[data-equation]').getBoundingClientRect(),ink=root.querySelector('.reading-ink').getBoundingClientRect();
+    return {width:math.width,inkWidth:ink.width,top:math.top,inkTop:ink.top};
+  });
+  expect(equationInk.width).toBeGreaterThan(10);
+  expect(Math.abs(equationInk.width-equationInk.inkWidth)).toBeLessThan(6);
+  expect(Math.abs(equationInk.top-equationInk.inkTop)).toBeLessThan(6);
   await page.evaluate(() => highlightTest.visible(false));
   expect(
     await page
@@ -338,6 +356,7 @@ try {
     JSON.stringify({
       status: "passed",
       stress,
+      equationInk,
       lookaheadZooms: [0.75, 1, 1.25],
     }),
   );

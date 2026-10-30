@@ -146,10 +146,15 @@ try {
   stage("derived labels");
   await expect(markers).toHaveText(expected);
   const menu = async () => {
-    await editor
-      .locator("p")
-      .filter({ hasText: /OUTLINE_A$/ })
-      .click({ button: "right" });
+    await expect(async () => {
+      await editor
+        .locator("p")
+        .filter({ hasText: /OUTLINE_A$/ })
+        .click({ button: "right" });
+      await expect(
+        page.getByRole("menuitem", { name: "List…", exact: true }),
+      ).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 7000 });
     await page.getByRole("menuitem", { name: "List…", exact: true }).click();
   };
   const dialog = page.getByRole("dialog", { name: "List", exact: true });
@@ -157,7 +162,9 @@ try {
   await menu();
   await expect(dialog.getByLabel("List structure")).toHaveValue("outline");
   await expect(dialog.getByLabel("Outline level start")).toHaveValue("3");
-  await dialog.getByLabel("Outline level", { exact: true }).selectOption("1");
+  await dialog
+    .getByLabel("Outline level", { exact: true })
+    .selectOption({ value: "1" });
   await dialog.getByLabel("Outline number pattern").fill("%1-%2");
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(markers).toHaveText([
@@ -247,6 +254,25 @@ try {
   report.checks.push(
     "Caret editing, saved prose without generated labels, shared PDF, Arrangement and 50/100/150% UI scale.",
   );
+  stage("numbered paragraph across pages");
+  await page.evaluate(async (id)=>{
+    const p=await window.alder.request("GET",`/api/projects/${id}`);
+    const paragraph=p.book.chapters[0].document.content[0].content[0].content[0];
+    paragraph.content=Array.from({length:100},(_,i)=>[...(i?[{type:"hard_break"}]:[]),{type:"text",text:`LONG_OUTLINE_${String(i).padStart(3,"0")} A line within one numbered item.`}]).flat();
+    await window.alder.request("PUT",`/api/projects/${id}`,{project:p,expectedRevision:p.revision});
+  },id);
+  await reopen();
+  await expect(editor).toContainText("LONG_OUTLINE_099");
+  await expect(markers).toHaveText(expected);
+  const longPdf=await page.evaluate(async(id)=>{
+    const result=await window.alder.request("POST",`/api/projects/${id}/export`,{format:"pdf"});
+    const bytes=[...new Uint8Array(await (await fetch(window.alder.mediaBase+result.downloadUrl)).arrayBuffer())];
+    return {result,bytes};
+  },id);
+  fs.writeFileSync(path.join(directory,"long-outline.pdf"),Buffer.from(longPdf.bytes));
+  expect(longPdf.result.validation.status).toBe("passed");
+  expect(longPdf.result.validation.pages).toBeGreaterThan(2);
+  report.checks.push("A single numbered paragraph flows across pages without changing its authored numbering.");
   expect(report.errors).toEqual([]);
   report.status = "passed";
 } catch (error) {

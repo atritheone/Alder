@@ -4,7 +4,7 @@ import re
 
 
 def validate_contents(attrs):
-    if attrs.get('kind','headings') not in ('headings','figures','tables'):
+    if attrs.get('kind','headings') not in ('headings','figures','tables','index'):
         raise ValueError('Unsupported contents type.')
     if attrs.get('pageNumbers') is not None and type(attrs['pageNumbers']) is not bool:
         raise ValueError('Contents page numbers must be on or off.')
@@ -21,6 +21,8 @@ def refresh_contents(documents, styles=None):
     from .document_captions import number_captions
     number_captions(documents)
     values = reference_values(documents)
+    from .document_index import entries,refresh_index
+    index_entries=entries(documents)
     headings = []
     def collect(node):
         if node['type'] == 'table_of_contents': return
@@ -32,6 +34,9 @@ def refresh_contents(documents, styles=None):
     def refresh(node):
         if node['type'] == 'table_of_contents':
             attrs = node.get('attrs', {}); validate_contents(attrs)
+            if attrs.get('kind')=='index':
+                refresh_index(node,index_entries,styles)
+                return
             previous = {}
             for entry in node.get('content', []):
                 target = next((c['attrs']['targetId'] for c in entry.get('content', []) if c['type'] == 'cross_reference'), None)

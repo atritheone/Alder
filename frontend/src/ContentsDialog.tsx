@@ -74,10 +74,12 @@ export default function ContentsDialog({
                   headings: "Contents",
                   figures: "List of figures",
                   tables: "List of tables",
+                  index: "Index",
                 };
                 setValue({
                   ...value,
                   kind,
+                  ...(kind==='index'?{pageNumbers:true}:{}),
                   title: Object.values(titles).includes(value.title)
                     ? titles[kind!]
                     : value.title,
@@ -87,9 +89,10 @@ export default function ContentsDialog({
               <option value="headings">Headings</option>
               <option value="figures">Figures</option>
               <option value="tables">Tables</option>
+              <option value="index">Index entries</option>
             </select>
           </label>
-          <label>
+          {value.kind!=='index'&&<label>
             <input
               type="checkbox"
               disabled={busy}
@@ -99,7 +102,7 @@ export default function ContentsDialog({
               }
             />
             Page numbers
-          </label>
+          </label>}
           <label>
             Title
             <input
@@ -151,7 +154,7 @@ export default function ContentsDialog({
             </select>
           </label>
           <small>
-            Includes headings or captions from included chapters. Edit → Update
+            Includes headings, captions or index entries from included chapters. Edit → Update
             fields refreshes entries. Ctrl-click (Command-click on Mac) an entry
             to go to its source.
           </small>

@@ -7,12 +7,21 @@ export type PageInsets = {
   left: number;
 };
 export type PageGeometry = {
+  lineNumbering?: import('./lineNumbering').LineNumbering | null;
+  watermark?: import('./watermark').Watermark | null;
+  pageBorder?: import("./pageBorder").PageBorder | null;
+  columns?: import("./columns").Columns;
   width: number;
   height: number;
   margin: number;
   margins?: PageInsets;
+  mirrorMargins?: boolean;
 };
 export type PageSettings = {
+  lineNumbering?: import('./lineNumbering').LineNumbering | null;
+  watermark?: import('./watermark').Watermark | null;
+  pageBorder?: import("./pageBorder").PageBorder | null;
+  columns?: import("./columns").Columns;
   pageSize?: string;
   orientation?: string;
   pageWidthMm?: number;
@@ -23,6 +32,7 @@ export type PageSettings = {
   marginBottomMm?: number;
   marginLeftMm?: number;
   gutterMm?: number;
+  mirrorMargins?: boolean;
 };
 const number = (value: unknown, fallback: number, min: number, max: number) =>
   typeof value === "number" && Number.isFinite(value)
@@ -89,6 +99,13 @@ export function screenPageGeometry(settings: PageSettings): PageGeometry {
     width: width * px,
     height: height * px,
     margin: margin * px,
+    ...(settings.mirrorMargins ? { mirrorMargins: true } : {}),
+    ...(settings.columns ? { columns: settings.columns } : {}),
+    ...(settings.pageBorder !== undefined
+      ? { pageBorder: settings.pageBorder }
+      : {}),
+    ...(settings.watermark !== undefined ? {watermark:settings.watermark} : {}),
+    ...(settings.lineNumbering !== undefined ? {lineNumbering:settings.lineNumbering} : {}),
     margins: {
       top: margins.top * px,
       right: margins.right * px,

@@ -65,11 +65,15 @@ export default function TableDialog({
       className="word-dialog"
       aria-label="Table properties"
       ref={dialog}
-      onCancel={onClose}
+      onCancel={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
     >
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          event.stopPropagation();
           onApply(changes);
         }}
       >
@@ -200,9 +204,8 @@ export default function TableDialog({
           </small>
           {!initial.parallelRows && (
             <small>
-              In Write, tables with vertical merges, nested content or
-              vertically aligned cells keep rows together when they fit. The
-              row-break choice is retained for Word.
+              This table contains objects or aligned containers that cannot yet
+              flow independently across pages. The row-break choice is retained for Word.
             </small>
           )}
         </div>

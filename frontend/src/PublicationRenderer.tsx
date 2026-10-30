@@ -5,6 +5,7 @@ import { screenPageGeometry } from "./pageGeometry";
 import { publicationHTML } from "./pagePublication";
 import { api } from "./api";
 import { defaultRunningMatter, storyDocuments } from "./runningMatter";
+import { prepareRunningImages } from "./runningImages";
 import {
   loadDocumentFont,
   fontIsAvailable,
@@ -12,9 +13,12 @@ import {
 } from "./fontCatalogue";
 import type { DocNode, Project } from "./types";
 import type { PageReferenceValues } from "./pageReferences";
+import { citationInput, formatCitations, applyCitationOutput } from './documentCitations';
 import "./book-workspace.css";
+import { assertStationeryFits, stationeryPrintHint } from './stationery';
 
 export type PublicationInput = {
+  language?: string;
   name: string;
   sourceIdentity: string;
   projectId: string;
@@ -40,6 +44,7 @@ async function readyImages(images: HTMLImageElement[], stage: string) {
   );
 }
 let rendering = false;
+const semanticContent=(node:DocNode):boolean=>!!node.text?.trim()||(['image','inline_image'].includes(node.type)&&!node.attrs?.decorative)||!!(node.type==='document_note'&&node.attrs?.body&&semanticContent(node.attrs.body))||!!node.content?.some(semanticContent);
 
 /** The desktop owns this isolated window. It never opens a user editing
  * session, writes a project, or borrows the visible editor's selection. */
@@ -48,6 +53,8 @@ export async function renderPublication(input: PublicationInput) {
     throw new Error("This publication renderer is already in use.");
   rendering = true;
   document.title = input.name;
+  const citations=citationInput([input.document],input.settings.citationStyle||'apa');
+  if(citations.citations.length)input={...input,document:applyCitationOutput(input.document,await formatCitations(citations),citations.style)};
   const parsed = parseEditorDocument(input.document);
   if (!parsed.document)
     throw new Error(parsed.error || "Unsupported publication structure.");
@@ -60,13 +67,18 @@ export async function renderPublication(input: PublicationInput) {
     node.content?.forEach(collectStoryFonts);
   };
   storyDocuments(input.settings.runningMatter).forEach(collectStoryFonts);
+  const imageStories = storyDocuments(input.settings.runningMatter);
   parsed.document.descendants((node) => {
+    if(node.type.name==='document_note'){collectStoryFonts(node.attrs.body);imageStories.push(node.attrs.body);}
+    imageStories.push(...storyDocuments(node.attrs.runningMatter));
     storyDocuments(node.attrs.runningMatter).forEach(collectStoryFonts);
     if (node.attrs.fontFamily) families.add(node.attrs.fontFamily);
     for (const mark of node.marks)
       if (mark.attrs.fontFamily) families.add(mark.attrs.fontFamily);
   });
+  await prepareRunningImages(imageStories);
   await loadDocumentFont();
+  await document.fonts.load('16px "Alder Math"');
   const missingFonts = [...families].filter(
     (family) => !fontIsAvailable(family, fonts),
   );
@@ -80,6 +92,7 @@ export async function renderPublication(input: PublicationInput) {
     const ref = useRef<EditorHandle>(null);
     return (
       <Editor
+        language={input.language}
         ref={(value) => {
           ref.current = value;
           editor = value;
@@ -99,6 +112,7 @@ export async function renderPublication(input: PublicationInput) {
         onImage={() => {}}
         onLink={() => {}}
         pageLayout={{
+          language: input.language,
           ...screenPageGeometry(input.settings),
           zoom: 1,
           lineHeight: input.settings.lineHeight,
@@ -108,6 +122,7 @@ export async function renderPublication(input: PublicationInput) {
             ? defaultRunningMatter(input.settings)
             : undefined,
           runningStyles: input.styles,
+          noteOptions: input.settings.noteOptions,
           firstPageNumber: input.settings.firstPageNumber || 1,
           pageNumberFormat: input.settings.pageNumberFormat,
           fontFamily: input.settings.fontFamily,
@@ -155,6 +170,7 @@ export async function renderPublication(input: PublicationInput) {
       throw new Error(
         "Publication pagination did not finish. The authored document has not changed.",
       );
+    assertStationeryFits(host, input.settings.stationeryPreset, captured.pages.length);
     const html = publicationHTML(captured);
     const pages = captured.pages.map(({ from, to, width, height }) => ({
       from,
@@ -165,6 +181,8 @@ export async function renderPublication(input: PublicationInput) {
     root.unmount();
     const printed = new DOMParser().parseFromString(html, "text/html");
     document.head.replaceChildren(...printed.head.childNodes);
+    document.title = input.name;
+    document.documentElement.lang = input.language || 'en';
     document.body.replaceChildren(...printed.body.childNodes);
     document.body.removeAttribute("style");
     await document.fonts.ready;
@@ -172,12 +190,16 @@ export async function renderPublication(input: PublicationInput) {
     await frame();
     return {
       sourceIdentity: input.sourceIdentity,
+      overflowingRows: captured.overflowingRows || [],
+      textBoxes:captured.textBoxes||{},
+      mixedNoteGeometry:!!captured.mixedNoteGeometry,
+      tagged: semanticContent(input.document),
       referenceValues,
       pages,
-      warnings: missingFonts.map(
+      warnings: [...(input.settings.stationeryPreset ? [stationeryPrintHint(input.settings.stationeryPreset)] : []), ...missingFonts.map(
         (family) =>
           `${family} is unavailable on this computer; this PDF uses the bundled Liberation Serif fallback, matching Write.`,
-      ),
+      )],
     };
   } catch (cause) {
     root.unmount();

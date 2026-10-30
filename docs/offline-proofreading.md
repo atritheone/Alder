@@ -2,6 +2,10 @@
 
 Alder's Checks panel now uses a Python proofreading service with local LanguageTool rules and an optional advanced review action backed by a local Qwen model. Australian, British and US English are separate settings. Advanced review is experimental; Grammarly parity has **not** been established.
 
+Assigned paragraph languages and inherited style languages now choose the local rules for each passage in Write, Sandbox and whole-book review. English conventions remain the default for unmarked English text; an explicit `en-US`, `en-GB` or other supported paragraph tag overrides that default. The installed LanguageTool instance supplies its supported-language list. Unknown languages are reported as unchecked, never submitted to English spelling rules. The advanced model still checks English only. Generated citations, bibliographies and contents are excluded. Text offsets remain tied to the original UTF-16 source, including selected passages and emoji; changing language or style metadata invalidates stale results even when wording is unchanged.
+
+`check-proofreading-languages.py` qualifies the installed Windows rules for British/US distinctions, French and German spelling, unsupported Hebrew coverage and exact correction offsets. `test-proofreading-languages-desktop.mjs` covers inherited/direct languages, language-only invalidation, undo, save/reopen and a French correction that leaves neighbouring English text unchanged. This is routing and interaction evidence, not an independent quality evaluation for every language in the pack. Other-platform and broader multilingual quality gates remain open.
+
 ## Using the checks
 
 Click **Spelling & grammar** in the bottom status bar, open **Checks** in the Sandbox word panel, or click an underline in either editor. The status bar shows checking progress, the number of suggestions, or an incomplete/basic-only state. Choose the English conventions for the project. Fast spelling and grammar checks run after typing pauses. Optional style advice is disabled by default.

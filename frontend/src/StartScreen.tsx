@@ -6,6 +6,7 @@ import { DOCUMENT_FONT } from "./fontCatalogue";
 import { newChapter } from "./book";
 import type { Project } from "./types";
 import type { DocumentTemplate } from "./DocumentTemplates";
+import { stationeryPresets, stationeryPrintHint } from './stationery';
 import "./start-screen.css";
 
 export function NewDocument({
@@ -75,6 +76,10 @@ export function NewDocument({
           setBusy(true);
           setError("");
           try {
+            if (templateId.startsWith('stock:')) {
+              await onCreate(await api<Project>(`/api/stationery/${templateId.slice(6)}/create`, 'POST', {name:values.name.trim()}), true);
+              return;
+            }
             if (templateId) {
               await onCreate(
                 await api<Project>(
@@ -166,7 +171,7 @@ export function NewDocument({
               </button>
             ))}
           </div>
-          {templates.some((template) => template.kind === kind) && (
+          {(kind === 'docx' || templates.some((template) => template.kind === kind)) && (
             <label>
               Template
               <select
@@ -176,6 +181,9 @@ export function NewDocument({
                 onChange={(e) => setTemplateId(e.target.value)}
               >
                 <option value="">Blank</option>
+                {kind === 'docx' && <optgroup label="Labels and envelopes">
+                  {stationeryPresets.map(stock => <option key={stock.id} value={`stock:${stock.id}`}>{stock.name}</option>)}
+                </optgroup>}
                 {templates
                   .filter((template) => template.kind === kind)
                   .map((template) => (
@@ -270,7 +278,7 @@ export function NewDocument({
             </div>
           )}
           <p className="quiet">
-            {templateId
+            {templateId.startsWith('stock:') ? stationeryPrintHint(templateId.slice(6)) : templateId
               ? templates.find((template) => template.id === templateId)
                   ?.content
                 ? "Create a new document using this template’s content, styles and page settings."

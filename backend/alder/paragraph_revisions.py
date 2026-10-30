@@ -45,7 +45,7 @@ def native_paragraph_revision(log):
         raise ValueError('Review numbered-heading formatting before Word exchange; its original numbering properties cannot yet be represented without losing revision evidence.')
     # Font changes also affect the paragraph's runs; they require rPrChange in
     # addition to pPrChange. Do not export only half of the revision.
-    unchanged = ('styleId', 'level', 'fontFamily', 'fontSize', 'color', 'captionLabel', 'captionTargetId', 'headingNumbered', 'headingStart')
+    unchanged = ('styleId', 'level', 'fontFamily', 'fontSize', 'color', 'textLanguage', 'captionLabel', 'captionTargetId', 'headingNumbered', 'headingStart')
     if original['type'] != final['type'] or any(original['attrs'].get(k) != final['attrs'].get(k) for k in unchanged):
         raise ValueError('This paragraph style or font revision needs combined Word paragraph/run formatting. Review that change first, or keep the Alder document.')
     stamp = next(r['stamp'] for r in log['records'] if r['status'] == 'pending')
@@ -80,7 +80,7 @@ def read_paragraph_revision(paragraph, reader, warnings):
     change = props.find(f'{{{W}}}pPrChange') if props is not None else None
     if change is None: return None
     previous = change.find(f'{{{W}}}pPr')
-    allowed = {'pStyle', 'keepNext', 'keepLines', 'pageBreakBefore', 'widowControl', 'tabs', 'spacing', 'ind', 'jc', 'pBdr', 'shd', 'contextualSpacing', 'rPr', 'pPrChange'}
+    allowed = {'pStyle', 'keepNext', 'keepLines', 'pageBreakBefore', 'widowControl', 'suppressLineNumbers', 'tabs', 'spacing', 'ind', 'jc', 'bidi', 'pBdr', 'shd', 'contextualSpacing', 'rPr', 'pPrChange'}
     attribute_sets = {'spacing': {'before', 'after', 'line', 'lineRule'}, 'ind': {'left', 'right', 'firstLine', 'hanging'}, 'jc': {'val'}, 'pStyle': {'val'}}
     for source in (props, previous):
         if source is None or any(child.tag.rsplit('}', 1)[-1] not in allowed for child in source):

@@ -1,0 +1,20 @@
+{
+  "project": "STIX Two Math",
+  "version": "2.13 b171",
+  "license": "OFL-1.1",
+  "commit": "744a22a4dd626cd14d75728aef34fc8ad7c85db0",
+  "files": [
+    {
+      "file": "STIXTwoMath-Regular.woff2",
+      "url": "https://raw.githubusercontent.com/stipub/stixfonts/744a22a4dd626cd14d75728aef34fc8ad7c85db0/fonts/static_otf_woff2/STIXTwoMath-Regular.woff2",
+      "sha256": "094191335def3f0452c81ec0713cfc2f29bb6af8cecbf79b60881fbf2db97562",
+      "bytes": 551908
+    },
+    {
+      "file": "OFL.txt",
+      "url": "https://raw.githubusercontent.com/stipub/stixfonts/744a22a4dd626cd14d75728aef34fc8ad7c85db0/OFL.txt",
+      "sha256": "0c8825913b60d858aacdb33c4ca6660a7d64b0d6464702efbb19313f5765861a",
+      "bytes": 4519
+    }
+  ]
+}

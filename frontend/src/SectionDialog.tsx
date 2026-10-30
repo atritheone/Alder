@@ -5,6 +5,13 @@ import { pageGeometry } from "./pageGeometry";
 import type { SectionSettings } from "./sectionLayout";
 import { pageNumberFormats, type PageNumberFormat } from "./pageNumbering";
 import "./word-processing.css";
+import ColumnFields from "./ColumnFields";
+import PageBorderFields from "./PageBorderFields";
+import WatermarkFields from "./WatermarkFields";
+import LineNumberFields from "./LineNumberFields";
+import { validColumns } from "./columns";
+import NoteOptionsFields from "./NoteOptionsFields";
+import { type NoteOptions } from "./noteOptions";
 
 export default function SectionDialog({
   initial,
@@ -12,19 +19,23 @@ export default function SectionDialog({
   onApply,
   onClose,
   onRemove,
+  inheritedNotes,
 }: {
   initial: SectionSettings;
   editing: boolean;
   onApply: (value: SectionSettings) => void;
   onClose: () => void;
   onRemove?: () => void;
+  inheritedNotes: NoteOptions;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [value, setValue] = useState(initial);
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
-  const invalid = pageGeometry(value.page).adjusted;
+  const invalid =
+    pageGeometry(value.page).adjusted ||
+    !validColumns(value.page.columns, value.page);
   return createPortal(
     <dialog
       className="word-dialog"
@@ -169,7 +180,17 @@ export default function SectionDialog({
               ["marginBottomMm", "Bottom margin"],
               ["marginLeftMm", "Left margin"],
               ["gutterMm", "Binding gutter"],
-            ] as [keyof SectionSettings["page"], string][]
+            ] as [
+              Exclude<
+                keyof SectionSettings["page"],
+                | "mirrorMargins"
+                | "columns"
+                | "pageBorder"
+                | "watermark"
+                | "lineNumbering"
+              >,
+              string,
+            ][]
           ).map(([key, label]) => (
             <label key={key}>
               {label} (mm)
@@ -201,9 +222,65 @@ export default function SectionDialog({
               />
             </label>
           ))}
+          <ColumnFields
+            page={value.page}
+            onChange={(columns) =>
+              setValue({ ...value, page: { ...value.page, columns } })
+            }
+          />
+          <details>
+            <summary>Page border</summary>
+            <PageBorderFields
+              value={value.page.pageBorder}
+              onChange={(pageBorder) =>
+                setValue({ ...value, page: { ...value.page, pageBorder } })
+              }
+            />
+          </details>
+          <details>
+            <summary>Watermark</summary>
+            <WatermarkFields
+              value={value.page.watermark}
+              onChange={(watermark) =>
+                setValue({ ...value, page: { ...value.page, watermark } })
+              }
+            />
+          </details>
+          <details>
+            <summary>Line numbering</summary>
+            <LineNumberFields
+              value={value.page.lineNumbering}
+              onChange={(lineNumbering) =>
+                setValue({ ...value, page: { ...value.page, lineNumbering } })
+              }
+            />
+          </details>
+          <details>
+            <summary>Notes</summary>
+            <label>
+              <input
+                type="checkbox"
+                checked={value.noteOptions == null}
+                onChange={(event) =>
+                  setValue({
+                    ...value,
+                    noteOptions: event.target.checked ? null : inheritedNotes,
+                  })
+                }
+              />
+              Same note settings as previous section
+            </label>
+            {value.noteOptions != null && (
+              <NoteOptionsFields
+                value={value.noteOptions}
+                onChange={(noteOptions) => setValue({ ...value, noteOptions })}
+              />
+            )}
+          </details>
           {invalid && (
             <p role="alert">
-              Leave at least 20 mm of writing space in each direction.
+              Leave at least 20 mm of writing space in each column and between
+              the top and bottom margins.
             </p>
           )}
         </div>

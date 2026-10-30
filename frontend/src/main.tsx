@@ -4,6 +4,8 @@ import App from "./App";
 import ContextMenus from "./ContextMenu";
 import "./styles.css";
 import "./controls.css";
+import "./equations.css";
+import "mathlive/fonts.css";
 if (new URLSearchParams(location.search).has("publication")) {
   (window as any).alderPublication = import("./PublicationRenderer").then(
     (module) => module.renderPublication,

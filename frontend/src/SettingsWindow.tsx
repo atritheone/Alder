@@ -18,6 +18,13 @@ import "./settings-window.css";
 import TypingSettings from "./TypingSettings";
 import { pageGeometry } from "./pageGeometry";
 import { pageNumberFormats, type PageNumberFormat } from "./pageNumbering";
+import ColumnFields from "./ColumnFields";
+import PageBorderFields from './PageBorderFields';
+import WatermarkFields from './WatermarkFields';
+import LineNumberFields from './LineNumberFields';
+import { validColumns } from "./columns";
+import NoteOptionsFields from './NoteOptionsFields';
+import { stationeryPrintHint } from './stationery';
 
 const categories = [
   "Appearance",
@@ -187,6 +194,12 @@ export default function SettingsWindow(p: Props) {
       if (pageGeometry(candidate).adjusted) {
         setError(
           "Page margins must leave at least 20 mm of writing space in each direction. Reduce the margins before choosing a smaller page.",
+        );
+        return;
+      }
+      if (!validColumns(candidate.columns, candidate)) {
+        setError(
+          "Each column needs at least 20 mm of writing space. Reduce the column count or gap before choosing smaller page dimensions.",
         );
         return;
       }
@@ -408,6 +421,10 @@ export default function SettingsWindow(p: Props) {
             <>
               <fieldset disabled={!p.project}>
                 <Section title="Page">
+                  {p.project?.settings.stationeryPreset && <>
+                    <p className="quiet">{stationeryPrintHint(p.project.settings.stationeryPreset)}</p>
+                    <label className="settings-row"><span>Check stationery fit</span><input type="checkbox" checked onChange={() => p.onChange(project => {project.settings.stationeryPreset = null;})} /></label>
+                  </>}
                   {select(
                     "pageSize",
                     "Page size",
@@ -442,11 +459,12 @@ export default function SettingsWindow(p: Props) {
                   )}
                 </Section>
                 <Section title="Margins">
+                  {check("mirrorMargins", "Mirror margins")}
                   {(["Top", "Bottom", "Left", "Right"] as const).map((edge) => (
                     <div key={edge}>
                       {number(
                         `margin${edge}Mm`,
-                        `${edge} (mm)`,
+                        `${p.project?.settings.mirrorMargins && edge === "Left" ? "Inside" : p.project?.settings.mirrorMargins && edge === "Right" ? "Outside" : edge} (mm)`,
                         0,
                         100,
                         0.1,
@@ -456,7 +474,9 @@ export default function SettingsWindow(p: Props) {
                   ))}
                   {number(
                     "gutterMm",
-                    "Left binding gutter (mm)",
+                    p.project?.settings.mirrorMargins
+                      ? "Inside binding gutter (mm)"
+                      : "Left binding gutter (mm)",
                     0,
                     50,
                     0.1,
@@ -469,8 +489,21 @@ export default function SettingsWindow(p: Props) {
                     </p>
                   )}
                 </Section>
+                <Section title="Columns">
+                  <ColumnFields
+                    page={p.project?.settings || {}}
+                    rowClass="settings-row"
+                    onChange={(value) => setting("columns", value)}
+                  />
+                </Section>
+                <Section title="Page border"><PageBorderFields value={p.project?.settings.pageBorder} rowClass="settings-row" onChange={value=>setting('pageBorder',value)}/></Section>
+                <Section title="Watermark"><WatermarkFields value={p.project?.settings.watermark} rowClass="settings-row" onChange={value=>setting('watermark',value)}/></Section>
+                <Section title="Line numbering"><LineNumberFields value={p.project?.settings.lineNumbering} rowClass="settings-row" onChange={value=>setting('lineNumbering',value)}/></Section>
+                <Section title="Notes"><NoteOptionsFields value={p.project?.settings.noteOptions} onChange={value=>setting('noteOptions',value)}/></Section>
                 <Section title="Headers & numbering">
-                  <button type="button" onClick={p.onRunningMatter}>Headers and footers…</button>
+                  <button type="button" onClick={p.onRunningMatter}>
+                    Headers and footers…
+                  </button>
                   <label className="settings-row">
                     <span>Number format</span>
                     <select

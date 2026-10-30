@@ -29,6 +29,20 @@ def fixture():
 
 
 LABELS=['3.','3(a)','3.a.i','3.a.ii','3(b)','3.b.iii','4.','4(a)','4.a.iv']
+
+def edge_fixture():
+    p=fixture();doc=p['book']['chapters'][0]['document'];doc['content']=[]
+    for fmt,start,count in [('upper-alpha',26,3),('upper-roman',3999,2),('square',1,2)]:
+        rules=template();rules[0].update(format=fmt,pattern='▪' if fmt=='square' else '%1.')
+        rules[1].update(format='decimal',pattern='%2.',restart=0)
+        for index in range(count):
+            doc['content'].extend([{'type':'bullet_list' if fmt=='square' else 'ordered_list','attrs':{'listTemplate':rules,'order':start,'continuePrevious':index>0},'content':[{'type':'list_item','content':[
+                {'type':'paragraph','content':[{'type':'text','text':f'OUTLINE_{fmt}_{index}'}]},
+                {'type':'ordered_list','content':[{'type':'list_item','content':[{'type':'paragraph','content':[{'type':'text','text':f'OUTLINE_{fmt}_{index}_child'}]}]}]},
+            ]}]},{'type':'paragraph','content':[{'type':'text','text':'Separated list'}]}])
+    return validate_project(p)
+
+EDGE_LABELS=['Z.','1.','AA.','2.','BB.','3.','MMMCMXCIX.','1.','MMMM.','2.','▪','1.','▪','2.']
 def labels(document):
     # Records are per list, so collect labels in document text order.
     values={id(item['node']):item['label'] for record in outline_layout(document) for item in record['items']}
@@ -69,3 +83,10 @@ def test_pdf_and_markdown_use_calculated_outline_labels(tmp_path):
     md=build_export(p,'md',tmp_path);text=Path(md['path']).read_text(encoding='utf-8')
     for label in LABELS:assert label in text
     assert any('outline numbering' in warning for warning in md['warnings'])
+
+@pytest.mark.parametrize('format',['docx','html','epub'])
+def test_outline_extended_numbers_and_bullet_root_continue(tmp_path,format):
+    p=edge_fixture()
+    assert labels(p['book']['chapters'][0]['document'])==EDGE_LABELS
+    result=build_export(p,format,tmp_path)
+    assert labels(import_document(Path(result['path']))['document'])==EDGE_LABELS

@@ -25,11 +25,12 @@ export default function ReferenceDialog({
     onClose();
   };
   const isCaption = index.targets.get(target)?.kind === "caption";
+  const isNote = index.targets.get(target)?.kind === "note";
   const isNumberedHeading =
     index.targets.get(target)?.kind === "heading" &&
     !!index.targets.get(target)?.number;
   const effectiveFormat =
-    format === "page" || isCaption || (isNumberedHeading && format === "number")
+    format === "page" || isCaption || ((isNote||isNumberedHeading) && format === "number")
       ? format
       : "text";
   const text =
@@ -98,7 +99,7 @@ export default function ReferenceDialog({
                 {isCaption && (
                   <option value="labelNumber">Label and number</option>
                 )}
-                {(isCaption || isNumberedHeading) && (
+                {(isCaption || isNumberedHeading || isNote) && (
                   <option value="number">Number only</option>
                 )}
                 <option value="page">Page number</option>
@@ -112,11 +113,11 @@ export default function ReferenceDialog({
               value={target}
               onChange={(event) => {
                 setTarget(event.target.value);
-                if (!index.resolve(event.target.value)) setFormat("page");
+                if (!index.resolve(event.target.value)) setFormat(index.targets.get(event.target.value)?.kind==='note'?'number':"page");
               }}
             >
               <option value="">Choose a target…</option>
-              {(["heading", "bookmark", "caption"] as const).map((kind) => (
+              {(["heading", "bookmark", "caption", "note"] as const).map((kind) => (
                 <optgroup
                   key={kind}
                   label={
@@ -124,7 +125,7 @@ export default function ReferenceDialog({
                       ? "Headings"
                       : kind === "caption"
                         ? "Captions"
-                        : "Bookmarked passages"
+                        : kind==='note' ? 'Notes' : "Bookmarked passages"
                   }
                 >
                   {items

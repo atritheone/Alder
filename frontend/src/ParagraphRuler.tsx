@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { EditorView } from "prosemirror-view";
 import type { TabStop } from "./tabStops";
+import { mirrorShiftToPosition } from "./mirroredMargins";
+import { columnShiftToPosition } from "./columnLayout";
 
 const preference = "alder.ruler";
 export function useRuler() {
@@ -38,7 +40,12 @@ export default function ParagraphRuler({
   version: unknown;
 }) {
   const host = useRef<HTMLDivElement>(null);
-  const [geometry, setGeometry] = useState({ left: 0, width: 0, unit: 4 / 3 });
+  const [geometry, setGeometry] = useState({
+    left: 0,
+    width: 0,
+    unit: 4 / 3,
+    rtl: false,
+  });
   const [drag, setDrag] = useState<{ index: number; position: number } | null>(
     null,
   );
@@ -66,7 +73,20 @@ export default function ParagraphRuler({
         ((parseFloat(getComputedStyle(block).marginRight) || 0) * rect.width) /
         block.offsetWidth;
       const next = {
-        left: (rect.left - indent - origin.left) / hostScale,
+        rtl: getComputedStyle(block).direction === "rtl",
+        left:
+          (rect.left -
+            indent -
+            origin.left +
+            ((mirrorShiftToPosition(editor, current.before(), current.pos) +
+              columnShiftToPosition(
+                editor,
+                current.before() + 1,
+                current.pos,
+              )) *
+              rect.width) /
+              block.offsetWidth) /
+          hostScale,
         width: (rect.width + indent + right) / hostScale,
         unit: ((rect.width / block.offsetWidth / hostScale) * 4) / 3,
       };
@@ -87,14 +107,16 @@ export default function ParagraphRuler({
   const at = (event: React.PointerEvent) => {
     const rect = host.current!.getBoundingClientRect();
     const scale = rect.width / host.current!.offsetWidth;
+    const distance =
+      ((event.clientX - rect.left) / scale - geometry.left) / geometry.unit;
     return Math.max(
       0.5,
       Math.min(
         1440,
         Math.round(
-          (((event.clientX - rect.left) / scale - geometry.left) /
-            geometry.unit) *
-            2,
+          (geometry.rtl
+            ? geometry.width / geometry.unit - distance
+            : distance) * 2,
         ) / 2,
       ),
     );
@@ -113,7 +135,9 @@ export default function ParagraphRuler({
     key === "rightIndent"
       ? bodyWidth - v
       : key === "firstLineIndent"
-        ? value("leftIndent") + v
+        ? geometry.rtl
+          ? bodyWidth - value("rightIndent") - v
+          : value("leftIndent") + v
         : v;
   const indentValue = (key: string, event: React.PointerEvent) => {
     const rect = host.current!.getBoundingClientRect();
@@ -129,7 +153,9 @@ export default function ParagraphRuler({
           (key === "rightIndent"
             ? bodyWidth - x
             : key === "firstLineIndent"
-              ? x - value("leftIndent")
+              ? geometry.rtl
+                ? bodyWidth - x - value("rightIndent")
+                : x - value("leftIndent")
               : x) * 2,
         ) / 2,
       ),
@@ -201,7 +227,10 @@ export default function ParagraphRuler({
               const next =
                 value(key) +
                 (e.key === "ArrowRight" ? 1 : -1) *
-                  (key === "rightIndent" ? -1 : 1) *
+                  (key === "rightIndent" ||
+                  (key === "firstLineIndent" && geometry.rtl)
+                    ? -1
+                    : 1) *
                   (e.shiftKey ? 10 : 1);
               onFormat({ [key]: Math.max(-144, Math.min(144, next)) });
             }}
@@ -213,7 +242,11 @@ export default function ParagraphRuler({
             <span
               className="ruler-tick"
               key={i}
-              style={{ left: i * 36 * geometry.unit }}
+              style={{
+                left: geometry.rtl
+                  ? geometry.width - i * 36 * geometry.unit
+                  : i * 36 * geometry.unit,
+              }}
               aria-hidden="true"
             >
               {i * 36}
@@ -228,9 +261,12 @@ export default function ParagraphRuler({
             aria-label={`${stop.align} tab at ${stop.position} points`}
             title={`${stop.position} pt · ${stop.align} tab. Drag to move; Delete to remove.`}
             style={{
-              left:
-                (drag?.index === i ? drag.position : stop.position) *
-                geometry.unit,
+              left: geometry.rtl
+                ? geometry.width -
+                  (drag?.index === i ? drag.position : stop.position) *
+                    geometry.unit
+                : (drag?.index === i ? drag.position : stop.position) *
+                  geometry.unit,
             }}
             onPointerDown={(event) => {
               if (event.button !== 0) return;
@@ -269,6 +305,7 @@ export default function ParagraphRuler({
                       1440,
                       stop.position +
                         (event.key === "ArrowRight" ? 1 : -1) *
+                          (geometry.rtl ? -1 : 1) *
                           (event.shiftKey ? 10 : 1),
                     ),
                   ),

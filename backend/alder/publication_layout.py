@@ -7,6 +7,8 @@ import re
 
 
 def prepare_layout(project, options=None):
+    from .stationery import validate_stock
+    validate_stock(project)
     from .publishing import _prepare_publication, _settings, _publication_sections, _Resources, _warn, plain_text
     from .models import validate_document
     warnings = []
@@ -37,7 +39,13 @@ def prepare_layout(project, options=None):
         if section['title']: blocks.append(paragraph(section['title'], 'heading', {'level': 1}))
         blocks.extend(section['blocks'])
     def walk(node):
+        from .running_matter import stories
+        for story in stories(node.get('attrs',{}).get('runningMatter')): walk(story)
         node.get('attrs', {}).pop('_headingLabel', None)
+        node.get('attrs', {}).pop('_noteLabel', None)
+        node.get('attrs', {}).pop('rangeName', None)
+        node.get('attrs', {}).pop('_noteReference', None)
+        if node['type']=='document_note':walk(node['attrs']['body'])
         for derived in ('_outlineLabel','_outlineHanging','_outlineIndent'):node.get('attrs',{}).pop(derived,None)
         if node['type'] in ('cross_reference', 'bookmark_end'):
             # Native Word/HTML exporters use derived names. The editing schema
@@ -57,17 +65,28 @@ def prepare_layout(project, options=None):
             node['content'] = [child for child in node['content'] if child['type'] != 'comment_anchor']
             for child in node['content']: walk(child)
     document = {'type': 'doc', 'content': blocks or [{'type': 'paragraph'}]}
+    # Native Word uses a generated bookmark around each note reference. The
+    # desktop page renderer resolves directly against the note's stable id.
+    from .document_notes import notes
+    note_aliases={'note_reference_'+hashlib.sha256(node['attrs']['blockId'].encode()).hexdigest()[:32]:node['attrs']['blockId'] for node in notes([document])}
+    def restore_note_targets(node):
+        if node['type']=='cross_reference' and node.get('attrs',{}).get('_noteReference'):
+            node['attrs']['targetId']=note_aliases.get(node['attrs']['targetId'],node['attrs']['targetId'])
+        for child in node.get('content',[]):restore_note_targets(child)
+    restore_note_targets(document)
     validate_document(document)
     walk(document)
+    from .running_matter import stories
+    for story in stories(settings.get('runningMatter')): walk(story)
     # Filesystem-only renderer options never cross into the page or manifest.
     settings.pop('assetRoot', None)
-    identity = hashlib.sha256(json.dumps({'document': document, 'settings': settings}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+    identity = hashlib.sha256(json.dumps({'document': document, 'settings': settings, 'language': prepared.get('language','en')}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
     return {'version': 1, 'projectId': project['id'], 'sourceRevision': project.get('revision', 0), 'sourceIdentity': identity,
-            'name': project.get('name') or 'Untitled', 'document': document, 'settings': settings, 'styles': prepared.get('styles', []),
+            'name': project.get('name') or 'Untitled', 'language':prepared.get('language','en'),'document': document, 'settings': settings, 'styles': prepared.get('styles', []),
             'warnings': warnings, 'text': plain_text(document)}
 
 
-def validate_rendered_pdf(data, pages):
+def validate_rendered_pdf(data, pages, require_tags=False):
     from pypdf import PdfReader
     if not data.startswith(b'%PDF-') or len(data) > 100 * 1024 * 1024:
         raise ValueError('Invalid or oversized rendered PDF.')
@@ -86,7 +105,18 @@ def validate_rendered_pdf(data, pages):
                 raise ValueError('The renderer supplied invalid page geometry.')
             if abs(float(getattr(actual.mediabox, dimension)) - value * .75) > 1:
                 raise ValueError('The PDF page geometry differs from the document page map.')
-    return {'status': 'passed', 'format': 'pdf', 'pages': len(pages), 'layoutEngine': 'alder-page-map'}
+    root=reader.trailer['/Root']
+    mark_info=root.get('/MarkInfo')
+    marked=mark_info.get_object().get('/Marked') if mark_info else None
+    tagged=bool(root.get('/StructTreeRoot') and getattr(marked,'value',marked) is True)
+    language=str(root.get('/Lang') or '')
+    title=str((reader.metadata or {}).get('/Title') or '')
+    if require_tags and (not tagged or not language or not title):
+        raise ValueError('The renderer did not retain PDF tags, document language and title.')
+    # This reports structural presence, not PDF/UA conformance. Reading order and
+    # semantic associations are qualified against exported fixtures separately.
+    return {'status': 'passed', 'format': 'pdf', 'pages': len(pages), 'layoutEngine': 'alder-page-map',
+            'tagged':tagged,'language':language,'documentTitle':title}
 
 
 def output_name(name):

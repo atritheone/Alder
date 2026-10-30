@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
-import type { Analysis, Project } from "./types";
+import type { Analysis, Project, DocNode } from "./types";
+import { generatedTextSpans, intersectsTextSpans } from "./textProjection";
+import { proofreadingLanguages } from "./proofreadingLanguages";
 
 export type ProofreadingResult = Analysis & {
   id: string;
@@ -34,6 +36,8 @@ export function useProofreading(
   targetId: string,
   project: Project | null,
   flush: () => Promise<void>,
+  document?: DocNode,
+  language?: string,
 ) {
   const [result, setResult] = useState<ProofreadingResult | null>(null);
   const [error, setError] = useState("");
@@ -54,10 +58,26 @@ export function useProofreading(
     selection && selection.source === text
       ? JSON.stringify({ start: selection.start, end: selection.end })
       : "null";
+  const languages = useMemo(
+    () =>
+      JSON.stringify(
+        project ? proofreadingLanguages(document, project, language, text) : [],
+      ),
+    [
+      document,
+      text,
+      project?.styles,
+      project?.language,
+      project?.settings.proofreadingDialect,
+      language,
+    ],
+  );
   const configuration = JSON.stringify({
     dialect:
       project?.settings.proofreadingDialect ||
-      (project?.language !== "en" ? project?.language : undefined) ||
+      (["en-AU", "en-GB", "en-US"].includes(project?.language || "")
+        ? project?.language
+        : undefined) ||
       "en-GB",
     style: project?.settings.proofreadingStyle === true,
     acceptedWords: project?.dictionary.map((entry) => entry.word) || [],
@@ -96,7 +116,8 @@ export function useProofreading(
         setResult({
           ...job,
           sourceText: source,
-          localConfiguration: configuration + projectRules + selectedRange,
+          localConfiguration:
+            configuration + projectRules + selectedRange + languages,
         });
     };
     const poll = async () => {
@@ -127,6 +148,7 @@ export function useProofreading(
               configuration: JSON.parse(configuration),
               advanced,
               range: JSON.parse(selectedRange),
+              languageRanges: JSON.parse(languages),
             },
           );
           jobId = job.id;
@@ -158,6 +180,7 @@ export function useProofreading(
     configuration,
     projectRules,
     selectedRange,
+    languages,
     refresh,
     advanced,
     flush,
@@ -165,18 +188,27 @@ export function useProofreading(
   const current =
     result?.targetId === targetId &&
     result.sourceText === text &&
-    result.localConfiguration === configuration + projectRules + selectedRange
+    result.localConfiguration ===
+      configuration + projectRules + selectedRange + languages
       ? result
       : null;
+  const generated = useMemo(
+    () => (document ? generatedTextSpans(document) : []),
+    [document],
+  );
   const visible = useMemo(
     () =>
       current
         ? {
             ...current,
-            annotations: current.annotations.filter((a) => !ignored.has(a.id)),
+            annotations: current.annotations.filter(
+              (a) =>
+                !ignored.has(a.id) &&
+                !intersectsTextSpans(generated, a.start, a.end),
+            ),
           }
         : null,
-    [current, ignored],
+    [current, ignored, generated],
   );
   return {
     result: visible,

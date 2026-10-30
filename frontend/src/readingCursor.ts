@@ -4,6 +4,7 @@ export type ReadingPosition = {
   chapterId: string;
   offset: number;
   length: number;
+  note?: import('./speechText').ReadingRange['note'];
 };
 
 export function readingPosition(

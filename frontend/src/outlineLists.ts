@@ -1,3 +1,4 @@
+import { formatPageNumber } from "./pageNumbering";
 import type { Node as PMNode } from "prosemirror-model";
 import { Plugin, type Command, type EditorState } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
@@ -105,41 +106,16 @@ export function listNumber(value: number, format: string): string {
     square: "▪",
   };
   if (bullets[format]) return bullets[format];
-  if (format.includes("alpha")) {
-    let result = "";
-    for (let n = value; n > 0; ) {
-      const digit = (n - 1) % 26;
-      result = String.fromCharCode(65 + digit) + result;
-      n = Math.floor((n - 1) / 26);
-    }
-    return format === "lower-alpha" ? result.toLowerCase() : result;
-  }
-  if (format.includes("roman") && value > 0 && value < 4000) {
-    let result = "",
-      n = value;
-    for (const [amount, symbol] of [
-      [1000, "M"],
-      [900, "CM"],
-      [500, "D"],
-      [400, "CD"],
-      [100, "C"],
-      [90, "XC"],
-      [50, "L"],
-      [40, "XL"],
-      [10, "X"],
-      [9, "IX"],
-      [5, "V"],
-      [4, "IV"],
-      [1, "I"],
-    ] as const) {
-      while (n >= amount) {
-        result += symbol;
-        n -= amount;
-      }
-    }
-    return format === "lower-roman" ? result.toLowerCase() : result;
-  }
-  return String(value);
+  const formats = {
+    "lower-alpha": "lowerLetter",
+    "upper-alpha": "upperLetter",
+    "lower-roman": "lowerRoman",
+    "upper-roman": "upperRoman",
+  } as const;
+  return formatPageNumber(
+    value,
+    formats[format as keyof typeof formats] || "decimal",
+  );
 }
 export function nextListLabel(
   template: ListTemplate,
@@ -318,11 +294,35 @@ export function applyListOptions(
     if (dispatch) {
       const tr = closeHistory(state.tr);
       for (const step of [...cleared.steps, ...formatted.steps]) tr.step(step);
-      tr.setSelection(formatted.selection);
+      tr.setSelection(formatted.selection.getBookmark().resolve(tr.doc));
       dispatch(tr);
     }
     return true;
   };
+}
+/** Ordinary list labels follow Word's repeated-letter and extended Roman
+ * conventions too; CSS lower-alpha switches to spreadsheet-style AB. */
+export function ordinaryListLabels(doc: PMNode) {
+  const labels: { pos: number; node: PMNode; label: string }[] = [];
+  doc.descendants((node, pos) => {
+    if (node.attrs.listTemplate) return false;
+    if (
+      node.type.name !== "ordered_list" ||
+      !node.attrs.listStyle ||
+      node.attrs.listStyle === "decimal"
+    )
+      return;
+    node.forEach((item, offset, index) =>
+      labels.push({
+        pos: pos + 1 + offset,
+        node: item,
+        label:
+          listNumber((node.attrs.order || 1) + index, node.attrs.listStyle) +
+          ". ",
+      }),
+    );
+  });
+  return labels;
 }
 export function outlineLists() {
   let previous: PMNode | undefined, decorations: DecorationSet;
@@ -335,6 +335,11 @@ export function outlineLists() {
         if (previous === state.doc) return decorations;
         const layout = outlineListLayout(state.doc);
         decorations = DecorationSet.create(state.doc, [
+          ...ordinaryListLabels(state.doc).map(({ pos, node, label }) =>
+            Decoration.node(pos, pos + node.nodeSize, {
+              style: `list-style-type:"${label}"`,
+            }),
+          ),
           ...layout.lists.map(({ pos, node, left }) =>
             Decoration.node(pos, pos + node.nodeSize, {
               class: "outline-list",

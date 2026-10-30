@@ -1230,29 +1230,38 @@ button.danger {
   padding-left: 17px;
   color: #666666;
 }
-.ProseMirror img {
+.ProseMirror img, [data-running-story] img {
   max-width: 100%;
   height: auto;
 }
 .ProseMirror figure {
   margin: 12px 0;
 }
-.ProseMirror table {
+[data-running-story] figure { margin: 0; }
+.ProseMirror table, [data-running-story] table {
   border-collapse: collapse;
   width: 100%;
   table-layout: fixed;
 }
-.ProseMirror th,
-.ProseMirror td {
+/* Page fragments can sit outside the continuous table's first-page bounds.
+   The page paint clip, rather than the table wrapper, owns those boundaries. */
+.ProseMirror[data-mirrored-margins] .tableWrapper,
+.ProseMirror[data-column-layout] .tableWrapper,
+.ProseMirror[data-column-layout] table,
+.ProseMirror[data-mirrored-margins] table {
+  overflow: visible;
+}
+.ProseMirror th, [data-running-story] th,
+.ProseMirror td, [data-running-story] td {
   border: 1px solid #999999;
   min-width: var(--default-cell-min-width, 25px);
   padding: 7px;
   vertical-align: top;
 }
-.ProseMirror td p {
+.ProseMirror td p, [data-running-story] td p {
   margin: 0;
 }
-.ProseMirror th { background: #eee; }
+.ProseMirror th, [data-running-story] th { background: #eee; }
 .ProseMirror .selectedCell {
   background: #d6d6d6;
   outline: 1px solid #293f5e;
@@ -3676,3 +3685,22 @@ button.library-add-button:hover {
 
 /* Hide the stationary mouse pointer during prose input, without rerendering editors. */
 html.alder-typing-pointer, html.alder-typing-pointer * { cursor: none !important; }
+/* Mail merge reuses the square document dialog and existing action controls. */
+.mail-merge-dialog { width: min(52rem, calc(100vw - 3rem)); }
+.merge-mapping { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .6rem 1.2rem; }
+.merge-mapping label { display: grid; gap: .25rem; }
+.merge-preview { max-height: 22rem; overflow: auto; padding: 1rem; background: var(--paper, #fff); color: #222; }
+.merge-preview > section + section { margin-top: 1.5rem; }
+.merge-preview .ProseMirror { padding: .5rem 0 0; min-height: 0; }
+.merge-preview p { white-space: pre-wrap; }
+.merge-preview img { max-width: 100%; }
+.merge-preview table { border-collapse: collapse; max-width: 100%; }
+
+/* Editing affordances never alter the printed field geometry. */
+.ProseMirror .form-field { cursor: pointer; }
+.ProseMirror .form-field:hover, .ProseMirror .form-field.ProseMirror-selectednode { outline: 1px solid var(--accent); outline-offset: 1px; }
+.ProseMirror .form-field[data-empty-field] { display: inline-block; min-width: 3ch; }
+.ProseMirror .form-field[data-empty-field]::before { content: attr(data-placeholder); color: var(--muted); }
+.form-field-value { border: 0; padding: 0; margin: 0; min-width: 0; }
+.form-field-value textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
+.publication-sheet .form-field::before, .page-snapshot .form-field::before { content: none; }

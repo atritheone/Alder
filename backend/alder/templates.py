@@ -72,6 +72,7 @@ class Templates:
             if not project['book']['chapters']:
                 project['book']['chapters'] = [{'id':uid('chapter_'), 'title':'Document', 'include':True, 'document':{'type':'doc','content':[{'type':'paragraph'}]}}]
         else:
+            project['settings'].pop('stationeryPreset', None)
             project['book'] = {'version':1, 'chapters':[{'id':uid('chapter_'), 'title':'Document', 'include':True,
                 'document':{'type':'doc','content':[{'type':'paragraph'}]}}]}
         # Only images actually used by the template are collected.

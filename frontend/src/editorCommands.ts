@@ -28,6 +28,10 @@ const characterMarks = [
 ];
 import { paragraphAppearanceKeys } from "./paragraphAppearance";
 export const paragraphProperties = [
+  'suppressLineNumbers',
+  "hyphenation",
+  "textLanguage",
+  "textDirection",
   "headingNumbered",
   "headingStart",
   ...paragraphAppearanceKeys,

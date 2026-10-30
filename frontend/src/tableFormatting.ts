@@ -9,7 +9,7 @@ import {
   TextSelection,
 } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
-import { parallelTableRows } from "./tableStructure";
+import { parallelCellStories } from "./tableStructure";
 import {
   CellSelection,
   isInTable,
@@ -167,12 +167,47 @@ export function rowSpec(spec: NodeSpec): NodeSpec {
       "tr",
       {
         "data-allow-split": String(node.attrs.allowSplit),
+        "data-note-row-id": node.attrs.blockId,
         style: validNumber(node.attrs.minHeight, 1440)
           ? `height:${node.attrs.minHeight}pt`
           : null,
       },
       0,
     ],
+  };
+}
+
+/** ProseMirror's default HTML reader accepts only whole-pixel grid widths.
+ * Physical stationery and imported Word tables also need fractional widths. */
+export function preciseCellSpec(spec: NodeSpec): NodeSpec {
+  return {
+    ...spec,
+    parseDOM: spec.parseDOM?.map((rule) =>
+      !("tag" in rule)
+        ? rule
+        : {
+            ...rule,
+            getAttrs(dom: HTMLElement) {
+              const attrs = rule.getAttrs?.(dom);
+              if (attrs === false) return false;
+              const source = dom.getAttribute("data-colwidth") || "";
+              const widths = /^\d+(?:\.\d+)?(?:,\d+(?:\.\d+)?)*$/.test(source)
+                ? source.split(",").map(Number)
+                : null;
+              return {
+                ...attrs,
+                colwidth:
+                  widths &&
+                  widths.length === Number(dom.getAttribute("colspan") || 1) &&
+                  widths.every(
+                    (w) => Number.isFinite(w) && w >= 0 && w <= 10000,
+                  )
+                    ? widths
+                    : null,
+              };
+            },
+          },
+    ),
   };
 }
 export function tableContext(state: EditorState) {
@@ -186,9 +221,7 @@ export type TableAppearance = {
   rows: Record<string, any>;
   columnWidth?: number;
 };
-export function selectedTableProperties(
-  state: EditorState,
-):
+export function selectedTableProperties(state: EditorState):
   | (TableAppearance & {
       identity: string;
       columns: number;
@@ -215,7 +248,7 @@ export function selectedTableProperties(
   });
   return {
     identity: rect.table.attrs.blockId as string,
-    parallelRows: parallelTableRows(rect.table),
+    parallelRows: parallelCellStories(rect.table),
     table: { align: rect.table.attrs.align },
     cells: Object.fromEntries(
       Object.entries(cellDefaults).map(([key, value]) => [

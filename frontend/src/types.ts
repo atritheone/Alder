@@ -56,6 +56,8 @@ export type Placement = {
   frozenText: string | null;
 };
 export type Section = {
+  matter?: 'frontmatter' | 'bodymatter' | 'backmatter';
+  showTitle?: boolean;
   id: string;
   title: string;
   role: string;
@@ -108,12 +110,16 @@ export type Pronunciation = {
 };
 export type StyleKind = "paragraph" | "character";
 export type StyleProperties = {
+  suppressLineNumbers?: boolean | null;
   headingNumbered?: boolean | null;
   fontFamily?: string | null;
   fontSize?: number | null;
   lineHeight?: number | null;
   lineSpacing?: number | null;
   lineSpacingMode?: "multiple" | "exact" | "atLeast" | null;
+  hyphenation?: boolean | null;
+  textLanguage?: string | null;
+  textDirection?: 'ltr' | 'rtl' | null;
   keepWithNext?: boolean | null;
   keepTogether?: boolean | null;
   widowOrphan?: boolean | null;
@@ -140,6 +146,7 @@ export type NamedStyle = StyleProperties & {
 };
 export type Project = {
   lastImport?: {
+    bookStructure?: boolean;
     name: string;
     clipId?: string;
     warnings?: string[];
@@ -162,6 +169,8 @@ export type Project = {
   pronunciation: Pronunciation[];
   styles: NamedStyle[];
   settings: {
+    stationeryPreset?: string | null;
+    citationStyle?: import('./citationTypes').CitationStyle;
     pronunciationDictionaries?: string[];
     disabledPronunciationDictionaries?: string[];
     author: string;
@@ -175,6 +184,11 @@ export type Project = {
     marginBottomMm?: number;
     marginLeftMm?: number;
     gutterMm?: number;
+    mirrorMargins?: boolean;
+    pageBorder?: import('./pageBorder').PageBorder | null;
+    watermark?: import('./watermark').Watermark | null;
+    lineNumbering?: import('./lineNumbering').LineNumbering | null;
+    noteOptions?: import('./noteOptions').NoteOptions;
     fontFamily: string;
     fontSize: number;
     lineHeight: number;
@@ -192,6 +206,8 @@ export type RawSource = {
   error?: string;
 };
 export type Chapter = {
+  matter?: 'frontmatter' | 'bodymatter' | 'backmatter';
+  showTitle?: boolean;
   rawSource?: RawSource;
   rawFormat?: "markdown" | "html";
   id: string;

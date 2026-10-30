@@ -5,6 +5,7 @@ import {
 } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
 import { imageCrop, type ImageCrop } from "./imageCrop";
+import { imageWrapping, type ImageWrap } from "./imageWrapping";
 
 export function selectedImage(state: EditorState) {
   const selection = state.selection;
@@ -26,6 +27,8 @@ export function setImageProperties(
     src?: string;
     placement?: "inline" | "block";
     crop?: ImageCrop | null;
+    wrap?: ImageWrap;
+    wrapGap?: number;
   },
 ): Command {
   return (state, dispatch) => {
@@ -41,6 +44,7 @@ export function setImageProperties(
       return false;
     try {
       imageCrop(values.crop);
+      imageWrapping(values);
     } catch {
       return false;
     }
@@ -56,12 +60,16 @@ export function setImageProperties(
     });
     if (position == null) return false;
     const node = state.doc.nodeAt(position)!;
-    const { placement, ...properties } = values;
+    const { placement: requestedPlacement, ...properties } = values;
+    const placement =
+      requestedPlacement ??
+      (values.wrap && values.wrap !== "none" ? "inline" : undefined);
     if (placement && !["inline", "block"].includes(placement)) return false;
     const attrs = {
       ...node.attrs,
       ...properties,
     };
+    if (placement === "block") attrs.wrap = "none";
     const tr = closeHistory(state.tr);
     if (!placement || (placement === "inline") === node.isInline) {
       tr.setNodeMarkup(position, undefined, attrs);
@@ -91,6 +99,20 @@ export function setImageProperties(
         selected = pos;
     });
     if (selected < 0) return false;
+    // A wrapped picture is anchored to the start of its paragraph. Keeping it
+    // in the authored paragraph makes text moves, undo and exchange carry the
+    // picture without a second, fallible identity lookup during reflow.
+    if (attrs.wrap && attrs.wrap !== "none") {
+      const anchor = tr.doc.resolve(selected);
+      if (anchor.parent.isTextblock && anchor.parentOffset > 0) {
+        const picture = tr.doc.nodeAt(selected)!;
+        tr.delete(selected, selected + picture.nodeSize).insert(
+          anchor.start(),
+          picture,
+        );
+        selected = anchor.start();
+      }
+    }
     dispatch?.(
       tr.setSelection(NodeSelection.create(tr.doc, selected)).scrollIntoView(),
     );

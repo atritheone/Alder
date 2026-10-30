@@ -8,18 +8,30 @@ import { desktopExecutable } from "./desktop-paths.mjs";
 
 const target = Number(process.env.ALDER_LAYOUT_PAGES || 100);
 const mixedSections = process.env.ALDER_LAYOUT_SECTIONS === "1";
+const hyphenation = process.env.ALDER_LAYOUT_HYPHENATION === "1";
 if (![100, 500, 1000].includes(target))
   throw new Error("Choose 100, 500 or 1000 target pages.");
 const directory = path.resolve("work/layout-performance");
 fs.mkdirSync(directory, { recursive: true });
 const reportPath = path.join(
   directory,
-  `${target}${mixedSections ? "-sections" : ""}.json`,
+  `${target}${mixedSections ? "-sections" : ""}${hyphenation ? "-hyphenation" : ""}.json`,
 );
 const report = {
   status: "running",
   targetPages: target,
+  measuredAt: new Date().toISOString(),
+  machine: {
+    platform: process.platform,
+    architecture: process.arch,
+    cpu: os.cpus()[0]?.model,
+    logicalProcessors: os.cpus().length,
+    memoryGiB: Math.round(os.totalmem() / 1024 ** 3),
+    font: "Cambria",
+    baseline: "600 x 720 CSS pixels; 40 pixel margins; 18pt exact leading",
+  },
   mixedSections,
+  hyphenation,
   steps: [],
   limitations: [
     "Renderer highlight scheduling only; no audio engine or cross-platform performance certification.",
@@ -63,6 +75,12 @@ try {
     page.getByRole("textbox", { name: "Text editor", exact: true }),
   ).toBeVisible();
   const ready = async () => {
+    if (hyphenation)
+      await expect
+        .poll(() => page.locator(".discretionary-hyphen").count(), {
+          timeout: 30000,
+        })
+        .toBeGreaterThan(100);
     await page.evaluate(
       () =>
         new Promise((resolve) =>
@@ -79,27 +97,25 @@ try {
       })
       .toBeGreaterThan(0);
     return page.evaluate(() =>
-      window.__layoutProbe
-        .pages()
-        .map((p) => ({
-          from: p.from,
-          to: p.to,
-          ...(p.frame
-            ? {
-                frame: {
-                  top: p.frame.top,
-                  left: p.frame.left,
-                  width: p.frame.layout.width,
-                  height: p.frame.layout.height,
-                },
-              }
-            : {}),
-        })),
+      window.__layoutProbe.pages().map((p) => ({
+        from: p.from,
+        to: p.to,
+        ...(p.frame
+          ? {
+              frame: {
+                top: p.frame.top,
+                left: p.frame.left,
+                width: p.frame.layout.width,
+                height: p.frame.layout.height,
+              },
+            }
+          : {}),
+      })),
     );
   };
   const started = performance.now();
   await page.evaluate(
-    ({ target, mixedSections }) => {
+    ({ target, mixedSections, hyphenation }) => {
       window.__layoutProbe.pageSize({ width: 600, height: 720, margin: 40 });
       window.__layoutProbe.document({
         type: "doc",
@@ -107,6 +123,7 @@ try {
           type: "paragraph",
           attrs: {
             blockId: `benchmark-${i}`,
+            hyphenation,
             lineSpacingMode: "exact",
             lineSpacing: 18,
             spaceAfter: 0,
@@ -145,21 +162,37 @@ try {
         ),
       });
     },
-    { target, mixedSections },
+    { target, mixedSections, hyphenation },
   );
   let map = await ready();
   report.pages = map.length;
   report.initialMilliseconds = performance.now() - started;
   save();
   for (const fraction of [0, 0.5, 0.9]) {
+    const profiler =
+      process.env.ALDER_LAYOUT_PROFILE === "1" && fraction === 0
+        ? await page.context().newCDPSession(page)
+        : null;
+    if (profiler) {
+      await profiler.send("Profiler.enable");
+      await profiler.send("Profiler.start");
+    }
     const start = performance.now();
     await page.evaluate((fraction) => {
       const text = window.__layoutProbe.text();
       const at = Math.floor(text.length * fraction);
-      window.__layoutProbe.edit(at, at, " local edit");
+      window.__layoutProbe.edit(at, at, " measured words");
     }, fraction);
     const incremental = await ready();
     const milliseconds = performance.now() - start;
+    if (profiler) {
+      const data = await profiler.send("Profiler.stop");
+      fs.writeFileSync(
+        path.join(directory, "edit-profile.json"),
+        JSON.stringify(data.profile),
+      );
+      await profiler.detach();
+    }
     const fullStart = performance.now();
     await page.evaluate(() => window.__layoutProbe.fullLayout());
     map = await ready();
@@ -191,6 +224,9 @@ try {
       maxMilliseconds: durations[39],
     };
   });
+  report.layoutTimings = await page.evaluate(() =>
+    window.__layoutProbe.timings(),
+  );
   report.status = "passed";
 } catch (error) {
   report.status = "failed";

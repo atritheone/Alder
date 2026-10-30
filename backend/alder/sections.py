@@ -4,13 +4,15 @@ from .page_numbering import validate_numbering
 
 
 def validate_section(attrs):
+    from .note_options import note_options
+    note_options(attrs.get('noteOptions'))
     from .running_matter import validate_running_matter
     validate_running_matter(attrs.get('runningMatter'), section=True)
     validate_numbering(attrs.get('numberingStart'), attrs.get('numberingFormat'))
     if attrs.get('kind', 'nextPage') not in ('nextPage', 'continuous', 'oddPage', 'evenPage'):
         raise ValueError('Unsupported section break.')
     page = attrs.get('page', {})
-    if not isinstance(page, dict) or set(page) - set(PAGE_FIELDS) - {'pageSize', 'orientation', 'marginMm'}:
+    if not isinstance(page, dict) or set(page) - set(PAGE_FIELDS) - {'pageSize', 'orientation', 'marginMm', 'columns', 'pageBorder', 'watermark', 'lineNumbering'}:
         raise ValueError('Invalid section page settings.')
     if page.get('pageSize', 'A4') not in (*PAGE_FORMAT['sizes'], 'Custom') or page.get('orientation', 'portrait') not in ('portrait', 'landscape'):
         raise ValueError('Invalid section paper or orientation.')
@@ -22,6 +24,12 @@ def validate_section(attrs):
 
 
 def write_docx_geometry(section, settings):
+    from .line_numbering import write_line_numbering
+    write_line_numbering(section,settings.get('lineNumbering'))
+    from .page_border import write_page_border
+    write_page_border(section,settings.get('pageBorder'))
+    from .columns import write_columns
+    write_columns(section,settings.get('columns'))
     from docx.shared import Mm
     from docx.enum.section import WD_ORIENT
     geometry = page_geometry(settings)

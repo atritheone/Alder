@@ -10,7 +10,13 @@ import { isRevisionMark, type RevisionStamp } from "./trackedChanges";
 import type { FormatLog } from "./trackedFormatting";
 import { validateReviewMarkup } from "./reviewMarkup";
 import { projectText } from "./textProjection";
+import { validCitationItems } from './citationTypes';
+import { validBibliography } from './documentCitations';
 import type { ParagraphFormatLog } from "./trackedParagraphFormatting";
+import {textBoxProperties,validTextBoxContent} from "./textBoxes";
+import {validDocumentNote} from './documentNotes';
+import {equationProperties,importedMath} from "./equations";
+import {formFieldProperties} from './formFields';
 
 export function clipboardText(schema: Schema, slice: Slice) {
   const fragment = slice.content.firstChild?.isInline
@@ -52,12 +58,31 @@ export function clipboardSlice(
   container.innerHTML = html;
   const root = container.content;
   validateReviewMarkup(root);
+  for(const el of root.querySelectorAll('[data-equation]')) equationProperties(JSON.parse(el.getAttribute('data-equation')!));
+  for(const el of root.querySelectorAll('math'))if(!el.closest('[data-equation]'))importedMath(el);
+  for(const element of root.querySelectorAll('[data-form-field]')) {
+    try { formFieldProperties(JSON.parse(element.getAttribute('data-form-field')!)); }
+    catch { throw new Error('The copied form field contains invalid properties. The document was not changed.'); }
+  }
+  for(const element of root.querySelectorAll('[data-text-box]')) {
+    try { textBoxProperties(JSON.parse(element.getAttribute('data-text-box')!)); }
+    catch { throw new Error('The copied text box contains invalid properties. The document was not changed.'); }
+  }
+  for(const element of root.querySelectorAll('[data-document-citation],[data-document-bibliography]')){
+    try{const citation=element.hasAttribute('data-document-citation'),value=JSON.parse(element.getAttribute(citation?'data-document-citation':'data-document-bibliography')!);if(!(citation?validCitationItems(value.items):validBibliography(value)))throw new Error();}
+    catch{throw new Error('The copied citation contains invalid source metadata. The document was not changed.');}
+  }
+  for(const element of root.querySelectorAll('[data-document-note]')){
+    let value;
+    try{value=JSON.parse(element.getAttribute('data-document-note')!);if(!validDocumentNote(value))throw new Error();schema.nodeFromJSON(value.body).check();}
+    catch{throw new Error('The copied note contains unsupported or invalid content. The document was not changed.');}
+  }
   root
     .querySelectorAll("script,style,iframe,object,embed,meta,link")
     .forEach((node) => node.remove());
   root
     .querySelectorAll(
-      'img.ProseMirror-separator,br.ProseMirror-trailingBreak,[data-heading-marker="true"],.heading-number,[data-outline-number="true"]',
+      'img.ProseMirror-separator,br.ProseMirror-trailingBreak,[data-heading-marker="true"],.heading-number,[data-outline-number="true"],[data-discretionary-hyphen="true"]',
     )
     .forEach((node) => node.remove());
   root.querySelectorAll("[href],[src]").forEach((node) => {
@@ -96,7 +121,21 @@ export function clipboardSlice(
     }
     return attrs;
   };
-  const slice = DOMParser.fromSchema(schema).parseSlice(root);
+  const parsed = DOMParser.fromSchema(schema).parseSlice(root);
+  // parseSlice opens every non-leaf ancestor, including atomic inline fields
+  // and text boxes. Opening those wrappers pastes only their wording and loses
+  // their identity/properties. Only ordinary container edges may merge.
+  const openDepth = (last: boolean) => {
+    let depth = 0;
+    for (let n = last ? parsed.content.lastChild : parsed.content.firstChild;
+      n && !n.isLeaf && !n.isAtom; n = last ? n.lastChild : n.firstChild) depth++;
+    return depth;
+  };
+  const slice = new Slice(parsed.content, Math.min(parsed.openStart,openDepth(false)), Math.min(parsed.openEnd,openDepth(true)));
+  slice.content.descendants(node=>{
+    if(node.type.name === "text_box" && !validTextBoxContent(node.toJSON().content))
+      throw new Error('The copied text box contains unsupported content. The document was not changed.');
+  });
   const bookmarks = copiedBookmarkTargets(slice.content);
   const revisions = new Map<string, string>(),
     paragraphIds = new Map<string, string>();
@@ -131,6 +170,7 @@ export function clipboardSlice(
   });
   const clean = (node: PMNode): PMNode | null => {
     const attrs = styleAttrs({ ...node.attrs });
+    if(node.type.name==='document_note')attrs.body=clean(schema.nodeFromJSON(node.attrs.body))!.toJSON();
     if (attrs.revisionProperties) {
       const log = attrs.revisionProperties as ParagraphFormatLog;
       attrs.revisionProperties = {
@@ -173,6 +213,8 @@ export function clipboardSlice(
       if (!bookmarks.links.has(String(attrs.targetId))) return null;
       attrs.targetId = bookmarks.links.get(String(attrs.targetId));
     }
+    if(node.type.name==='index_reference')attrs.targetIds=node.attrs.targetIds.map((id:string)=>bookmarks.links.get(id)||id);
+    if(node.type.name==='index_entry' && attrs.rangeId)attrs.rangeId=bookmarks.links.get(String(attrs.rangeId))||attrs.rangeId;
     if (node.type.name === "bookmark" && attrs.range)
       attrs.range = bookmarks.complete.has(String(attrs.blockId));
     if ("blockId" in attrs) attrs.blockId = bookmarks.nodes.get(node) || null;

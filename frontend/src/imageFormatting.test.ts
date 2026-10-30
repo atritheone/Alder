@@ -8,6 +8,8 @@ import { projectText, projectedRange } from "./textProjection";
 import { proofreadingTransaction } from "./proofreadingEdits";
 import { replaceMatches } from "./findText";
 import { imageCrop, croppedImageSource } from "./imageCrop";
+import { documentUnits, moveArrangementUnit } from "./arrangementUnits";
+import { imageAnchors } from "./imageAnchors";
 
 const image = (id: string) =>
   schema.nodes.image.create({
@@ -16,6 +18,79 @@ const image = (id: string) =>
     src: "/api/projects/test/assets/asset",
     alt: "Original",
   });
+it("anchors wrapping to the paragraph without losing marked text, identity or undo", () => {
+  const picture = schema.nodes.inline_image.create({
+    blockId: "anchor",
+    src: "/picture.png",
+    alt: "Picture",
+  });
+  const doc = schema.nodes.doc.create(null, [
+    schema.nodes.paragraph.create(null, [
+      schema.text("Before ", [schema.marks.strong.create()]),
+      picture,
+      schema.text("after."),
+    ]),
+    schema.nodes.paragraph.create(null, schema.text("Destination.")),
+  ]);
+  let state = EditorState.create({ doc, plugins: [history()] });
+  expect(
+    setImageProperties("anchor", {
+      width: 100,
+      align: "left",
+      alt: "Picture",
+      title: null,
+      wrap: "right",
+      wrapGap: 8,
+    })(state, (tr) => (state = state.apply(tr))),
+  ).toBe(true);
+  expect(state.doc.firstChild!.firstChild!.attrs).toMatchObject({
+    blockId: "anchor",
+    wrap: "right",
+    wrapGap: 8,
+  });
+  expect(state.doc.textContent).toBe(doc.textContent);
+  expect(state.doc.firstChild!.child(1).marks[0].type.name).toBe("strong");
+  const restored = schema.nodeFromJSON(state.doc.toJSON());
+  expect(restored.firstChild!.firstChild!.attrs.wrap).toBe("right");
+  const unit = documentUnits(state.doc).find(
+    (unit) => unit.kind === "paragraph",
+  )!;
+  const moved = moveArrangementUnit(state, unit, state.doc.content.size)!;
+  expect(moved.tr.doc.lastChild!.firstChild!.attrs.blockId).toBe("anchor");
+  expect(moved.tr.doc.lastChild!.firstChild!.attrs.wrap).toBe("right");
+  undo(state, (tr) => (state = state.apply(tr)));
+  expect(state.doc.eq(doc)).toBe(true);
+});
+it("reanchors a sentence moved into other prose in the same undo group", () => {
+  const picture = schema.nodes.inline_image.create({
+    blockId: "anchor",
+    src: "/picture.png",
+    wrap: "left",
+  });
+  const doc = schema.nodes.doc.create(null, [
+    schema.nodes.paragraph.create(null, [
+      picture,
+      schema.text("First sentence. Second sentence."),
+    ]),
+    schema.nodes.paragraph.create(
+      null,
+      schema.text("Destination. Other words."),
+    ),
+  ]);
+  let state = EditorState.create({ doc, plugins: [history(), imageAnchors()] });
+  const sentence = documentUnits(doc).find((unit) => unit.kind === "sentence")!;
+  const moved = moveArrangementUnit(
+    state,
+    sentence,
+    doc.firstChild!.nodeSize + 1 + 13,
+  )!;
+  state = state.applyTransaction(moved.tr).state;
+  expect(state.doc.lastChild!.firstChild!.attrs.blockId).toBe("anchor");
+  expect(state.doc.lastChild!.textContent).toContain("First sentence.");
+  expect(state.doc.firstChild!.textContent).toBe("Second sentence.");
+  undo(state, (tr) => (state = state.applyTransaction(tr).state));
+  expect(state.doc.eq(doc)).toBe(true);
+});
 describe("image properties", () => {
   it("keeps crops non-destructive and independently undoable", () => {
     const doc = schema.nodes.doc.create(null, image("one"));
