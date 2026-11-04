@@ -1,8 +1,10 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="flash/alder_logo_white_transparent.png" />
+  <a href="#gh-dark-mode-only">
+    <img src="flash/alder_logo_white_transparent.png" alt="Alder logo" width="300" />
+  </a>
+  <a href="#gh-light-mode-only">
     <img src="flash/alder_logo_black_transparent.png" alt="Alder logo" width="300" />
-  </picture>
+  </a>
 </p>
 
 <h1 align="center">Alder</h1>
