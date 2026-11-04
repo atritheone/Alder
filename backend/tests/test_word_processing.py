@@ -17,6 +17,24 @@ def manuscript(nodes):
     return validate_project(project)
 
 
+def test_pdf_bullet_markers_with_bundled_font_fallback(monkeypatch, tmp_path):
+    from alder import fonts
+    from pypdf import PdfReader
+    if not (fonts.bundled_directory() / 'LiberationSerif-Regular.ttf').is_file():
+        pytest.skip('Bundled publication fonts not provisioned; run scripts/prepare-test-fonts.py.')
+    # Exercise the same fallback even on Windows machines with Cambria installed.
+    monkeypatch.setattr(fonts, 'installed_faces', lambda: [])
+    project = manuscript([
+        {'type': 'bullet_list', 'attrs': {'listStyle': marker},
+         'content': [{'type': 'list_item', 'content': [paragraph(marker)]}]}
+        for marker in ('disc', 'circle', 'square')
+    ])
+    result = build_export(project, 'pdf', tmp_path)
+    text = '\n'.join(page.extract_text() for page in PdfReader(result['path']).pages)
+    for label, marker in (('\u2022', 'disc'), ('\u25cb', 'circle'), ('\u25aa', 'square')):
+        assert f'{label} {marker}' in text
+
+
 def test_native_word_document_without_a_numbering_part_opens(tmp_path):
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
     doc=Document();doc.add_paragraph('A genuine unnumbered document.')
