@@ -102,7 +102,7 @@ def test_unmatched_top_level_outline_keeps_intent_but_honours_word_restart(tmp_p
 
 @pytest.mark.parametrize('backward',[False,True])
 @pytest.mark.parametrize('continued',[False,True])
-@pytest.mark.parametrize('cell',[False,True])
+@pytest.mark.parametrize('cell',[False,'table_cell','table_header'])
 @pytest.mark.parametrize('restart',[False,True])
 @pytest.mark.parametrize('outline',[False,True])
 def test_native_list_move_keeps_preceding_and_following_chains(tmp_path,backward,continued,cell,restart,outline):
@@ -116,7 +116,7 @@ def test_native_list_move_keeps_preceding_and_following_chains(tmp_path,backward
             if n['type']=='ordered_list' and n.get('attrs',{}).get('revisionMove'):n['attrs']['continuePrevious']=True
         earlier=copy.deepcopy(nodes[3]);earlier['attrs']={**earlier['attrs'],'order':7,'continuePrevious':False};earlier['content'][0]['content'][0]['content'][0]['text']='Earlier item'
         nodes.insert(0,earlier)
-    if cell:doc['content']=[{'type':'table','content':[{'type':'table_row','content':[{'type':'table_cell','content':nodes}]}]}]
+    if cell:doc['content']=[{'type':'table','content':[{'type':'table_row','content':[{'type':cell,'content':nodes}]}]}]
     p=validate_project(p);doc=p['book']['chapters'][0]['document']
     restored=import_document(Path(build_export(p,'docx',tmp_path)['path']))['document']
     assert len(revision_summary(restored))==1

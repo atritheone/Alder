@@ -93,8 +93,16 @@ def test_cross_cell_comments_and_nested_changes_exchange(tmp_path,format):
         assert document_text(actual)==document_text(expected)
         assert actual['content'][1]['content'][0]['content'][1]['content'][0]['attrs'].get('align','left')==('right' if view=='final' else 'left')
 
-def test_changed_grid_refuses_without_altering_inputs():
+def test_complete_column_deletion_preserves_reviews_without_altering_inputs():
     a=doc(table());b=deepcopy(a);b['content'][0]['content'][0]['content'].pop()
+    before=deepcopy((a,b))
+    result=compare(a,b)
+    assert len(revision_summary(result))==1
+    assert (a,b)==before
+
+def test_partial_column_deletion_refuses_without_altering_inputs():
+    a=doc(table());a['content'][0]['content'].append(deepcopy(a['content'][0]['content'][0]))
+    b=deepcopy(a);b['content'][0]['content'][0]['content'].pop()
     before=deepcopy((a,b))
     with pytest.raises(ValueError,match='boundaries'):compare_documents(a,b,'Reviewer',DATE)
     assert (a,b)==before

@@ -359,7 +359,8 @@ def restore_word_list_moves(document,independent_roots=frozenset()):
                     item.setdefault('attrs',{}).update(revisionMove={**first,'originalId':original},blockId=original if first['kind']=='insertion' else 'block_'+uuid4().hex)
                     for paragraph in paragraphs:paragraph['attrs'].pop('revisionMove')
     def walk(node):
-        if node['type'] in STRUCTURAL_BLOCKS:
+        # Cells contain independent moves; they cannot themselves carry a move.
+        if node['type'] in STRUCTURAL_BLOCKS and node['type'] not in ('table_cell','table_header'):
             paragraphs=[c for c in identity_nodes(node) if c['type']=='paragraph']
             moves=[c.get('attrs',{}).get('revisionMove') for c in paragraphs]
             # A cell may contain both ends of a list/paragraph move. Its table
