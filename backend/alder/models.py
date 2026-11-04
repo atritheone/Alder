@@ -37,7 +37,7 @@ def text_document(text: str) -> dict:
 
 def document_text(document: dict) -> str:
     """Stable, lossless text projection of supported blocks, using LF boundaries."""
-    if any(mark.get('type') == 'revision_deletion' for mark in document.get('marks', [])):
+    if (document.get('attrs',{}).get('revisionMove') or document.get('attrs',{}).get('revisionBlock') or {}).get('kind')=='deletion' or any(mark.get('type') == 'revision_deletion' for mark in document.get('marks', [])):
         return ''
     kind = document.get("type", "")
     if kind == "text_box":
@@ -50,7 +50,7 @@ def document_text(document: dict) -> str:
         return ""
     if kind in ("horizontalRule", "horizontal_rule", "pageBreak", "page_break", "column_break", "section_break"):
         return ""
-    parts = [document_text(child) for child in document.get("content", [])]
+    parts = [document_text(child) for child in document.get("content", []) if (child.get('attrs',{}).get('revisionMove') or child.get('attrs',{}).get('revisionBlock') or {}).get('kind')!='deletion']
     if kind in ("tableRow", "table_row"):
         return "\t".join(parts)
     if kind in ("doc", "bibliography", "table_of_contents", "blockquote", "bulletList", "bullet_list", "orderedList", "ordered_list",
@@ -61,7 +61,7 @@ def document_text(document: dict) -> str:
 
 NODE_TYPES = {
     "citation", "bibliography",
-    "document_note", "text_box", "form_field", "form_block", "equation",
+    "document_note", "text_box", "form_field", "form_block", "equation", "shape",
     "index_entry", "index_reference",
     "table_of_contents",
     "revision_break",
@@ -110,6 +110,11 @@ def validate_document(document: Any) -> dict:
             if not children or any(child.get('type') != 'paragraph' for child in children): raise ValidationError('A bibliography contains generated paragraphs.')
         if node['type'] in ('citation','bibliography') and attrs.get('renderedStyle','apa') not in ('apa','ieee'):
             raise ValidationError('Unsupported citation style.')
+        if node['type'] == 'shape':
+            from .document_shapes import properties
+            try: properties(attrs)
+            except ValueError as exc: raise ValidationError(str(exc)) from exc
+            if children or node.get('marks'):raise ValidationError('A shape has no text content or character formatting.')
         if node['type'] == 'equation':
             from .equations import validate as validate_equation
             try: validate_equation(node)
@@ -142,8 +147,13 @@ def validate_document(document: Any) -> dict:
             if node['type']=='index_reference' and any(child.get('type')!='text' for child in children):raise ValidationError('Index page references contain only text.')
         if attrs.get('revisionProperties') is not None:
             from .paragraph_revisions import validate_paragraph_log
-            if node['type'] not in ('paragraph', 'heading'): raise ValidationError('Only prose paragraphs have reviewed paragraph properties.')
+            if node['type'] not in ('paragraph', 'heading','table','table_row','table_cell','table_header','ordered_list','bullet_list'): raise ValidationError('This structure does not support reviewed properties.')
             validate_paragraph_log(attrs['revisionProperties'])
+            base_kind=attrs['revisionProperties']['base']['type']
+            if (node['type'] in ('table','table_row','table_cell','table_header') or base_kind in ('table','table_row','table_cell','table_header')) and node['type']!=base_kind:
+                raise ValidationError('Cell formatting revisions must retain their cell type.')
+            if (node['type'] in ('ordered_list','bullet_list')) != (base_kind in ('ordered_list','bullet_list')):
+                raise ValidationError('List formatting revisions must retain their item containers.')
         if node['type'] == 'comment_anchor':
             from .document_comments import validate_anchor
             try:
@@ -284,6 +294,8 @@ def validate_document(document: Any) -> dict:
             walk(child, depth + 1)
 
     walk(document, 0)
+    from .tracked_moves import validate_moves
+    validate_moves(document)
     if has_list_templates:
         from .outline_lists import outline_layout
         try:outline_layout(document)

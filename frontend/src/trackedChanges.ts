@@ -10,7 +10,7 @@ import { closeHistory, isHistoryTransaction } from "prosemirror-history";
 import { ReplaceStep } from "prosemirror-transform";
 
 export type RevisionKind = "insertion" | "deletion";
-export type RevisionStamp = { id: string; author: string; date: string };
+export type RevisionStamp = { id: string; author: string; date: string; move?: boolean | null };
 export type ReviewView = "final" | "original" | "markup";
 export const revisionMark = (kind: RevisionKind) => `revision_${kind}`;
 export const isRevisionMark = (name: string) =>
@@ -25,12 +25,13 @@ export function validRevisionStamp(value: unknown): value is RevisionStamp {
     stamp.author.length <= 200 &&
     typeof stamp.date === "string" &&
     stamp.date.length <= 40 &&
+    (stamp.move == null || typeof stamp.move === "boolean") &&
     (stamp.date === "" || Number.isFinite(Date.parse(stamp.date)))
   );
 }
 export function revisionMarkSpec(kind: RevisionKind): MarkSpec {
   return {
-    attrs: { id: {}, author: { default: "" }, date: { default: "" } },
+    attrs: { id: {}, author: { default: "" }, date: { default: "" }, move: {default: null} },
     inclusive: false,
     excludes: "",
     spanning: true,
@@ -43,6 +44,7 @@ export function revisionMarkSpec(kind: RevisionKind): MarkSpec {
             id: dom.getAttribute(`data-revision-${kind}`),
             author: dom.getAttribute("data-revision-author") || "",
             date: dom.getAttribute("data-revision-date") || "",
+            move: dom.getAttribute("data-revision-move") === "true" || null,
           };
           return validRevisionStamp(attrs) ? attrs : false;
         },
@@ -54,6 +56,7 @@ export function revisionMarkSpec(kind: RevisionKind): MarkSpec {
         [`data-revision-${kind}`]: mark.attrs.id,
         "data-revision-author": mark.attrs.author,
         "data-revision-date": mark.attrs.date,
+        "data-revision-move": mark.attrs.move ? "true" : null,
         class: `document-revision-${kind}`,
       },
       0,

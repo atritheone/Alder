@@ -20,7 +20,8 @@ from narration import split_narration, validate_section_breaks, preflight_tracks
 from mutagen.id3 import ID3, APIC, TIT2, TALB, TPE1, TPE2, TPE3, TCOM, TRCK, TPOS, TCON, TLAN, TIT1, TXXX, COMM, TSSE
 from mutagen.mp3 import MP3
 
-ROOT = Path(os.environ.get("CHATTERBOX_AUDIOBOOK_ROOT", str(DATA / "audiobooks/her-many-faces")))
+from audiobook_project import project_root
+ROOT = project_root()
 HERE = Path(__file__).parent
 FFMPEG = shutil.which("ffmpeg")
 

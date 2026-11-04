@@ -4,6 +4,7 @@ import { closeHistory, isHistoryTransaction } from "prosemirror-history";
 import type { DocNode } from "./types";
 import { validNoteBody } from "./documentNotes";
 import { identifiedDocument } from "./blockIdentities";
+import { blockMoveView } from "./trackedBlockMoves";
 
 export const formFieldDefaults = {
   kind: "plain",
@@ -274,7 +275,9 @@ export function formFieldGuards(onError: (message: string) => void = () => {}) {
       if (!tr.docChanged) return true;
       try {
         const next = fields(tr.doc),
-          previous = fields(state.doc),
+          // Move ghosts share one authored field. A review decision removes a
+          // ghost, not the locked control retained at the original/destination.
+          previous = fields(tr.getMeta("reviewDecision") ? blockMoveView(state.doc, "final") : state.doc),
           unchanged = new Set(previous),
           byId = new Map(next.map((n) => [n.attrs.blockId, n]));
         for (const n of next)

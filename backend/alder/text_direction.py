@@ -15,13 +15,13 @@ import sys
 import unicodedata
 
 
-def _library_candidates():
+def _library_candidates(component='uc'):
     if sys.platform == 'win32':
         yield str(Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/icu.dll')
     elif sys.platform == 'darwin':
         yield '/usr/lib/libicucore.A.dylib'
     else:
-        found = ctypes.util.find_library('icuuc')
+        found = ctypes.util.find_library('icui18n' if component == 'i18n' else 'icuuc')
         if found:
             yield found
     # Calibre's already verified runtime includes ICU. Do not load DLLs from
@@ -34,9 +34,9 @@ def _library_candidates():
     ]
     for root in roots:
         directory = resource_executable(root, 'calibre').parent
-        patterns = ('app/bin/icuuc*.dll',) if sys.platform == 'win32' else (
-            '../Frameworks/libicuuc*.dylib', '../Frameworks/libicucore*.dylib',
-        ) if sys.platform == 'darwin' else ('lib/libicuuc.so*',)
+        patterns = (('app/bin/icuin*.dll',) if component == 'i18n' else ('app/bin/icuuc*.dll',)) if sys.platform == 'win32' else (
+            '../Frameworks/libicui18n*.dylib' if component == 'i18n' else '../Frameworks/libicuuc*.dylib', '../Frameworks/libicucore*.dylib',
+        ) if sys.platform == 'darwin' else (('lib/libicui18n.so*',) if component == 'i18n' else ('lib/libicuuc.so*',))
         for pattern in patterns:
             yield from (str(path.resolve()) for path in sorted(directory.glob(pattern)))
 

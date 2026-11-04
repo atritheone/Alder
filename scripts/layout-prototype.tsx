@@ -97,6 +97,7 @@ function Prototype() {
   });
   host.style.zoom = String(scale);
   const api = {
+    ready: () => editor.current?.isLayoutReady() || false,
     timings: () => layoutTimings.current,
     capture() {
       const started = performance.now();

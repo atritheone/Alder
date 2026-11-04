@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { useEffect, useRef, useState } from "react";
 import { AudioLines, Clock3, LoaderCircle, Play } from "lucide-react";
 import type {
@@ -254,7 +255,7 @@ function Differences({ check }: { check: SpeechCheck }) {
         <p className="narration-check-score">
           Word error rate: {(check.wordErrorRate * 100).toFixed(1)}%
           <span>
-            {check.expectedWords ?? "—"} expected · {check.heardWords ?? "—"}{" "}
+            {check.expectedWords == null ? "—" : formatInteger(check.expectedWords)} expected · {check.heardWords == null ? "—" : formatInteger(check.heardWords)}{" "}
             recognised
           </span>
         </p>
@@ -438,7 +439,7 @@ function ChunkReview({
       }
     >
       <summary>
-        <strong>Chunk {index + 1}</strong>
+        <strong>Chunk {formatInteger(index + 1)}</strong>
         <span>
           {typeof chunk.seconds === "number"
             ? `${chunk.seconds.toFixed(2)} s`
@@ -452,7 +453,7 @@ function ChunkReview({
             disabled={
               !chunk.audioUrl || !["ready", "completed"].includes(chunk.status)
             }
-            aria-label={`Listen to chunk ${index + 1}`}
+            aria-label={`Listen to chunk ${formatInteger(index + 1)}`}
             onClick={() => chunk.audioUrl && onPlayChunk(chunk.audioUrl)}
           >
             <Play size={12} />
@@ -461,7 +462,7 @@ function ChunkReview({
           {typeof chunk.startSeconds === "number" && (
             <button
               disabled={!assembled}
-              aria-label={`Seek to chunk ${index + 1}`}
+              aria-label={`Seek to chunk ${formatInteger(index + 1)}`}
               onClick={() => onSeek(chunk.startSeconds!)}
             >
               <Clock3 size={12} />
@@ -470,10 +471,10 @@ function ChunkReview({
           )}
           <span>
             {attempts.length
-              ? `Take ${selected + 1} of ${attempts.length}`
+              ? `Take ${formatInteger(selected + 1)} of ${formatInteger(attempts.length)}`
               : "Original take"}
             {typeof (chunk.selectedSeed ?? chunk.seed) === "number"
-              ? ` · seed ${chunk.selectedSeed ?? chunk.seed}`
+              ? ` · seed ${formatInteger((chunk.selectedSeed ?? chunk.seed)!)}`
               : ""}
           </span>
         </div>
@@ -509,7 +510,7 @@ function ChunkReview({
         )}
         {onReview && (
           <ListeningDecision
-            label={`chunk ${index + 1}`}
+            label={`chunk ${formatInteger(index + 1)}`}
             chunkId={chunk.id}
             ready={chunk.status === "ready"}
             review={chunk.manualReview}
@@ -521,23 +522,23 @@ function ChunkReview({
         )}
         {attempts.length > 0 && (
           <details className="narration-attempts">
-            <summary>Saved take checks ({attempts.length})</summary>
+            <summary>Saved take checks ({formatInteger(attempts.length)})</summary>
             {attempts.map((attempt) => (
               <article key={attempt.index}>
                 <header>
                   <strong>
-                    Take {attempt.index + 1}
+                    Take {formatInteger(attempt.index + 1)}
                     {attempt.index === selected ? " · selected" : ""}
                   </strong>
                   <span>
-                    Seed {attempt.seed}
+                    Seed {formatInteger(attempt.seed)}
                     {attempt.seconds
                       ? ` · ${attempt.seconds.toFixed(2)} s`
                       : ""}
                   </span>
                   {attempt.audioUrl && (
                     <button
-                      aria-label={`Listen to chunk ${index + 1}, take ${attempt.index + 1}`}
+                      aria-label={`Listen to chunk ${formatInteger(index + 1)}, take ${formatInteger(attempt.index + 1)}`}
                       onClick={() => onPlayChunk(attempt.audioUrl!)}
                     >
                       <Play size={10} />
@@ -581,9 +582,9 @@ export default function NarrationReview({
         <AudioLines size={13} />
         <span>Review chunks and wording</span>
         <small>
-          {job.chunks.length} chunks
+          {formatInteger(job.chunks.length)} chunks
           {job.verificationSummary
-            ? ` · ${job.verificationSummary.needsReview} ${job.strictVerification === false ? "wording warnings" : "need review"}`
+            ? ` · ${formatInteger(job.verificationSummary.needsReview)} ${job.strictVerification === false ? "wording warnings" : "need review"}`
             : ""}
         </small>
       </summary>
@@ -623,8 +624,8 @@ export default function NarrationReview({
           )}
           {job.manualReviewSummary && (
             <p className="narration-review-note">
-              Listening acceptance: {job.manualReviewSummary.accepted} of{" "}
-              {job.manualReviewSummary.total} chunks. Automatic recognition:{" "}
+              Listening acceptance: {formatInteger(job.manualReviewSummary.accepted)} of{" "}
+              {formatInteger(job.manualReviewSummary.total)} chunks. Automatic recognition:{" "}
               {job.reviewStatus?.replaceAll("_", " ") || "not checked"}.
             </p>
           )}

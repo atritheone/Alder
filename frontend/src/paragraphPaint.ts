@@ -1,3 +1,4 @@
+import { hasParagraphPaint, paragraphPaintCandidates } from "./paragraphPaintCandidates";
 import type { EditorView } from "prosemirror-view";
 import type { FlowPage, PageLayout } from "./pageFlow";
 import { documentCanvasWidth, pageFrame, pageAtY } from "./sectionLayout";
@@ -37,6 +38,14 @@ export function layoutParagraphPaint(
   }
   const updated: Element[] = [];
   painted.set(view, updated);
+  if (!hasParagraphPaint(view.state.doc, styles)) {
+    const sheet = sheets.get(view);
+    if (sheet?.textContent) sheet.textContent = "";
+    projectedPaint.get(view)?.remove();
+    projectedPaint.delete(view);
+    projectedPages.delete(view);
+    return;
+  }
   const canvas = view.dom.closest<HTMLElement>(".flow-canvas");
   if (!canvas || !pages.length) return;
   const origin = canvas.getBoundingClientRect();
@@ -71,7 +80,7 @@ export function layoutParagraphPaint(
     }
     styleSelectors.set(styles, namedSelector);
   }
-  const candidates = view.dom.querySelectorAll<HTMLElement>(
+  const candidates = paragraphPaintCandidates(view.dom,
     `table,blockquote${layout.mirrorMargins || projectColumns ? ",tr:not(.pagination-spacer)>td,tr:not(.pagination-spacer)>th" : ""},:is(p,h1,h2,h3,h4,h5,h6,pre)[style*="--alder-paragraph-paint"]${namedSelector ? "," + namedSelector : ""}`,
   );
   const tableEdges = new WeakMap<

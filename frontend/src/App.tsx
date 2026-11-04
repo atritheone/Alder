@@ -1,3 +1,5 @@
+import { formatInteger } from "./numberDisplay";
+import { prepareExport, type ExportProgress } from './documentExports';
 import { useTypingPointer } from "./useTypingPointer";
 import RunningMatterDialog from "./RunningMatterDialog";
 import { isLayoutField } from "./documentFields";
@@ -102,7 +104,7 @@ import { DEFAULT_SPEECH_OPTIONS } from "./SpeechOptions";
 
 import DocumentTabs from "./DocumentTabs";
 import StartScreen, { NewDocument } from "./StartScreen";
-import { openDocuments, rememberDocumentFile } from "./openDocuments";
+import { openDocuments, rememberDocumentFile, type OpeningProgress } from "./openDocuments";
 import FindPanel from "./FindPanel";
 import { replaceBookMatches } from "./bookFind";
 import DocumentOutline from "./OutlinePanel";
@@ -111,6 +113,7 @@ import { bookmarkTargets, bookBookmarkTargets } from "./bookmarkTargets";
 import ReferenceDialog from "./ReferenceDialog";
 import FieldDialog from "./FieldDialog";
 import MailMergeDialog from "./MailMergeDialog";
+import CompareDocumentsDialog from "./CompareDocumentsDialog";
 import ContentsDialog from "./ContentsDialog";
 import SourcesDialog from './SourcesDialog';
 import AccessibilityDialog from './AccessibilityDialog';
@@ -414,7 +417,12 @@ export default function App() {
     savedNumber("alder.workbenchWidth", 254, 160, 600),
   );
   const [chapterId, setChapterId] = useState<string | null>(null);
-  const [writingFocus, setWritingFocus] = useState(true);
+  const [writingFocus, setWritingFocusState] = useState(true);
+  const writingFocusRef = useRef(true);
+  const setWritingFocus = useCallback((value: boolean) => {
+    writingFocusRef.current = value;
+    setWritingFocusState(value);
+  }, []);
   const bookEditor = useRef<EditorHandle>(null);
   const imageDestination = useRef<{ book: boolean; identity: string } | null>(
     null,
@@ -440,19 +448,53 @@ export default function App() {
   useEffect(() => {
     document.title = project ? `${project.name} — Alder` : "Alder";
   }, [project?.name]);
+  const [openingProgress, setOpeningProgress] = useState<OpeningProgress | null>(null);
+  const openingController = useRef<AbortController | null>(null);
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+  const exportController = useRef<AbortController | null>(null);
+  const cancelExport = useCallback(() => {
+    exportController.current?.abort();
+    setExportProgress(value => value && { stage: 'Cancelling export', cancellable: false });
+  }, []);
+  useEffect(() => {
+    if (!exportProgress?.cancellable) return;
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); cancelExport(); }
+    };
+    window.addEventListener('keydown', cancel, true);
+    return () => window.removeEventListener('keydown', cancel, true);
+  }, [exportProgress?.cancellable, cancelExport]);
+  useEffect(() => () => exportController.current?.abort(), []);
+  const cancelOpening = useCallback(() => {
+    openingController.current?.abort();
+    setOpeningProgress(value => value && { ...value, stage: 'Cancelling', cancellable: false });
+  }, []);
+  useEffect(() => {
+    if (!openingProgress?.cancellable) return;
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); cancelOpening(); }
+    };
+    window.addEventListener('keydown', cancel, true);
+    return () => window.removeEventListener('keydown', cancel, true);
+  }, [openingProgress?.cancellable, cancelOpening]);
+  useEffect(() => () => openingController.current?.abort(), []);
   const openFiles = useCallback(
     async (files: File[]) => {
-      setBusy("Opening files…");
+      if (openingController.current) { setError('Finish or cancel the current file import first.'); return; }
+      const controller = new AbortController();
+      openingController.current = controller;
       try {
         await flush();
-        await openDocuments(files, load, findSource);
+        await openDocuments(files, load, findSource, { signal: controller.signal, progress: value => setOpeningProgress(current =>
+          current && current.name === value.name && current.index === value.index && current.total === value.total && current.stage === value.stage && current.cancellable === value.cancellable ? current : value) });
         setView("Write");
         setPanel(null);
         setNewOpen(false);
       } catch (e) {
-        setError((e as Error).message);
+        if ((e as Error).name !== 'AbortError') setError((e as Error).message);
       } finally {
-        setBusy("");
+        openingController.current = null;
+        setOpeningProgress(null);
       }
     },
     [flush, load, findSource, setError],
@@ -521,6 +563,7 @@ export default function App() {
   } | null>(null);
   const fieldRefresh = useRef(0);
   const [mailMergeDialog,setMailMergeDialog]=useState<{project:Project;origin:EditorHandle;identity:string;source:string}|null>(null);
+  const [compareDialog,setCompareDialog]=useState<{project:Project;mode:'compare'|'combine'}|null>(null);
   const [runningDialog, setRunningDialog] = useState<{
     projectId: string;
     sectionId?: string;
@@ -680,6 +723,12 @@ export default function App() {
       })().catch(cause=>setError((cause as Error).message));
     };
     window.addEventListener('alder-mail-merge',openMailMerge);
+    const openComparison=(event:Event)=>{
+      const {identity,mode='compare'}=(event as CustomEvent<{identity:string;mode?:'compare'|'combine'}>).detail;
+      if(!project||bookEditor.current?.getIdentity()!==identity)return;
+      void(async()=>{await flush();const saved=await api<Project>(`/api/projects/${project.id}`);if(bookEditor.current?.getIdentity()===identity)setCompareDialog({project:saved,mode});})().catch(cause=>setError((cause as Error).message));
+    };
+    window.addEventListener('alder-compare-documents',openComparison);
     const open = (event: Event) => {
       if (!project) return;
       const identity = (event as CustomEvent<{ identity: string }>).detail
@@ -788,6 +837,7 @@ export default function App() {
     window.addEventListener("alder-reference-navigate", navigate);
     return () => {
       window.removeEventListener('alder-mail-merge',openMailMerge);
+      window.removeEventListener('alder-compare-documents',openComparison);
       window.removeEventListener('alder-sources-dialog',openSources);
       window.removeEventListener('alder-accessibility-check',openAccessibility);
       window.removeEventListener("alder-reference-dialog", open);
@@ -1319,7 +1369,7 @@ export default function App() {
       fields: [
         {
           name: "after",
-          label: `Split after paragraph (1–${blocks.length - 1})`,
+          label: `Split after paragraph (1–${formatInteger(blocks.length - 1)})`,
           value: Math.max(1, Math.floor(blocks.length / 2)),
           type: "number",
         },
@@ -1644,28 +1694,38 @@ export default function App() {
     [project],
   );
   const doExport = async (format: string) => {
-    if (!project) return;
+    if (!project || exportController.current) return;
+    const controller = new AbortController();
+    exportController.current = controller;
+    setExportProgress({ stage: 'Preparing export', cancellable: true });
     setBusy(`Building ${format.toUpperCase()}…`);
     setExportResult(null);
     try {
       await refreshCitationsBeforeSave();
       await flush();
-      const result = await api(`/api/projects/${project.id}/export`, "POST", {
+      const saved = await api<Project>(`/api/projects/${project.id}`);
+      const result = await prepareExport(project.id, {
         format,
+        expectedRevision: saved.revision,
         options: {
-          includeGlossary: Boolean(project.settings.includeGlossary),
+          includeGlossary: Boolean(saved.settings.includeGlossary),
           includeReviewComments:
-            project.settings.includeReviewComments !== false,
+            saved.settings.includeReviewComments !== false,
           reviewView: ["html", "epub", "docx"].includes(format)
-            ? project.settings.exportReviewView || "markup"
-            : project.settings.exportReviewView === "original"
+            ? saved.settings.exportReviewView || "markup"
+            : saved.settings.exportReviewView === "original"
               ? "original"
               : "final",
         },
-      });
+      }, controller.signal, value => setExportProgress(current => current?.stage === value.stage && current.cancellable === value.cancellable ? current : value));
       setExportResult(result);
-      setHint(`${format.toUpperCase()} export ready`);
+      setHint(`${format.toUpperCase()} export ready: ${project.name}`);
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') throw error;
+      setHint('Export cancelled');
     } finally {
+      exportController.current = null;
+      setExportProgress(null);
       setBusy("");
     }
   };
@@ -1773,6 +1833,13 @@ export default function App() {
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", done);
   };
+  const openingStatus = openingProgress && (
+    <div className="open-progress document-opening-progress" role="status">
+      <span>{openingProgress.stage} {openingProgress.name}{openingProgress.total > 1 ? ` (${formatInteger(openingProgress.index)} of ${formatInteger(openingProgress.total)})` : ''}…</span>
+      <progress aria-label="Opening document" />
+      <button disabled={!openingProgress.cancellable} onClick={cancelOpening}>Cancel</button>
+    </div>
+  );
   const settingsWindow = settingsOpen && (
     <SettingsWindow
       category={settingsCategory}
@@ -1803,6 +1870,7 @@ export default function App() {
           onOpenFiles={openFiles}
         />
         {settingsWindow}
+        {openingStatus}
         {!window.alder && (
           <div className="start-settings-menu">
             <button
@@ -2174,6 +2242,7 @@ export default function App() {
       }
     >
       {settingsWindow}
+      {openingStatus}
       {versionsOpen && (
         <DocumentVersions
           projectId={project.id}
@@ -2378,6 +2447,7 @@ export default function App() {
             }}
             editorRef={bookEditor}
             onSelection={(w, selection) => {
+              if (!writingFocusRef.current) return;
               setWord(w);
               setSelection(selection);
               setCandidate("");
@@ -2500,7 +2570,7 @@ export default function App() {
                         });
                         await flush();
                         setHint(
-                          `Replaced ${groups.reduce((total, group) => total + group.matches.length, 0)} matches across ${groups.length} chapters. Undo document change restores them together.`,
+                          `Replaced ${formatInteger(groups.reduce((total, group) => total + group.matches.length, 0))} matches across ${formatInteger(groups.length)} chapters. Undo document change restores them together.`,
                         );
                       }
                     : undefined
@@ -2664,10 +2734,10 @@ export default function App() {
                     <div className="property-caption">DRAFT</div>
                     <div className="property-grid">
                       <label>
-                        Words<output>{draftCounts.words}</output>
+                        Words<output>{formatInteger(draftCounts.words)}</output>
                       </label>
                       <label>
-                        Sentences<output>{draftCounts.sentences}</output>
+                        Sentences<output>{formatInteger(draftCounts.sentences)}</output>
                       </label>
                     </div>
                     <label>
@@ -2780,6 +2850,9 @@ export default function App() {
                           return previous;
                         return { identity: sandboxIdentity, text: s };
                       });
+                      // An inactive editor may refresh its decorations or
+                      // reconcile a saved caret. It does not own global status.
+                      if (writingFocusRef.current) return;
                       setWord(w);
                       setSelection(s);
                       setCandidate("");
@@ -3297,13 +3370,13 @@ export default function App() {
                       <div className="job-actions">
                         <span>
                           {
-                            job.chunks.filter(
+                            formatInteger(job.chunks.filter(
                               (c) =>
                                 c.status === "ready" ||
                                 c.status === "completed",
-                            ).length
+                            ).length)
                           }
-                          /{job.chunks.length} chunks
+                          /{formatInteger(job.chunks.length)} chunks
                         </span>
                         {job.audioUrl && (
                           <>
@@ -3485,14 +3558,14 @@ export default function App() {
                 : proofreading.result?.status === "cancelled"
                   ? "cancelled"
                   : proofreading.result?.status === "completed"
-                    ? `${proofreading.result.annotations.length} suggestions`
+                    ? `${formatInteger(proofreading.result.annotations.length)} suggestions`
                     : "checking…"}
         </button>
         <span
           className="status-project-count"
           title={selection ? "Words in selection" : "Words in document"}
         >
-          {words(selection || bookText(project))} words
+          {formatInteger(words(selection || bookText(project)))} words
         </span>
         <button
           className={detailOpen ? "active" : ""}
@@ -3684,6 +3757,7 @@ export default function App() {
       }}/>}
       {contentsDialog && project && (
         <ContentsDialog
+          language={project.language}
           initial={
             contentsDialog.node?.attrs as
               | import("./documentContents").ContentsOptions
@@ -3824,6 +3898,7 @@ export default function App() {
           }}
         />
       )}
+      {compareDialog&&project?.id===compareDialog.project.id&&<CompareDocumentsDialog project={compareDialog.project} mode={compareDialog.mode} onClose={()=>{setCompareDialog(null);requestAnimationFrame(()=>bookEditor.current?.focus());}} onOpen={async next=>{await load(next);setCompareDialog(null);}}/>}
       {mailMergeDialog && project?.id===mailMergeDialog.project.id && <MailMergeDialog project={mailMergeDialog.project} schema={editorSchema}
         onClose={()=>{const {origin,identity}=mailMergeDialog;setMailMergeDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}}
         onInsert={name=>{
@@ -4051,9 +4126,9 @@ export default function App() {
                     <div>
                       <h2>{project.name}</h2>
                       <p>
-                        {project.sections.length} sections ·{" "}
-                        {project.book?.chapters.filter((c) => c.include).length}{" "}
-                        included chapters · {words(collatedText(project))} words
+                        {formatInteger(project.sections.length)} sections ·{" "}
+                        {formatInteger(project.book?.chapters.filter((c) => c.include).length || 0)}{" "}
+                        included chapters · {formatInteger(words(collatedText(project)))} words
                       </p>
                     </div>
                   </div>
@@ -4076,23 +4151,23 @@ export default function App() {
                   <div className="export-formats">
                     <div className="export-review-summary">
                       <p>
-                        {(project.book?.chapters || [])
+                        {formatInteger((project.book?.chapters || [])
                           .filter((chapter) => chapter.include)
                           .reduce(
                             (count, chapter) =>
                               count + commentSummary(chapter.document).open,
                             0,
-                          )}{" "}
+                          ))}{" "}
                         unresolved comment threads in the included chapters.
                       </p>
                       <p>
-                        {(project.book?.chapters || [])
+                        {formatInteger((project.book?.chapters || [])
                           .filter((chapter) => chapter.include)
                           .reduce(
                             (count, chapter) =>
                               count + revisionCount(chapter.document),
                             0,
-                          )}{" "}
+                          ))}{" "}
                         pending changes in the included chapters.
                       </p>
                       <label>
@@ -4169,15 +4244,17 @@ export default function App() {
                     ))}
                   </div>
                   {busy && (
-                    <p className="build-progress">
+                    <p className="build-progress" role="status">
                       <LoaderCircle className="spin" size={15} />
-                      {busy}
+                      {exportProgress?.stage || busy}
+                      {exportProgress && <button disabled={!exportProgress.cancellable} onClick={cancelExport}>Cancel</button>}
                     </p>
                   )}
-                  {exportResult && (
+                  {exportResult?.projectId === project.id && (
                     <div className="export-result">
                       <Check size={18} />
                       <strong>{exportResult.filename}</strong>
+                      {exportResult.sourceRevision !== project.revision && <small>The document has changed since this export.</small>}
                       <button
                         className="accent"
                         onClick={() =>

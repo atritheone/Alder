@@ -20,10 +20,12 @@ export function validRevisionBreak(value: any): boolean {
     !!value &&
     ["insertion", "deletion"].includes(value.kind) &&
     validRevisionStamp(value.stamp) &&
+    (value.scope == null || value.scope === 'item') &&
+    (value.scope !== 'item' || (typeof value.nextId === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(value.nextId))) &&
     (value.kind === "insertion"
       ? typeof value.nextId === "string" &&
         /^[A-Za-z0-9_.-]{1,128}$/.test(value.nextId)
-      : ["paragraph", "heading"].includes(value.rightType) &&
+      : (value.scope === 'item' ? value.rightType === 'list_item' : ["paragraph", "heading"].includes(value.rightType)) &&
         value.rightAttrs &&
         typeof value.rightAttrs === "object" &&
         !Array.isArray(value.rightAttrs))
@@ -42,6 +44,7 @@ export const revisionBreakSpec: NodeSpec = {
     rightType: { default: null },
     rightAttrs: { default: null },
     blockId: { default: null },
+    scope: { default: null },
   },
   toDOM: (node) => [
     "span",
@@ -50,7 +53,7 @@ export const revisionBreakSpec: NodeSpec = {
       "data-revision-break-content": JSON.stringify(node.attrs),
       class: `document-revision-break ${node.attrs.kind}`,
       contenteditable: "false",
-      "aria-label": `${node.attrs.kind === "insertion" ? "Inserted" : "Deleted"} paragraph break`,
+      "aria-label": `${node.attrs.kind === "insertion" ? "Inserted" : "Deleted"} ${node.attrs.scope === 'item' ? 'list item' : 'paragraph'} break`,
     },
   ],
   parseDOM: [
@@ -142,6 +145,9 @@ export function trackParagraphTransaction(
     start.node(-1) === end.node(-1) &&
     start.after() === end.before()
   ) {
+    if ([start.parent, end.parent].some(node => {
+      let found = false; node.forEach(child => { if (child.type.name === 'revision_break' && child.attrs.scope === 'item') found = true; }); return found;
+    })) throw Error('Review the pending item boundary before joining its paragraphs. The document has not changed.');
     // A pending inserted boundary cancelled by the same author is simply gone.
     const marker = start.nodeBefore;
     if (
@@ -196,17 +202,24 @@ export function resolveParagraphChanges(
     }
     if (node.attrs.kind === "insertion") {
       const at = tr.doc.resolve(pos),
-        boundary = at.after(),
+        boundary = node.attrs.scope === 'item' ? at.after(-1) : at.after(),
         next = tr.doc.nodeAt(boundary);
       if (
-        next?.attrs.blockId !== node.attrs.nextId ||
+        (node.attrs.scope === 'item' ? next?.firstChild?.attrs.blockId : next?.attrs.blockId) !== node.attrs.nextId ||
         !canJoin(tr.doc, boundary)
       )
         throw new Error(
           "The two sides of this paragraph change have moved apart. Bring them together before rejecting the break.",
         );
       tr.delete(pos, pos + 1);
-      tr.join(boundary - 1);
+      tr.join(boundary - 1, node.attrs.scope === 'item' ? 2 : 1);
+    } else if (node.attrs.scope === 'item') {
+      const at = tr.doc.resolve(pos), boundary = at.before();
+      if (at.parent.type.name !== 'paragraph' || at.node(-1).type.name !== 'list_item' ||
+          at.parent.attrs.blockId !== node.attrs.nextId || at.index(-1) === 0)
+        throw Error('The deleted item boundary has moved apart.');
+      tr.delete(pos, pos + 1);
+      tr.split(boundary, 1, [{ type: state.schema.nodes.list_item, attrs: node.attrs.rightAttrs }]);
     } else {
       const type = state.schema.nodes[node.attrs.rightType];
       if (!type || !["paragraph", "heading"].includes(type.name))

@@ -1,5 +1,5 @@
 import type { Node as PMNode } from "prosemirror-model";
-import { projectText, documentText, selectionOffsets } from "./textProjection";
+import { projectText, documentText, selectionOffsets, projectionOffset } from "./textProjection";
 import { documentNotes } from "./documentNotes";
 import {
   referenceSpans,
@@ -64,17 +64,9 @@ export function speechText(
       protectedSpans: TextSpan[] = [],
       superscripts: TextSpan[] = [],
       headings: TextHeading[] = [];
-    const offset = (position: number) => {
-      let low = 0,
-        high = projection.map.length;
-      while (low < high) {
-        const mid = (low + high) >>> 1;
-        if (projection.map[mid] < position) low = mid + 1;
-        else high = mid;
-      }
-      return low;
-    };
+    const offset = (position: number) => projectionOffset(projection, position);
     doc.descendants((node, pos) => {
+      if((node.attrs.revisionMove||node.attrs.revisionBlock)?.kind==='deletion')return false;
       const span = { start: offset(pos), end: offset(pos + node.nodeSize) };
       if (["table_of_contents", "citation", "bibliography"].includes(node.type.name)) {
         marked.push(span);

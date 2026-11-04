@@ -27,13 +27,45 @@ try {
   // Deterministic alignment and audio test the player without synthesizing a book.
   await app.evaluate(() => {
     const request = globalThis.fetch;
-    let job;
+    let job, proofJob;
     globalThis.fetch = async (...args) => {
       const url = String(args[0]);
       if (url.endsWith("/api/speech/prepare"))
         return Response.json({ ready: true });
-      if (url.endsWith("/api/analyze"))
+      if (url.endsWith("/api/proofreading/capabilities"))
         return Response.json({
+          engines: {
+            rules: { available: true },
+            advanced: { available: false },
+          },
+        });
+      if (
+        /\/api\/proofreading\/jobs\//.test(url) &&
+        args[1]?.method === "DELETE"
+      )
+        return Response.json({ status: "cancelled" });
+      if (url.endsWith("/api/proofreading/jobs/reading-proof-fixture"))
+        return Response.json(proofJob);
+      if (url.endsWith("/api/proofreading/check")) {
+        const source = JSON.parse(args[1].body);
+        proofJob = {
+          id: "reading-proof-fixture",
+          targetId: source.targetId,
+          sourceText: source.text,
+          sourceHash: "fixture",
+          configurationHash: "fixture",
+          status: "completed",
+          stage: "complete",
+          message: "",
+          sequence: 1,
+          warnings: [],
+          truncated: false,
+          coverage: {
+            totalBlocks: 1,
+            checkedBlocks: 1,
+            advancedBlocks: 0,
+            skippedBlocks: 0,
+          },
           annotations: [
             {
               id: "spelling",
@@ -55,7 +87,9 @@ try {
           words: 1,
           sentences: 1,
           readingSeconds: 1,
-        });
+        };
+        return Response.json(proofJob);
+      }
       if (
         /\/api\/projects\/[^/]+\/speech$/.test(url) &&
         args[1]?.method === "POST"
@@ -283,7 +317,7 @@ try {
       expected[0].page,
     );
     await expect(editor.locator(".annotation-spelling")).toHaveCount(0);
-    await expect(editor.locator(".annotation-repetition")).toHaveCount(1);
+    await expect(editor.locator(".annotation-repetition")).toHaveCount(0);
     await reader.locator("audio").evaluate((audio) => {
       audio.currentTime = 21;
     });
@@ -300,6 +334,7 @@ try {
       page.getByLabel("Reading progress", { exact: true }),
     ).toHaveText(expected[1].progress);
     await expect(editor.locator(".annotation-spelling")).toHaveCount(1);
+    await expect(editor.locator(".annotation-repetition")).toHaveCount(1);
     await reader
       .getByRole("button", { name: "Play Reading", exact: true })
       .click();

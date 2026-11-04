@@ -75,12 +75,9 @@ try {
     page.getByRole("textbox", { name: "Text editor", exact: true }),
   ).toBeVisible();
   const ready = async () => {
-    if (hyphenation)
-      await expect
-        .poll(() => page.locator(".discretionary-hyphen").count(), {
-          timeout: 30000,
-        })
-        .toBeGreaterThan(100);
+    await expect.poll(() => page.evaluate(() => window.__layoutProbe.ready()), {
+      timeout: 30000,
+    }).toBe(true);
     await page.evaluate(
       () =>
         new Promise((resolve) =>
@@ -166,6 +163,7 @@ try {
   );
   let map = await ready();
   report.pages = map.length;
+  report.visibleHyphenationMarkers = await page.locator('.discretionary-hyphen').count();
   report.initialMilliseconds = performance.now() - started;
   save();
   for (const fraction of [0, 0.5, 0.9]) {
@@ -224,6 +222,97 @@ try {
       maxMilliseconds: durations[39],
     };
   });
+  if (process.env.ALDER_LAYOUT_TYPING === "1") {
+    const trace = process.env.ALDER_LAYOUT_TRACE === "1"
+      ? await page.context().newCDPSession(page) : null;
+    if(trace)await trace.send('Tracing.start',{categories:'devtools.timeline,v8.execute,blink.user_timing',transferMode:'ReturnAsStream'});
+    const profiler =
+      process.env.ALDER_LAYOUT_PROFILE === "1"
+        ? await page.context().newCDPSession(page)
+        : null;
+    if (profiler) {
+      await profiler.send("Profiler.enable");
+      await profiler.send("Profiler.start");
+    }
+    const editor = page.getByRole("textbox", {
+      name: "Text editor",
+      exact: true,
+    });
+    await editor.evaluate((element) => {
+      window.__nativeTypingFrames = [];
+      window.__nativeInputs = [];
+      element.addEventListener("beforeinput", (event) => {
+        window.__nativeInputs.push({ type:event.inputType, prevented:event.defaultPrevented });
+      });
+      element.addEventListener("keydown", (event) => {
+        if (
+          event.key.length !== 1 ||
+          event.ctrlKey ||
+          event.altKey ||
+          event.metaKey
+        )
+          return;
+        const start = performance.now();
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            window.__nativeTypingFrames.push(performance.now() - start);
+          }),
+        );
+      });
+    });
+    for (const fraction of [0, 0.5, 0.9]) {
+      await page.evaluate((fraction) => {
+        const p = window.__layoutProbe,
+          text=p.text(),at = Math.floor(text.length * fraction);
+        window.__expectedTypedText=text.slice(0,at)+' native typing sample'+text.slice(at);
+        p.select(at, at);
+      }, fraction);
+      await editor.pressSequentially(" native typing sample", { delay: 70 });
+      expect(await page.evaluate(()=>window.__layoutProbe.text()===window.__expectedTypedText)).toBe(true);
+      await ready();
+    }
+    const incremental = await ready();
+    if(trace){
+      const completed=new Promise(resolve=>trace.once('Tracing.tracingComplete',resolve));
+      await trace.send('Tracing.end');
+      const {stream}=await completed;
+      let data='';
+      while(true){const part=await trace.send('IO.read',{handle:stream});data+=part.data;if(part.eof)break;}
+      await trace.send('IO.close',{handle:stream});
+      fs.writeFileSync(path.join(directory,'typing-trace.json'),data);
+      const totals=new Map();
+      for(const event of JSON.parse(data).traceEvents){
+        if(event.ph!=='X'||!event.dur)continue;
+        const value=totals.get(event.name)||{name:event.name,count:0,totalMilliseconds:0,maxMilliseconds:0};
+        value.count++;value.totalMilliseconds+=event.dur/1000;value.maxMilliseconds=Math.max(value.maxMilliseconds,event.dur/1000);totals.set(event.name,value);
+      }
+      report.typingTrace=[...totals.values()].sort((a,b)=>b.totalMilliseconds-a.totalMilliseconds).slice(0,30);
+      await trace.detach();
+    }
+    if (profiler) {
+      const data = await profiler.send("Profiler.stop");
+      fs.writeFileSync(
+        path.join(directory, "typing-profile.json"),
+        JSON.stringify(data.profile),
+      );
+      await profiler.detach();
+    }
+    await page.evaluate(() => window.__layoutProbe.fullLayout());
+    expect(await ready()).toEqual(incremental);
+    const durations = await page.evaluate(() =>
+      window.__nativeTypingFrames.sort((a, b) => a - b),
+    );
+    expect(durations).toHaveLength(63);
+    report.nativeTyping = {
+      inputs: await page.evaluate(() => window.__nativeInputs),
+      count: durations.length,
+      measurement:
+        "Trusted keydown to the frame after the next paint opportunity; includes editor layout, excludes OS input queue and physical display latency.",
+      medianMilliseconds: durations[Math.floor(durations.length * 0.5)],
+      p95Milliseconds: durations[Math.floor(durations.length * 0.95)],
+      maxMilliseconds: durations.at(-1),
+    };
+  }
   report.layoutTimings = await page.evaluate(() =>
     window.__layoutProbe.timings(),
   );

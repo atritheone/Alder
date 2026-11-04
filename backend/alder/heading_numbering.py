@@ -31,7 +31,7 @@ class HeadingNumberingWriter:
         self.counts[level + 1:] = [0] * (5 - level)
         if self.number is None or restart is not None:
             writer = NumberingWriter(self.document)
-            self.number = writer.create(True)
+            self.number = writer.create(True,relative=False)
             number = next(n for n in writer.root.findall(qn('w:num')) if int(n.get(qn('w:numId'))) == self.number)
             abstract_id = number.find(qn('w:abstractNumId')).get(qn('w:val'))
             abstract = next(n for n in writer.root.findall(qn('w:abstractNum')) if n.get(qn('w:abstractNumId')) == abstract_id)

@@ -5,6 +5,36 @@ import pytest
 from alder.publication_layout import prepare_layout, validate_rendered_pdf
 
 
+def test_chapter_boundaries_follow_generated_matter_and_ignore_excluded_chapters():
+    from alder.models import create_project,validate_project
+    p=create_project(template='blank')
+    p['name']='BOOK_TITLE';p['settings'].update(documentKind='book',includeTitle=True,includeToc=True,chapterPageBreaks=True)
+    def chapter(identifier,included=True,show=True):
+        return {'id':identifier,'title':'TITLE_'+identifier,'showTitle':show,'include':included,'document':{'type':'doc','content':[{'type':'paragraph','content':[{'type':'text','text':'BODY_'+identifier+' 😀'}]}]}}
+    p['book']={'version':1,'chapters':[chapter('a'),chapter('skip',False),chapter('b',show=False)]}
+    p=validate_project(p);before=deepcopy(p)
+    result=prepare_layout(p);blocks=result['document']['content'];a,b=result['chapterBlocks']
+    assert [c['id'] for c in result['chapterBlocks']]==['a','b']
+    assert a['bodyFromBlock']==a['fromBlock']+1 and a['toBlock']==a['bodyFromBlock']+1
+    assert blocks[a['fromBlock']]['content'][0]['text']=='TITLE_a'
+    assert blocks[a['bodyFromBlock']]['content'][0]['text']=='BODY_a 😀'
+    assert blocks[b['fromBlock']-1]['type']=='page_break'
+    assert b['fromBlock']==b['bodyFromBlock'] and blocks[b['bodyFromBlock']]['content'][0]['text']=='BODY_b 😀'
+    assert p==before
+    p['book']['chapters'][2]['title']='Hidden title changed'
+    assert prepare_layout(p)['sourceIdentity']!=result['sourceIdentity']
+
+
+def test_chapter_page_metadata_belongs_to_the_frozen_snapshot():
+    from alder.publication_layout import validate_chapter_pages
+    source=[{'id':'a','title':'Original title'}];pages=[{},{}]
+    row={'id':'a','title':'Untrusted title','from':3,'bodyFrom':8,'to':30,'pageIndexes':[0,1],'bodyPage':0,'bodyPageLabel':'vii','startsOnSharedPage':True}
+    assert validate_chapter_pages([row],source,pages)[0]['title']=='Original title'
+    assert validate_chapter_pages(None,source,pages)==[]
+    for mutation in ({'id':'foreign'},{'pageIndexes':[2]},{'pageIndexes':[1,0]},{'bodyPage':True},{'bodyPage':2},{'from':9},{'startsOnSharedPage':'yes'}):
+        with pytest.raises(ValueError,match='chapter page map'):validate_chapter_pages([{**row,**mutation}],source,pages)
+
+
 def test_print_snapshot_is_final_wording_and_never_mutates_review_history():
     from test_document_revisions import project_fixture
     p = project_fixture(); before = deepcopy(p)
@@ -16,6 +46,24 @@ def test_print_snapshot_is_final_wording_and_never_mutates_review_history():
     assert prepare_layout(p, {'reviewView': 'original'})['text'].startswith('Old wording.')
     assert 'assetRoot' not in result['settings']
     assert p == before
+
+
+@pytest.mark.parametrize('container',['table','ordered_list'])
+def test_native_move_geometry_requests_original_sources_without_polluting_printed_document(container):
+    from test_tracked_structural_objects import fixture
+    from alder.tracked_block_moves import identity_nodes
+    project=fixture(container,'text_box');before=deepcopy(project)
+    assert 'moveSourceIds' not in prepare_layout(project)
+    result=prepare_layout(project,{'measureMoveSources':True})
+    aliases=result['moveSourceIds']
+    assert aliases['box_ghost']=='box'
+    final_ids={n.get('attrs',{}).get('blockId') for n in identity_nodes(result['document'])}
+    original=prepare_layout(project,{'reviewView':'original'})
+    original_ids={n.get('attrs',{}).get('blockId') for n in identity_nodes(original['document'])}
+    assert all(target in final_ids and target in original_ids and source not in final_ids for source,target in aliases.items())
+    assert 'measureMoveSources' not in result['settings'] and project==before
+    project['book']['chapters'][0]['include']=False
+    assert 'moveSourceIds' not in prepare_layout(project,{'measureMoveSources':True})
 
 
 def test_print_snapshot_freezes_collected_pixels_and_applies_crop_once():

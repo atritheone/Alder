@@ -175,6 +175,20 @@ describe("table appearance and conversion", () => {
     );
     expect(sortTableRows(1)(merged)).toBe(false);
   });
+  it("sorts using the document language with a stable fallback for older language labels", () => {
+    const entry = (id: string, text: string) => schema.node("table_row", { blockId: id }, schema.node("table_cell", { blockId: id + "_cell" }, p(text, id + "_paragraph")));
+    const state = selected(table([row("Header", [cell("Heading", {}, true)]), entry("zebra", "Zebra"), entry("aland", "Åland"), entry("apple", "Apple")]));
+    const ordered = (language: string) => {
+      const sorted = run(state, sortTableRows(1, language));
+      return Array.from({ length: sorted.doc.firstChild!.childCount }, (_, index) => sorted.doc.firstChild!.child(index).attrs.blockId);
+    };
+    expect(ordered("sv-SE")).toEqual(["Header", "apple", "zebra", "aland"]);
+    expect(ordered("en-GB")).toEqual(["Header", "aland", "apple", "zebra"]);
+    expect(ordered("Old language label")).toEqual(ordered("en"));
+    const descending = run(state, sortTableRows(-1, "sv"));
+    expect(descending.doc.firstChild!.child(1).attrs.blockId).toBe("aland");
+    expect(run(descending, undo).doc.eq(state.doc)).toBe(true);
+  });
   it("converts tab-separated paragraphs to a rectangular table without losing marks or empty cells", () => {
     const doc = schema.node("doc", null, [
       p("A\tB"),

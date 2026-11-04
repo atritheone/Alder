@@ -1,11 +1,14 @@
 import { Fragment, type Node as PMNode } from "prosemirror-model";
-import { type Command, type EditorState } from "prosemirror-state";
+import { type Command, EditorState, Selection } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
+import { canSplit } from "prosemirror-transform";
 import {
   CellSelection,
   isInTable,
   selectedRect,
   TableMap,
+  addRowBefore,
+  addRowAfter,
 } from "prosemirror-tables";
 
 function context(state: EditorState) {
@@ -28,6 +31,48 @@ export function tableRowBoundary(map: TableMap, row: number) {
   return true;
 }
 const boundary = tableRowBoundary;
+export function insertDocumentTable(rows: number, columns: number): Command {
+  return (state, dispatch) => {
+    if (!Number.isInteger(rows) || !Number.isInteger(columns) || rows<1 || columns<1 || rows>100 || columns>100) return false;
+    const cell=()=>state.schema.nodes.table_cell.create(null,state.schema.nodes.paragraph.create());
+    const row=()=>state.schema.nodes.table_row.create(null,Array.from({length:columns},cell));
+    const table=state.schema.nodes.table.create(null,Array.from({length:rows},row));
+    const tr=state.tr.deleteSelection(), at=tr.selection.$from;
+    if (['paragraph','heading'].includes(at.parent.type.name)) {
+      const container=at.node(-1), index=at.index(-1), fragment=Fragment.from(table);
+      let pos:number;
+      if (!at.parentOffset && container.canReplace(index,index,fragment)) pos=at.before();
+      else if(at.parentOffset===at.parent.content.size && container.canReplace(index+1,index+1,fragment)) pos=at.after();
+      else {
+        if(!canSplit(tr.doc,at.pos))return false;
+        tr.split(at.pos);pos=at.pos+1;
+        const boundary=tr.doc.resolve(pos);
+        if(!boundary.parent.canReplace(boundary.index(),boundary.index(),fragment))return false;
+      }
+      tr.insert(pos,table).setSelection(Selection.near(tr.doc.resolve(pos+4)));
+    } else tr.replaceSelectionWith(table);
+    dispatch?.(closeHistory(tr).scrollIntoView());return true;
+  };
+}
+/** A row selection inserts the same number of rows, as one undoable command. */
+export function insertTableRows(direction: -1 | 1): Command {
+  return (state, dispatch) => {
+    const rect=context(state);
+    if(!rect)return false;
+    if(!dispatch)return true;
+    const count=state.selection instanceof CellSelection ? rect.bottom-rect.top : 1;
+    const command=direction<0?addRowBefore:addRowAfter,tr=closeHistory(state.tr);
+    for(let i=0;i<count;i++){
+      const current=EditorState.create({doc:tr.doc,selection:tr.selection});
+      if(!command(current,part=>{for(const step of part.steps)tr.step(step);tr.setSelection(part.selection.getBookmark().resolve(tr.doc));}))return false;
+    }
+    const table=tr.doc.nodeAt(rect.tableStart-1)!;
+    let rowStart=rect.tableStart;
+    for(let i=0;i<(direction<0?rect.top:rect.bottom);i++)rowStart+=table.child(i).nodeSize;
+    tr.setSelection(Selection.near(tr.doc.resolve(rowStart+2),1));
+    dispatch(tr.scrollIntoView());return true;
+  };
+}
 /** Cell stories currently qualified for independent page fragments. */
 export function parallelTableRows(table: PMNode): boolean {
   return Array.from({ length: table.childCount }, (_, i) =>
@@ -108,13 +153,13 @@ export function moveTableRows(direction: -1 | 1): Command {
       destination = next - count;
     }
     if (!dispatch) return true;
+    const offset=(index:number)=>tableStart+rows(table).slice(0,index).reduce((sum,row)=>sum+row.nodeSize,0);
+    const from=offset(top),to=offset(bottom),target=offset(direction<0?destination:destination+count);
+    const moved=content.slice(top,bottom);
     content.splice(destination, 0, ...content.splice(top, count));
     const result = table.copy(Fragment.fromArray(content));
-    const tr = closeHistory(state.tr).replaceWith(
-      tableStart - 1,
-      tableStart - 1 + table.nodeSize,
-      result,
-    );
+    const tr=closeHistory(state.tr).delete(from,to);
+    tr.insert(tr.mapping.map(target),Fragment.fromArray(moved));
     const updated = TableMap.get(result);
     tr.setSelection(
       CellSelection.rowSelection(
@@ -124,6 +169,7 @@ export function moveTableRows(direction: -1 | 1): Command {
         ),
       ),
     );
+    tr.setMeta('arrangementMove',{kind:'row',from,to,destination:target});
     dispatch(tr.scrollIntoView());
     return true;
   };

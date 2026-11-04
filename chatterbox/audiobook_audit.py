@@ -104,7 +104,7 @@ def main():
         assert audio.info.channels == 1 and audio.info.sample_rate == 24000 and audio.info.bitrate == 128000
         tags = audio.tags
         assert tags.version == (2, 3, 0), (file, tags.version)
-        author = plan.get("author", "Natalie")
+        author = plan["author"]
         expected = {"TIT2": track.get("metadata_title", track["title"]), "TALB": plan["title"], "TPE1": author, "TPE2": author, "TCOM": author,
                     "TPE3": plan["narrator"], "TRCK": f"{track['track']}/{total}", "TPOS": "1/1",
                     "TLAN": plan.get("language", "eng"), "TCON": "Audiobook", "TIT1": track["group"],

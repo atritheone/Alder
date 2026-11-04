@@ -13,6 +13,23 @@ def prepare_layout(project, options=None):
     from .models import validate_document
     warnings = []
     options = {**(options or {})}
+    measure_move_sources = options.pop('measureMoveSources', False)
+    move_sources = {}
+    if measure_move_sources:
+        from .publishing import project_document
+        from .tracked_block_moves import identity_nodes, moved_object_aliases
+        for section in project_document(project):
+            source = {'type': 'doc', 'content': section['blocks']}
+            aliases = moved_object_aliases(source)
+            for node in identity_nodes(source):
+                identifier = node.get('attrs', {}).get('blockId')
+                if node['type'] in ('text_box', 'table_row') and identifier in aliases:
+                    move_sources[identifier] = aliases[identifier]
+                if (node.get('attrs', {}).get('revisionBlock') or {}).get('kind') == 'deletion':
+                    for deleted in (node, *identity_nodes(node)):
+                        identity = deleted.get('attrs', {}).get('blockId')
+                        if identity and deleted['type'] in ('text_box', 'table_row'):
+                            move_sources[identity] = identity
     options.setdefault('reviewView', 'final')
     if options['reviewView'] == 'markup':
         raise ValueError('Print publication requires the final or original review view.')
@@ -21,6 +38,7 @@ def prepare_layout(project, options=None):
     sections = _publication_sections(prepared, warnings)
     resources = _Resources(prepared, settings, warnings)
     blocks = []
+    chapter_blocks = []
     def paragraph(text, kind='paragraph', attrs=None):
         return {'type': kind, 'attrs': attrs or {}, 'content': [{'type': 'text', 'text': str(text)}]}
     if settings['includeTitle']:
@@ -36,8 +54,13 @@ def prepare_layout(project, options=None):
     for index, section in enumerate(sections):
         if index and settings.get('chapterPageBreaks'):
             blocks.append({'type': 'page_break'})
+        first = len(blocks)
         if section['title']: blocks.append(paragraph(section['title'], 'heading', {'level': 1}))
+        body_first = len(blocks)
         blocks.extend(section['blocks'])
+        if project.get('book') is not None:
+            chapter_blocks.append({'id':section['id'],'title':section.get('navigationTitle') or section['title'],
+                                   'fromBlock':first,'bodyFromBlock':body_first,'toBlock':len(blocks)})
     def walk(node):
         from .running_matter import stories
         for story in stories(node.get('attrs',{}).get('runningMatter')): walk(story)
@@ -80,10 +103,32 @@ def prepare_layout(project, options=None):
     for story in stories(settings.get('runningMatter')): walk(story)
     # Filesystem-only renderer options never cross into the page or manifest.
     settings.pop('assetRoot', None)
-    identity = hashlib.sha256(json.dumps({'document': document, 'settings': settings, 'language': prepared.get('language','en')}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+    identity = hashlib.sha256(json.dumps({'document': document, 'settings': settings, 'language': prepared.get('language','en'), 'chapterBlocks':chapter_blocks}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
     return {'version': 1, 'projectId': project['id'], 'sourceRevision': project.get('revision', 0), 'sourceIdentity': identity,
             'name': project.get('name') or 'Untitled', 'language':prepared.get('language','en'),'document': document, 'settings': settings, 'styles': prepared.get('styles', []),
-            'warnings': warnings, 'text': plain_text(document)}
+            'warnings': warnings, 'text': plain_text(document), 'chapterBlocks':chapter_blocks,
+            **({'moveSourceIds': move_sources} if move_sources else {})}
+
+
+def validate_chapter_pages(value, chapters, pages):
+    """Bound navigation metadata to this frozen snapshot and its actual sheets."""
+    if value is None:return []  # Older renderers have no chapter navigation.
+    def fail():raise ValueError('Invalid publication chapter page map.')
+    if not isinstance(value,list) or len(value)!=len(chapters):fail()
+    result=[]
+    for chapter,item in zip(chapters,value):
+        if not isinstance(item,dict) or item.get('id')!=chapter['id']:fail()
+        indexes=item.get('pageIndexes');body=item.get('bodyPage')
+        if (not isinstance(indexes,list) or not indexes or len(indexes)>len(pages) or
+            any(type(n) is not int or not 0<=n<len(pages) for n in indexes) or indexes!=sorted(set(indexes)) or
+            type(body) is not int or body not in indexes):fail()
+        positions=[item.get(key) for key in ('from','bodyFrom','to')]
+        if any(type(n) is not int or n<0 for n in positions) or positions!=sorted(positions):fail()
+        label=item.get('bodyPageLabel');shared=item.get('startsOnSharedPage')
+        if not isinstance(label,str) or len(label)>10000 or type(shared) is not bool:fail()
+        result.append({**{key:item[key] for key in ('from','bodyFrom','to','pageIndexes','bodyPage','bodyPageLabel','startsOnSharedPage')},
+                       'id':chapter['id'],'title':chapter['title']})
+    return result
 
 
 def validate_rendered_pdf(data, pages, require_tags=False):

@@ -4,6 +4,11 @@ import re
 
 
 def validate_contents(attrs):
+    from .index_collation import validate_language
+    validate_language(attrs.get('indexLanguage'))
+    from .document_index import validate_group
+    validate_group(attrs.get('indexGroup'))
+    if attrs.get('useSortText') is not None and type(attrs['useSortText']) is not bool:raise ValueError('Index sort text must be on or off.')
     if attrs.get('kind','headings') not in ('headings','figures','tables','index'):
         raise ValueError('Unsupported contents type.')
     if attrs.get('pageNumbers') is not None and type(attrs['pageNumbers']) is not bool:

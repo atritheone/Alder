@@ -13,6 +13,7 @@ import {
 } from "./noteOptions";
 import type { FlowPage } from "./pageFlow";
 import { physicalPageAtPosition } from "./pageRanges";
+import { blockMoveChanges } from "./trackedBlockMoves";
 export type DocumentNote = { kind: "footnote" | "endnote"; body: DocNode };
 export function validNoteBody(value: DocNode): boolean {
   let count = 0;
@@ -37,7 +38,7 @@ export function validNoteBody(value: DocNode): boolean {
       "table_cell",
       "table_header",
     ].includes(node.type) &&
-    !node.attrs?.revisionProperties &&
+    !node.attrs?.revisionBlock && !node.attrs?.revisionMove && !node.attrs?.revisionProperties &&
     !node.attrs?.captionLabel &&
     (node.type !== "document_field" || node.attrs?.fieldKind === "merge") &&
     (!["image", "inline_image"].includes(node.type) ||
@@ -145,6 +146,7 @@ function collect(
   doc.descendants((node, pos) => {
     if (
       node.type.name === "table_of_contents" ||
+      (node.attrs.revisionMove || node.attrs.revisionBlock)?.kind === "deletion" ||
       node.marks.some((mark) => mark.type.name === "revision_deletion")
     )
       return false;
@@ -188,6 +190,31 @@ export function documentNotes(
   }
   return values;
 }
+/** A deleted move copy displays the destination's number, without allocating
+ * another note body or advancing the live counter. */
+export function noteReferenceNumbers(doc: PMNode, entries = documentNotes(doc)) {
+  const references = entries.map(note => ({ id: note.id, targetId: note.id, pos: note.pos, number: note.number, kind: note.value.kind }));
+  const byId = new Map(entries.map(note => [note.id, note]));
+  const moves = blockMoveChanges(doc);
+  const destinations = new Map(moves.filter(entry => entry.move.stamp.move && entry.move.kind === "insertion")
+    .map(entry => [`${entry.move.stamp.id}:${entry.move.part ?? 0}`, entry.node]));
+  for (const { node, pos, move } of moves) {
+    if (!move.stamp.move || move.kind !== "deletion") continue;
+    const target = destinations.get(`${move.stamp.id}:${move.part ?? 0}`);
+    const pair = (source: PMNode, destination: PMNode | undefined, from: number) => {
+      if (source.type !== destination?.type) return;
+      source.forEach((child, offset, index) => {
+        const counterpart = destination.maybeChild(index);
+        if (child.type.name === "document_note") {
+          const note = byId.get(counterpart?.attrs.blockId);
+          if (note) references.push({ id: child.attrs.blockId, targetId: note.id, pos: from + offset, number: note.number, kind: note.value.kind });
+        } else if (!child.isLeaf) pair(child, counterpart || undefined, from + offset + 1);
+      });
+    };
+    pair(node, target, pos + 1);
+  }
+  return references;
+}
 /** Derived numbering shares the current editor's measured page ownership. It
  * changes neither the authored document nor undo history. */
 export function assignPageNoteNumbers(
@@ -227,10 +254,10 @@ export const noteNumbers = (
         previous = entries;
         return (decorations = DecorationSet.create(
           state.doc,
-          entries.map((note) =>
+          noteReferenceNumbers(state.doc, entries).map((note) =>
             Decoration.node(note.pos, note.pos + 1, {
               "data-note-number": note.number,
-              "aria-label": `${note.value.kind === "footnote" ? "Footnote" : "Endnote"} ${note.number}`,
+              "aria-label": `${note.kind === "footnote" ? "Footnote" : "Endnote"} ${note.number}`,
             }),
           ),
         ));
@@ -256,6 +283,7 @@ export function chapterNoteStarts(project: Project, id: string): NoteStarts {
       const walk = (node: DocNode) => {
         if (
           node.type === "table_of_contents" ||
+          (node.attrs?.revisionMove || node.attrs?.revisionBlock)?.kind === "deletion" ||
           node.marks?.some((mark) => mark.type === "revision_deletion")
         )
           return;

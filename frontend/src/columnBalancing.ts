@@ -80,7 +80,7 @@ export function balanceColumns(
       canvas.getBoundingClientRect().width / parseFloat(canvas.style.width);
   for (const boundary of boundaries) {
     if (boundary.pos <= reused) continue;
-    let end = regions.findIndex((r) => r.from === boundary.pos);
+    let end = regions.findIndex((r) => r.from === boundary.pos && !r.endnoteOnly);
     if (end <= 0) continue;
     const prior = regions[end - 1].frame?.layout || virtual,
       next = regions[end].frame?.layout || virtual;
@@ -98,7 +98,7 @@ export function balanceColumns(
       const node = view.state.doc.nodeAt(regions[i].from),
         resolved = view.state.doc.resolve(regions[i].from);
       if (
-        node?.type.name === "section_break" ||
+        (!regions[i].endnoteOnly && node?.type.name === "section_break") ||
         node?.type.name === "page_break" ||
         resolved.parent.attrs.pageBreakBefore
       )
@@ -119,10 +119,12 @@ export function balanceColumns(
     const used = Math.max(
       1,
       (endElement.getBoundingClientRect().top - origin.top) / scale - lastTop,
+      (regions[end - 1].endnoteBottom || 0) - pageInsets(prior).top,
     );
     let height = Math.min(available, used + (end - first - 1) * available);
     if (count > 1) {
-      const limit = { from, to: boundary.pos, height: available };
+      const limit: Limits[number] = { from, to: boundary.pos, height: available,
+        ...(virtual.sectionEndnotes?.some(bank=>bank.pos===boundary.pos)?{noteEnd:boundary.pos,startRegion:first}:{}) };
       limits.push(limit);
       let low = 1,
         high = available;
@@ -134,7 +136,7 @@ export function balanceColumns(
               (range) => range.from <= from && range.to > from,
             ),
           ),
-          stop = regions.findIndex((r) => r.from === boundary.pos);
+          stop = regions.findIndex((r) => r.from === boundary.pos && !r.endnoteOnly);
         let fits = start >= 0 && stop > start && stop - start <= count;
         if (fits)
           for (let i = start; i < stop; i++) {
@@ -142,6 +144,7 @@ export function balanceColumns(
               top =
                 (region.frame?.top || 0) +
                 pageInsets(region.frame?.layout || virtual).top;
+            if ((region.endnoteBottom || 0) > pageInsets(region.frame?.layout || virtual).top + limit.height + 1) fits = false;
             for (const range of pageRanges(region))
               view.state.doc.nodesBetween(
                 range.from,
@@ -194,7 +197,7 @@ export function balanceColumns(
       );
       limit.height = height;
       regions = measure(limits);
-      end = regions.findIndex((r) => r.from === boundary.pos);
+      end = regions.findIndex((r) => r.from === boundary.pos && !r.endnoteOnly);
     }
     let offset = 0;
     const startNode = view.state.doc.nodeAt(from);

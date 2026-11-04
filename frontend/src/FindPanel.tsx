@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { findText, type TextMatch } from "./findText";
@@ -339,7 +340,7 @@ export default function FindPanel({
           {searching
             ? "Searching…"
             : matches.length
-              ? `${index >= 0 && index < matches.length ? `${index + 1} of ` : ""}${matches.length} matches`
+              ? `${index >= 0 && index < matches.length ? `${formatInteger(index + 1)} of ` : ""}${formatInteger(matches.length)} matches`
               : "No matches"}
         </span>
         <button

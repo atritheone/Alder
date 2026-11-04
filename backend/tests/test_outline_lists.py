@@ -90,3 +90,15 @@ def test_outline_extended_numbers_and_bullet_root_continue(tmp_path,format):
     assert labels(p['book']['chapters'][0]['document'])==EDGE_LABELS
     result=build_export(p,format,tmp_path)
     assert labels(import_document(Path(result['path']))['document'])==EDGE_LABELS
+
+
+def test_independent_nested_outline_retains_its_parent_item_in_word(tmp_path):
+    p=fixture();doc=p['book']['chapters'][0]['document'];inner=doc['content'][0]
+    doc['content']=[{'type':'bullet_list','content':[{'type':'list_item','content':[
+        {'type':'paragraph','content':[{'type':'text','text':'Outer item'}]},inner]}]}]
+    before=deepcopy(p)
+    for format in ('html','epub','docx'):
+        restored=import_document(Path(build_export(p,format,tmp_path)['path']))['document']
+        assert labels(restored)==labels(doc)
+        assert restored['content'][0]['content'][0]['content'][1]['type']=='ordered_list'
+    assert p==before

@@ -25,7 +25,7 @@ export function readingBufferReady(
     if (seconds >= target) return true;
   }
   // A short remaining passage can start as soon as all of it is ready.
-  return true;
+  return !job!.hasMoreText;
 }
 
 /** Direct editor updates use the audio clock without a React-latency offset. */

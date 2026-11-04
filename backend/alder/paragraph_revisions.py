@@ -6,9 +6,14 @@ def validate_paragraph_log(log):
     from .document_revisions import validate_revision
     from .models import validate_document
     def appearance(value):
-        if not isinstance(value, dict) or value.get('type') not in ('paragraph', 'heading') or not isinstance(value.get('attrs'), dict) or any(key in value['attrs'] for key in ('revisionProperties', 'blockId')):
+        if not isinstance(value, dict) or value.get('type') not in ('paragraph', 'heading','table','table_row','table_cell','table_header','ordered_list','bullet_list') or not isinstance(value.get('attrs'), dict) or any(key in value['attrs'] for key in ('revisionProperties', 'revisionMove', 'revisionBlock', 'blockId')):
             raise ValueError('Invalid reviewed paragraph properties.')
-        validate_document({'type': 'doc', 'content': [value]})
+        if value['type'] in ('table','table_row','table_cell','table_header'):
+            from .table_formatting import validate_table_attributes
+            validate_table_attributes(value['type'],value['attrs'])
+        elif value['type'] in ('ordered_list','bullet_list'):
+            validate_document({'type':'doc','content':[{**value,'content':[{'type':'list_item','content':[{'type':'paragraph'}]}]}]})
+        else:validate_document({'type': 'doc', 'content': [value]})
     if not isinstance(log, dict) or not isinstance(log.get('records'), list) or not 1 <= len(log['records']) <= 1000:
         raise ValueError('Invalid paragraph revision history.')
     appearance(log.get('base'))
@@ -16,6 +21,14 @@ def validate_paragraph_log(log):
         if not isinstance(record, dict) or record.get('status') not in ('pending', 'accepted', 'rejected'):
             raise ValueError('Invalid paragraph revision record.')
         validate_revision(record.get('stamp')); appearance(record.get('before')); appearance(record.get('after'))
+        if log['base']['type'] in ('ordered_list','bullet_list'):
+            if any(side['type'] not in ('ordered_list','bullet_list') for side in (record['before'],record['after'])):
+                raise ValueError('List formatting revisions must retain their item containers.')
+        elif log['base']['type'] in ('table','table_row','table_cell','table_header'):
+            if any(side['type']!=log['base']['type'] or any(side['attrs'].get(k)!=log['base']['attrs'].get(k) for k in ('colspan','rowspan')) for side in (record['before'],record['after'])):
+                raise ValueError('Cell formatting revisions cannot change the table grid or header structure.')
+        elif record['before']['type'] not in ('paragraph','heading') or record['after']['type'] not in ('paragraph','heading'):
+            raise ValueError('Paragraph formatting revisions cannot change container structure.')
 
 
 def paragraph_format(log, original=False):

@@ -74,6 +74,28 @@ def test_long_sentence_splits_without_losing_words():
         split_narration("x" * 241)
 
 
+def test_single_newline_manuscript_retains_every_sentence_and_source_offset():
+    paragraphs = [
+        f'Paragraph {i + 1}. Dr. Alder visits A. B. Smith. Café trees grow here! '
+        'The writer listens carefully to each sentence. Unicode 🌲 remains intact.'
+        for i in range(1000)
+    ]
+    text = '\n'.join(paragraphs)
+    chunks = split_narration(text)
+    assert len(chunks) == 5 * len(paragraphs)
+    assert [c['text'] for c in chunks[1::5]] == ['Dr. Alder visits A. B. Smith.'] * len(paragraphs)
+    assert ' '.join(c['text'] for c in chunks).split() == text.split()
+    assert all(text[c['sourceStart']:c['sourceEnd']] == c['text'] for c in chunks)
+    assert sum(c['paragraphEnd'] for c in chunks) == 1
+
+
+@pytest.mark.parametrize('word', ['café', 'ไทย', 'العربية', '東京', 'e\u0301', 'word_name', 'version2', 'Ⅳ', '²'])
+def test_sentence_boundary_after_unicode_and_identifier_words(word):
+    text = f'{word}. Next sentence.'
+    chunks = split_narration(text)
+    assert [c['text'] for c in chunks] == [f'{word}.', 'Next sentence.']
+
+
 def test_word_offsets_preserve_spaces_line_breaks_and_unicode():
     from alder.reading import word_timings
     import re

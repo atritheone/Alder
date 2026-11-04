@@ -6,7 +6,7 @@ export type NoteNumbering = {
 };
 export type NoteOptions = {
   footnote: NoteNumbering & { placement: "pageBottom" | "beneathText" };
-  endnote: NoteNumbering;
+  endnote: NoteNumbering & { placement: "docEnd" | "sectEnd" };
 };
 export type NoteCounts = { footnote: number; endnote: number };
 export type NoteContext = NoteCounts & {
@@ -68,6 +68,7 @@ export function noteOptions(value?: Partial<NoteOptions>): NoteOptions {
       format: "lowerRoman",
       start: 1,
       restart: "continuous",
+      placement: "docEnd",
       ...value?.endnote,
     },
   };
@@ -85,13 +86,7 @@ export function validNoteOptions(value: unknown): value is NoteOptions {
       return false;
     if (
       Object.keys(row).some(
-        (key) =>
-          ![
-            "format",
-            "start",
-            "restart",
-            ...(kind === "footnote" ? ["placement"] : []),
-          ].includes(key),
+        (key) => !["format", "start", "restart", "placement"].includes(key),
       )
     )
       return false;
@@ -114,6 +109,7 @@ export function validNoteOptions(value: unknown): value is NoteOptions {
         ).includes(row.restart)
       );
     }) &&
-    ["pageBottom", "beneathText"].includes(options.footnote.placement)
+    ["pageBottom", "beneathText"].includes(options.footnote.placement) &&
+    ["docEnd", "sectEnd"].includes(options.endnote.placement)
   );
 }

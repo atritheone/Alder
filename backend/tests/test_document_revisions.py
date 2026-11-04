@@ -144,7 +144,7 @@ def test_production_exchange_retains_text_paragraph_and_format_revisions(tmp_pat
     formats = [m for n in walk(imported) for m in n.get('marks', []) if m['type'] == 'revision_format']
     assert len(formats) == 1
     assert formats[0]['attrs']['records'][0]['stamp']['author'] == 'Format reviewer'
-    assert {c['author'] for c in revision_summary(imported)} == {'Reviewer'}
+    assert {c['author'] for c in revision_summary(imported)} == {'Reviewer','Format reviewer','Structure reviewer'}
     assert [n['attrs']['kind'] for n in walk(imported) if n['type'] == 'revision_break'] == ['deletion', 'insertion']
 
 

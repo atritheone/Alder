@@ -27,7 +27,7 @@ def read_csv(text, delimiter=','):
         for row in source:
             if not row:continue
             if len(row)!=len(headers):
-                raise ValidationError(f'CSV record {len(rows)+1} has {len(row)} values; expected {len(headers)}.')
+                raise ValidationError(f'CSV record {len(rows)+1:,} has {len(row):,} values; expected {len(headers):,}.')
             if any(len(value)>10000 for value in row):raise ValidationError('A CSV value exceeds 10000 characters.')
             rows.append(row)
             if len(rows)>10000:raise ValidationError('Choose a CSV with at most 10000 records.')
@@ -97,7 +97,7 @@ def create_documents(store, project_id, request):
         if set(keys)!=set(mapping) or any(mapping[key] not in row for key in keys for row in rows):
             raise ValidationError('Map every merge field to an available CSV column.')
         for node in walk(template):
-            if node.get('type') in ('revision_insertion','revision_deletion','revision_break') or node.get('status')=='pending':
+            if node.get('type') in ('revision_insertion','revision_deletion','revision_break') or node.get('status')=='pending' or node.get('revisionMove') or node.get('revisionBlock'):
                 raise ValidationError('Review pending tracked changes before merging this template.')
         used={n.get('attrs',{}).get('assetId') for n in walk(template) if n.get('type') in ('image','inline_image')}
         used.add(template['settings'].get('coverAssetId'))

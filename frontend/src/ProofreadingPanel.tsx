@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import type { Annotation, Project } from "./types";
@@ -174,8 +175,8 @@ export default function ProofreadingPanel({
           </p>
           {c.result && (
             <p>
-              {c.result.annotations.length} issues · {c.result.words} words ·{" "}
-              {c.result.sentences} sentences
+              {formatInteger(c.result.annotations.length)} issues · {formatInteger(c.result.words)} words ·{" "}
+              {formatInteger(c.result.sentences)} sentences
             </p>
           )}
           <p>Scope: {c.scope}.</p>
@@ -196,10 +197,10 @@ export default function ProofreadingPanel({
           {actionError && <p role="alert">{actionError}</p>}
           {c.result && (
             <p>
-              {c.result.coverage.checkedBlocks} of{" "}
-              {c.result.coverage.totalBlocks} passages checked
+              {formatInteger(c.result.coverage.checkedBlocks)} of{" "}
+              {formatInteger(c.result.coverage.totalBlocks)} passages checked
               {c.advanced
-                ? `; ${c.result.coverage.advancedBlocks} reviewed with the model`
+                ? `; ${formatInteger(c.result.coverage.advancedBlocks)} reviewed with the model`
                 : ""}
               .
             </p>

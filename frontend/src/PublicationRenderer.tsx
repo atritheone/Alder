@@ -1,3 +1,4 @@
+import { prepareNotePublicationSemantics } from "./noteSemantics";
 import { createRoot } from "react-dom/client";
 import { useRef } from "react";
 import Editor, { parseEditorDocument, type EditorHandle } from "./Editor";
@@ -18,6 +19,7 @@ import "./book-workspace.css";
 import { assertStationeryFits, stationeryPrintHint } from './stationery';
 
 export type PublicationInput = {
+  chapterBlocks?: import("./bookPageContext").ChapterBlocks[];
   language?: string;
   name: string;
   sourceIdentity: string;
@@ -44,7 +46,7 @@ async function readyImages(images: HTMLImageElement[], stage: string) {
   );
 }
 let rendering = false;
-const semanticContent=(node:DocNode):boolean=>!!node.text?.trim()||(['image','inline_image'].includes(node.type)&&!node.attrs?.decorative)||!!(node.type==='document_note'&&node.attrs?.body&&semanticContent(node.attrs.body))||!!node.content?.some(semanticContent);
+const semanticContent=(node:DocNode):boolean=>!!node.text?.trim()||(['image','inline_image','shape'].includes(node.type)&&!node.attrs?.decorative)||!!(node.type==='document_note'&&node.attrs?.body&&semanticContent(node.attrs.body))||!!node.content?.some(semanticContent);
 
 /** The desktop owns this isolated window. It never opens a user editing
  * session, writes a project, or borrows the visible editor's selection. */
@@ -144,7 +146,7 @@ export async function renderPublication(input: PublicationInput) {
       passes = 0;
     while (!captured && performance.now() < deadline) {
       try {
-        captured = (editor as EditorHandle).getPagePublication();
+        captured = (editor as EditorHandle).getPagePublication(input.chapterBlocks);
         const resolved = (editor as EditorHandle).resolvePageReferences();
         referenceValues = resolved;
         if (resolved.changed) {
@@ -187,6 +189,7 @@ export async function renderPublication(input: PublicationInput) {
     document.body.removeAttribute("style");
     await document.fonts.ready;
     await readyImages([...document.images], "PDF preparation");
+    prepareNotePublicationSemantics();
     await frame();
     return {
       sourceIdentity: input.sourceIdentity,
@@ -195,6 +198,7 @@ export async function renderPublication(input: PublicationInput) {
       mixedNoteGeometry:!!captured.mixedNoteGeometry,
       tagged: semanticContent(input.document),
       referenceValues,
+      chapterPages: captured.chapterContext || [],
       pages,
       warnings: [...(input.settings.stationeryPreset ? [stationeryPrintHint(input.settings.stationeryPreset)] : []), ...missingFonts.map(
         (family) =>

@@ -1,10 +1,31 @@
+import { noteSemanticPaths } from "./noteSemantics";
+import { repeatingTableHeaders } from "./repeatingTableHeaders";
 import type { DocNode } from "./types";
 import type { NoteLine } from "./footnoteLayout";
 import { documentText } from "./textProjection";
 import { listNumber } from "./outlineLists";
+import { splitNoteCellBands, type CellBand } from "./noteCellBands";
 
 type Band = { top: number; bottom: number };
-type Ink = Band & { html: string };
+const headerRows = (table: HTMLTableElement) => {
+  const rows = [...table.rows];
+  return rows.slice(0, repeatingTableHeaders(rows.map(row => [...row.cells].map(cell => ({ header: cell.tagName === "TH", rowspan: cell.rowSpan })))));
+};
+type Ink = Band & {
+  html: string;
+  sourceFrom?: number;
+  sourceImages?: number;
+  paragraph?: number;
+  through?: number;
+  picture?: number;
+  lane?: string;
+};
+type NoteSources = Map<string, number> & {
+  paragraphIndices: Map<string, number>;
+  semantics: ReturnType<typeof noteSemanticPaths>;
+  imageStarts: Map<string, number>;
+  pictures: { from: number; images: number }[];
+};
 export type MeasuredNoteLines = NoteLine[] & { overflowingRows?: string[] };
 const separated = new Set([
   "doc",
@@ -19,15 +40,42 @@ const separated = new Set([
 
 /** Derived paragraph identities join measured DOM to the exact narration
  * projection. Container separators count once, including empty table cells. */
-export function indexNoteParagraphs(body: DocNode, prefix: number) {
-  const offsets = new Map<string, number>();
-  let offset = -prefix;
+export function indexNoteParagraphs(
+  body: DocNode,
+  prefix: number,
+  continuation?: number[],
+  imageStarts?: number[],
+  pictureSources?: { from: number; images: number }[],
+  origins?: number[],
+  paragraphShift = 0,
+) {
+  const offsets = new Map<string, number>() as NoteSources;
+  offsets.imageStarts = new Map();
+  offsets.pictures = [];
+  offsets.paragraphIndices = new Map();
+  let offset = -prefix,
+    image = 0;
   const walk = (node: DocNode) => {
+    if (["image", "inline_image"].includes(node.type)) {
+      offsets.pictures.push(
+        pictureSources?.[image] ?? { from: Math.max(0, offset), images: image },
+      );
+      image++;
+      return;
+    }
     if (node.type === "paragraph") {
       const id = `note_measure_${offsets.size}`;
       node.attrs = { ...node.attrs, blockId: id };
-      offsets.set(id, offset);
-      offset += documentText(node).length;
+      offsets.paragraphIndices.set(
+        id,
+        origins?.[offsets.size] ?? offsets.size - paragraphShift,
+      );
+      offsets.imageStarts.set(id, imageStarts?.[offsets.size] ?? image);
+      offsets.set(id, continuation?.[offsets.size] ?? offset);
+      node.content?.forEach((child) => {
+        if (["image", "inline_image"].includes(child.type)) walk(child);
+        else offset += documentText(child).length;
+      });
       return;
     }
     node.content?.forEach((child, index) => {
@@ -36,6 +84,7 @@ export function indexNoteParagraphs(body: DocNode, prefix: number) {
     });
   };
   walk(body);
+  offsets.semantics = noteSemanticPaths(body);
   return offsets;
 }
 
@@ -76,7 +125,7 @@ export function noteBands(
  * This also permits a long row to continue with unequal cell line heights. */
 export function measureRichNoteLines(
   host: HTMLElement,
-  offsets: Map<string, number>,
+  offsets: NoteSources,
   width: number,
   maximum = Infinity,
 ): MeasuredNoteLines {
@@ -86,13 +135,28 @@ export function measureRichNoteLines(
     intervals: Band[] = [],
     paint: Ink[] = [];
   const overflowingRows: string[] = [];
+  const order = new WeakMap<Node, number>();
+  let orderIndex = 0;
+  const ordered = document.createTreeWalker(host, NodeFilter.SHOW_ALL);
+  while (ordered.nextNode()) order.set(ordered.currentNode, orderIndex++);
+  const keeps: (Band & { lane?: string })[] = [];
   const bounds = (rect: DOMRect) => ({
     top: (rect.top - origin.top) / scale,
     bottom: (rect.bottom - origin.top) / scale,
   });
-  const positioned = (element: HTMLElement, rect: DOMRect) => {
+  const positioned = (
+    element: HTMLElement,
+    rect: DOMRect,
+    sourceFrom?: number,
+    sourceImages?: number,
+  ) => {
     element.style.cssText += `;position:absolute;left:${(rect.left - origin.left) / scale}px;top:${(rect.top - origin.top) / scale}px;white-space:pre;`;
-    const ink = { ...bounds(rect), html: element.outerHTML };
+    const ink = {
+      ...bounds(rect),
+      html: element.outerHTML,
+      sourceFrom,
+      sourceImages,
+    };
     inks.push(ink);
     intervals.push(ink);
   };
@@ -110,19 +174,13 @@ export function measureRichNoteLines(
       )
         ? 0
         : existing.height;
-    const rows = [...table.rows],
-      headers: HTMLTableRowElement[] = [];
-    for (const row of rows) {
-      if (
-        !row.cells.length ||
-        ![...row.cells].every((cell) => cell.tagName === "TH")
-      )
-        break;
-      headers.push(row);
-    }
-    const boxes = headers.map((row) => row.getBoundingClientRect());
+    const headers = headerRows(table);
+    // Frozen rows use display:contents, so only their cells have a box.
+    const boxes = headers.flatMap((row) =>
+      [...row.cells].map((cell) => cell.getBoundingClientRect()),
+    );
     const height =
-      !headers.length || headers.length === rows.length
+      !headers.length
         ? 0
         : (Math.max(...boxes.map((box) => box.bottom)) -
             Math.min(...boxes.map((box) => box.top))) /
@@ -142,6 +200,13 @@ export function measureRichNoteLines(
       .forEach((item, index) => {
         const paragraph = item.querySelector<HTMLElement>(":scope > p");
         if (!paragraph) return;
+        if (
+          paragraph.dataset.noteContinuedItem ||
+          paragraph.style.display === "none"
+        ) {
+          (item as HTMLElement).style.listStyleType = "none";
+          return;
+        }
         const marker = document.createElement("span"),
           css = getComputedStyle(paragraph);
         marker.dataset.outlineNumber = "true";
@@ -160,15 +225,23 @@ export function measureRichNoteLines(
     "p[data-reference-target]",
   )) {
     let offset = offsets.get(paragraph.dataset.referenceTarget!);
+    let imageOffset =
+      offsets.imageStarts.get(paragraph.dataset.referenceTarget!) || 0;
+    const paragraphIndex =
+      offsets.paragraphIndices.get(paragraph.dataset.referenceTarget!) ?? -1;
+    const lane = paragraph.dataset.referenceTarget!;
+    const repeated = !!paragraph.closest("[data-note-repeated-header]");
     if (offset == null) continue;
     const box = paragraph.getBoundingClientRect(),
       css = getComputedStyle(paragraph);
+    if (css.display === "none") continue;
     const walker = document.createTreeWalker(
       paragraph,
       NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
       {
         acceptNode: (node) =>
-          node.nodeType === Node.TEXT_NODE || (node as Element).tagName === "BR"
+          node.nodeType === Node.TEXT_NODE ||
+          ["BR", "IMG"].includes((node as Element).tagName)
             ? NodeFilter.FILTER_ACCEPT
             : NodeFilter.FILTER_SKIP,
       },
@@ -176,12 +249,25 @@ export function measureRichNoteLines(
     let hasInk = false;
     while (walker.nextNode()) {
       if (walker.currentNode.nodeType !== Node.TEXT_NODE) {
+        if ((walker.currentNode as Element).tagName === "IMG") {
+          if (
+            !(walker.currentNode as Element).classList.contains(
+              "ProseMirror-separator",
+            )
+          )
+            imageOffset++;
+          continue;
+        }
         if (
           !(walker.currentNode as Element).classList.contains(
             "ProseMirror-trailingBreak",
           )
-        )
+        ) {
           offset++;
+          const previous = inks.at(-1);
+          if (!repeated && previous?.paragraph === paragraphIndex)
+            previous.through = offset;
+        }
         continue;
       }
       const text = walker.currentNode as Text,
@@ -211,11 +297,26 @@ export function measureRichNoteLines(
           if (box.width <= 0.1) continue;
           const span = document.createElement("span");
           span.textContent = match[0];
+          span.dataset.noteStructure = JSON.stringify(
+            offsets.semantics.paragraphs.get(
+              paragraph.dataset.referenceTarget!,
+            ) || [],
+          );
+          span.dataset.noteOrder = JSON.stringify([
+            offset + start - (generated ? 0.5 : 0),
+            order.get(text) || 0,
+            start,
+          ]);
+          if (repeated) {
+            span.setAttribute("aria-hidden", "true");
+            span.dataset.noteRepeatedInk = "true";
+          }
+          if (generated) span.dataset.noteListMarker = "true";
           const language = text.parentElement
             ?.closest("[lang]")
             ?.getAttribute("lang");
           if (language) span.lang = language;
-          if (!generated && offset + start >= 0) {
+          if (!generated && !repeated && offset + start >= 0) {
             span.dataset.noteFrom = String(offset + start);
             span.dataset.noteTo = String(offset + start + match[0].length);
           }
@@ -253,33 +354,90 @@ export function measureRichNoteLines(
             const link = document.createElement("a");
             link.setAttribute("href", anchor.getAttribute("href")!);
             link.append(span);
-            positioned(span, box);
+            positioned(
+              span,
+              box,
+              Math.max(0, offset + (generated ? 0 : start)),
+              imageOffset,
+            );
             inks.at(-1)!.html = link.outerHTML;
-          } else positioned(span, box);
+          } else
+            positioned(
+              span,
+              box,
+              Math.max(0, offset + (generated ? 0 : start)),
+              imageOffset,
+            );
+          inks.at(-1)!.lane = lane;
+          if (!generated && !repeated && paragraphIndex >= 0) {
+            inks.at(-1)!.paragraph = paragraphIndex;
+            inks.at(-1)!.through = offset + start + match[0].length;
+          }
           hasInk = true;
         }
         from = lo;
       }
-      if (!generated) offset += text.length;
+      if (!generated) {
+        offset += text.length;
+        const previous = inks.at(-1);
+        if (!repeated && previous?.paragraph === paragraphIndex)
+          previous.through = offset;
+      }
     }
-    if (!hasInk) intervals.push(bounds(box));
+    if (
+      !hasInk &&
+      !paragraph.querySelector("img:not(.ProseMirror-separator)")
+    ) {
+      intervals.push(bounds(box));
+      inks.push({
+        ...bounds(box),
+        html: "",
+        lane,
+        sourceFrom: Math.max(0, offset),
+        sourceImages: imageOffset,
+        ...(!repeated && paragraphIndex >= 0
+          ? { paragraph: paragraphIndex, through: offset }
+          : {}),
+      });
+    }
     // Authored keep-together remains meaningful inside the note story.
     if (
       css.breakInside === "avoid" &&
       box.height / scale + headerHeight(paragraph) <= maximum
-    )
+    ) {
       intervals.push(bounds(box));
+      keeps.push({ ...bounds(box), lane });
+    }
   }
+  let pictureIndex = 0;
   for (const image of host.querySelectorAll<HTMLImageElement>(
     "img:not(.ProseMirror-separator)",
   )) {
     const box = image.getBoundingClientRect();
+    const source = offsets.pictures[pictureIndex++];
     if (!box.width || !box.height) continue;
     const copy = image.cloneNode(true) as HTMLImageElement;
+    copy.dataset.noteStructure = JSON.stringify(
+      offsets.semantics.pictures[pictureIndex - 1] || [],
+    );
+    copy.dataset.noteOrder = JSON.stringify([
+      source?.from || 0,
+      order.get(image) || 0,
+      0,
+    ]);
+    if (image.closest("[data-note-repeated-header]")) {
+      copy.setAttribute("aria-hidden", "true");
+      copy.dataset.noteRepeatedInk = "true";
+    }
     copy.removeAttribute("id");
     copy.removeAttribute("data-block-id");
     copy.style.cssText = `width:${box.width / scale}px;height:${box.height / scale}px;max-width:none`;
-    positioned(copy, box);
+    positioned(copy, box, source?.from, source?.images);
+    inks.at(-1)!.lane =
+      image.closest<HTMLElement>("p[data-reference-target]")?.dataset
+        .referenceTarget || `picture_${pictureIndex}`;
+    if (!image.closest("[data-note-repeated-header]"))
+      inks.at(-1)!.picture = source?.images;
   }
   for (const cell of host.querySelectorAll<HTMLElement>("td,th,p")) {
     const box = cell.getBoundingClientRect(),
@@ -312,37 +470,83 @@ export function measureRichNoteLines(
         top: Math.min(...cells.map((cell) => cell.top)),
         bottom: Math.max(...cells.map((cell) => cell.bottom)),
       };
-      if (interval.bottom - interval.top + headerHeight(row) <= maximum)
+      if (interval.bottom - interval.top + headerHeight(row) <= maximum) {
         intervals.push(interval);
-      else if (row.dataset.noteRowId)
+        keeps.push(interval);
+      } else if (row.dataset.noteRowId)
         overflowingRows.push(row.dataset.noteRowId);
     }
   }
-  const bands = noteBands(
+  let available = Math.max(
+    1,
+    maximum -
+      Math.max(
+        0,
+        ...[...host.querySelectorAll<HTMLElement>("td,th")].map(headerHeight),
+      ),
+  );
+  const initialBands = noteBands(
     intervals,
     host.getBoundingClientRect().height / scale,
-    Math.max(
-      1,
-      maximum -
-        Math.max(
-          0,
-          ...[...host.querySelectorAll<HTMLElement>("td,th")].map(headerHeight),
-        ),
-    ),
+    available,
   );
-  const renderBand = (band: Band): NoteLine => {
+  for (const { headers, height } of tableHeaders.values()) {
+    if (!headers.length || height <= 0) continue;
+    const boxes = headers.flatMap((row) =>
+      [...row.cells].map((cell) => bounds(cell.getBoundingClientRect())),
+    );
+    const top = Math.min(...boxes.map((box) => box.top)),
+      bottom = Math.max(...boxes.map((box) => box.bottom));
+    const headingSpace = initialBands
+      .filter((band) => band.top < bottom - 0.1 && band.bottom > top + 0.1)
+      .reduce((sum, band) => sum + band.bottom - band.top, 0);
+    available = Math.min(available, Math.max(1, maximum - headingSpace));
+  }
+  const bands = splitNoteCellBands(
+    initialBands,
+    inks.map((ink, index) => ({ ...ink, lane: ink.lane || `ink_${index}` })),
+    maximum,
+    keeps,
+    maximum - available,
+  );
+  const renderBand = (band: CellBand): NoteLine => {
     const decoration = paint
       .filter((item) => item.top < band.bottom && item.bottom > band.top)
       .map((item) => item.html)
       .join("");
-    const content = inks
-      .filter(
-        (item) => item.top >= band.top - 0.1 && item.top < band.bottom - 0.1,
-      )
-      .map((item) => item.html)
-      .join("");
+    const owned = inks.filter((item, index) =>
+      band.members
+        ? band.members.has(index)
+        : item.top >= band.top - 0.1 && item.top < band.bottom - 0.1,
+    );
+    const content = owned.map((item) => item.html).join("");
+    const paragraphs = new Map<number, number>(),
+      pictures: number[] = [];
+    for (const item of owned) {
+      if (item.paragraph != null && item.through != null)
+        paragraphs.set(
+          item.paragraph,
+          Math.max(paragraphs.get(item.paragraph) ?? -Infinity, item.through),
+        );
+      if (item.picture != null) pictures.push(item.picture);
+    }
     return {
       height: band.bottom - band.top,
+      read: { paragraphs: [...paragraphs], pictures },
+      sourceFrom: owned.reduce<number | undefined>(
+        (first, item) =>
+          item.sourceFrom == null
+            ? first
+            : Math.min(first ?? Infinity, item.sourceFrom),
+        undefined,
+      ),
+      sourceImages: owned.reduce<number | undefined>(
+        (first, item) =>
+          item.sourceImages == null
+            ? first
+            : Math.min(first ?? Infinity, item.sourceImages),
+        undefined,
+      ),
       html: `<div style="position:relative;height:${band.bottom - band.top}px"><div aria-hidden="true" style="position:absolute;inset:0;overflow:hidden"><div style="position:relative;top:${-band.top}px">${decoration}</div></div><div style="position:relative;top:${-band.top}px">${content}</div></div>`,
     };
   };
@@ -350,17 +554,8 @@ export function measureRichNoteLines(
   result.overflowingRows = overflowingRows;
   for (const table of host.querySelectorAll<HTMLTableElement>("table")) {
     if (table.parentElement?.closest("table")) continue;
-    const rows = [...table.rows],
-      headers = [];
-    for (const row of rows) {
-      if (
-        !row.cells.length ||
-        ![...row.cells].every((cell) => cell.tagName === "TH")
-      )
-        break;
-      headers.push(row);
-    }
-    if (!headers.length || headers.length === rows.length) continue;
+    const headers = headerRows(table);
+    if (!headers.length) continue;
     const cells = headers.flatMap((row) =>
         [...row.cells].map((cell) => bounds(cell.getBoundingClientRect())),
       ),

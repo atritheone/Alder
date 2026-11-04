@@ -40,7 +40,7 @@ export function validStory(node: DocNode): boolean {
       "image",
       "inline_image",
     ].includes(node.type) &&
-    !node.attrs?.revisionProperties &&
+    !node.attrs?.revisionBlock && !node.attrs?.revisionMove && !node.attrs?.revisionProperties &&
     !node.attrs?.captionLabel &&
     (!['image','inline_image'].includes(node.type) || !node.attrs?.wrap || node.attrs.wrap === 'none') &&
     (!node.marks ||

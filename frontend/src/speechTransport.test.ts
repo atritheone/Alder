@@ -135,4 +135,14 @@ describe("incremental speech updates", () => {
       expect(text.slice(offsets[i], offsets[i + 1])).toBe(char),
     );
   });
+  it("appends planned sections without losing retained media or the end-of-text signal", () => {
+    const next = mergeSpeechEvents({ ...job, hasMoreText: true }, {
+      sequence: 5,
+      events: [{ sequence: 5, header: { hasMoreText: false }, order: ["a", "b"],
+        chunks: [{ id: "b", playbackEligible: false }] as Job["chunks"] }],
+    });
+    expect(next.chunks.map(c => c.id)).toEqual(["a", "b"]);
+    expect(next.chunks[0].audioUrl).toBe("old");
+    expect(next.hasMoreText).toBe(false);
+  });
 });

@@ -195,6 +195,11 @@ try {
   await sandbox.focus();
   await expect(draftWords).toHaveText("1");
   await expect(draftSentences).toHaveText("1");
+  await expect(page.locator(".status-project-count")).toHaveText("1 words");
+  await editor.focus();
+  await expect(page.locator(".status-project-count")).toHaveText("8 words");
+  await sandbox.focus();
+  await expect(page.locator(".status-project-count")).toHaveText("1 words");
   await sandbox.press("ArrowRight");
   await expect(draftWords).toHaveText("4");
   await expect(draftSentences).toHaveText("2");

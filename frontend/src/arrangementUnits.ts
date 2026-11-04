@@ -32,6 +32,11 @@ export function documentUnits(doc: PMNode): ArrangementUnit[] {
       ).length;
     return (
       run.length >= minimum &&
+      run.every(({ node }) => {
+        let plain = true;
+        node.forEach(child => { if (!child.isText) plain = false; });
+        return plain;
+      }) &&
       lengths.every((n) => n <= 120) &&
       lengths.filter((n) => n >= 40).length >= minimum - 1 &&
       unfinished >= (run.length - 1) * 0.7
@@ -260,5 +265,6 @@ export function moveArrangementUnit(
     insertedTo += prefix.length;
   } else tr.insert(at, content);
   tr.doc.check();
+  tr.setMeta("arrangementMove", {kind:unit.kind,from:unit.from,to:unit.to,destination});
   return { tr, inserted: { ...unit, from: insertedFrom, to: insertedTo } };
 }

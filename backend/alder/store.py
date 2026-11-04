@@ -57,6 +57,8 @@ class Store:
             """)
             conn.execute("INSERT OR IGNORE INTO metadata VALUES ('schema_version','1')")
             conn.commit()
+        from .archive_files import ArchiveWrites
+        ArchiveWrites.recover(self)
 
     @contextmanager
     def connection(self):
@@ -330,6 +332,10 @@ class Store:
         return destination
 
     def open_archive(self, path: str) -> dict:
+        return self.commit_archive(self.prepare_archive(path))
+
+    def prepare_archive(self, path: str) -> dict:
+        """Validate every collected component without changing user data."""
         source = Path(path).expanduser().resolve()
         if not source.is_file() or source.suffix.lower() != ".alder":
             raise ValidationError("Select an existing .alder project file.")
@@ -357,6 +363,16 @@ class Store:
                         raise ValidationError("Invalid project archive component metadata.")
                     if name not in names:
                         raise ValidationError("An archive component is missing.")
+                    if name not in ('project.json', 'system-voices.json') and not name.startswith(('assets/', 'voices/')):
+                        # Recovery snapshots and optional components still need
+                        # integrity verification, but not another retained copy.
+                        digest, size = hashlib.sha256(), 0
+                        with archive.open(name) as component:
+                            while chunk := component.read(1024 * 1024):
+                                digest.update(chunk); size += len(chunk)
+                        if size != info.get('size') or digest.hexdigest() != info.get('sha256'):
+                            raise ValidationError('A project component failed its integrity check.')
+                        continue
                     payload = archive.read(name)
                     if len(payload) != info.get("size") or hashlib.sha256(payload).hexdigest() != info.get("sha256"):
                         raise ValidationError("A project component failed its integrity check.")
@@ -364,14 +380,13 @@ class Store:
                 p = validate_project(json.loads(payloads["project.json"]))
         except (BadZipFile, KeyError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValidationError("This is not a complete, readable Alder project archive.") from exc
-        original_id = p["id"]
         try:
             saved_system = json.loads(payloads.get("system-voices.json", b"[]"))
             if not isinstance(saved_system, list):
                 raise ValueError("Expected a list.")
         except (ValueError, UnicodeDecodeError) as exc:
             raise ValidationError("Invalid system voice metadata.") from exc
-        references(self.data_dir / "speech", saved_system)
+        voices = []
         for voice_id in manifest.get("voices", []):
             if not isinstance(voice_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", voice_id):
                 raise ValidationError("Archive contains an invalid voice identity.")
@@ -385,6 +400,40 @@ class Store:
                 raise ValidationError("Archive contains invalid voice metadata.") from exc
             if not isinstance(voice, dict) or voice.get("id") != voice_id or voice.get("hash") != hashlib.sha256(payloads[reference_key]).hexdigest():
                 raise ValidationError("Archive reference voice failed its integrity check.")
+            voices.append((voice, payloads[reference_key]))
+        for asset in p['assets']:
+            relative = 'assets/' + asset['path']
+            if relative not in payloads:
+                raise ValidationError(f"Archive is missing asset: {asset.get('name', asset['id'])}")
+            if not asset['path'].startswith(hashlib.sha256(payloads[relative]).hexdigest()):
+                raise ValidationError('Archive asset name does not match its content.')
+        assets = {'assets/' + asset['path']: payloads['assets/' + asset['path']] for asset in p['assets']}
+        return {'project': p, 'payloads': assets, 'voices': voices, 'system': saved_system,
+                'source': str(source), 'digest': hashlib.sha256(source.read_bytes()).hexdigest()}
+
+    def commit_archive(self, prepared: dict) -> dict:
+        # Resolve collisions at publication time, not when parsing began: the
+        # user can continue editing an existing workspace during preparation.
+        from .archive_files import ArchiveWrites
+        from .system_voices import _catalog_lock
+        with self._lock, _catalog_lock, ArchiveWrites(self.data_dir, self._atomic_bytes) as writes:
+            result = self._commit_archive(prepared, writes)
+        if not writes.directory.exists():
+            try:
+                with self.connection() as conn:
+                    conn.execute('DELETE FROM metadata WHERE key=?', (writes.key,)); conn.commit()
+            except sqlite3.Error:
+                pass  # A committed marker is safe for startup to clean later.
+        return result
+
+    def _commit_archive(self, prepared: dict, writes) -> dict:
+        p, payloads = deepcopy(prepared['project']), prepared['payloads']
+        original_id = p['id']
+        writes.remember(self.data_dir / 'speech' / 'voices' / 'system-catalog.json')
+        references(self.data_dir / 'speech', prepared['system'])
+        for original_voice, reference in prepared['voices']:
+            voice = deepcopy(original_voice)
+            voice_id = voice['id']
             destination = self.data_dir / "speech" / "voices" / voice_id
             if (destination / "reference.wav").is_file() and hashlib.sha256((destination / "reference.wav").read_bytes()).hexdigest() != voice["hash"]:
                 replacement = uid()
@@ -393,8 +442,13 @@ class Store:
                         entry["voiceId"] = replacement
                 voice["id"] = replacement
                 destination = self.data_dir / "speech" / "voices" / replacement
-            self._atomic_bytes(destination / "reference.wav", payloads[reference_key])
-            self._atomic_bytes(destination / "voice.json", json.dumps(voice).encode("utf-8"))
+            writes.write(destination / "reference.wav", reference)
+            try:
+                current_voice = json.loads((destination / 'voice.json').read_text('utf-8'))
+            except (OSError, ValueError):
+                current_voice = None
+            if not isinstance(current_voice, dict) or current_voice.get('id') != voice['id'] or current_voice.get('hash') != voice['hash']:
+                writes.write(destination / "voice.json", json.dumps(voice).encode("utf-8"))
         try:
             existing = self.get(p["id"])
         except KeyError:
@@ -407,17 +461,21 @@ class Store:
             p["restoredFrom"] = original_id
         for asset in p["assets"]:
             relative = "assets/" + asset.get("path", "")
-            if relative not in payloads:
-                raise ValidationError(f"Archive is missing asset: {asset.get('name', asset['id'])}")
             content = payloads[relative]
-            expected_name = hashlib.sha256(content).hexdigest()
-            if not asset["path"].startswith(expected_name):
-                raise ValidationError("Archive asset name does not match its content.")
-            self._atomic_bytes(self.asset_dir(p["id"]) / asset["path"], content)
+            writes.write(self.data_dir / 'assets' / p['id'] / asset['path'], content)
         # Opening a collected archive also repairs missing authored assets when
         # the working snapshot itself is unchanged. Do not skip the collection.
-        result = existing if same_snapshot else self.insert(p)
+        result = existing if same_snapshot else validate_project(p)
+        if not same_snapshot:
+            result['revision'] = 1
+            result['updatedAt'] = now()
+        payload = json.dumps(result, ensure_ascii=False)
         with self.connection() as conn:
-            conn.execute("INSERT OR REPLACE INTO archives VALUES (?,?,?)", (str(source), result["id"], hashlib.sha256(source.read_bytes()).hexdigest()))
+            conn.execute('BEGIN IMMEDIATE')
+            if not same_snapshot:
+                conn.execute('INSERT INTO projects VALUES (?,?,?,?,?,?)', (result['id'], result['name'], 1, result['updatedAt'], 0, payload))
+                conn.execute('INSERT INTO history VALUES (?,?,?)', (result['id'], 0, payload))
+            conn.execute("INSERT OR REPLACE INTO archives VALUES (?,?,?)", (prepared['source'], result["id"], prepared['digest']))
+            conn.execute('INSERT INTO metadata VALUES (?,?)', (writes.key, 'committed'))
             conn.commit()
         return result

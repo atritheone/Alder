@@ -1,4 +1,6 @@
 import { expect } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
 
 /** Reuse the long-document/audio fixture, with fast word boundaries deep in it. */
 export async function readingPerformance(app, page, editor) {
@@ -28,10 +30,9 @@ export async function readingPerformance(app, page, editor) {
   });
   await editor.focus();
   await editor.press("Control+Home");
-  await page
+  await expect(page
     .locator(".document-reader")
-    .getByLabel("Follow text", { exact: true })
-    .check();
+    .getByLabel("Follow text", { exact: true })).toHaveCount(0);
   await page.evaluate(() => {
     window.readingBenchmarkStart = performance.now();
     document.querySelector(".document-reader audio").addEventListener(
@@ -130,6 +131,8 @@ export async function readingPerformance(app, page, editor) {
     };
   }, timings);
   console.log("READING_PERFORMANCE", JSON.stringify(result));
+  fs.mkdirSync(path.resolve("work/reading-performance"), { recursive: true });
+  fs.writeFileSync(path.resolve("work/reading-performance/report.json"), JSON.stringify(result, null, 2));
   if (process.env.ALDER_ASSERT_READING_PERFORMANCE) {
     expect(result.highlightP95LagMs).toBeLessThan(100);
     expect(result.eventLoopP95Ms).toBeLessThan(35);

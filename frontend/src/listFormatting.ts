@@ -15,6 +15,9 @@ export const numberedMarkers = [
   "upper-roman",
 ] as const;
 export const bulletMarkers = ["disc", "circle", "square"] as const;
+export const liveListItemCount=(node:PMNode)=>{
+  let count=0;node.forEach(item=>{if((item.attrs.revisionMove||item.attrs.revisionBlock)?.kind!=='deletion')count++;});return count;
+};
 export function selectedList(state: EditorState) {
   const { $from, $to } = state.selection;
   for (let depth = $from.depth; depth > 0; depth--) {
@@ -94,22 +97,36 @@ export function setListFormatting(
  * container. Nested lists and table cells have independent sequences. */
 export function listOrders(doc: PMNode) {
   const updates: { position: number; order: number }[] = [];
+  const ghosts: { position: number; node: PMNode; key: string }[] = [];
+  const destinations = new Map<string, number>();
   function walk(parent: PMNode, start: number) {
     const preceding = new Map<string, number>();
     parent.forEach((node, offset) => {
+      if(node.attrs.revisionBlock?.kind==='deletion')return;
       const position = start + offset;
+      const move = node.attrs.revisionMove;
+      const moveKey = move && `${move.stamp.id}:${move.part ?? 0}`;
+      if (move?.kind === "deletion") {
+        if (node.type.name === "ordered_list") ghosts.push({ position, node, key: moveKey });
+        return;
+      }
       if (node.type.name === "ordered_list") {
         const marker = node.attrs.listTemplate?JSON.stringify(node.attrs.listTemplate):(node.attrs.listStyle || "decimal");
         const order = node.attrs.continuePrevious
           ? (preceding.get(marker) ?? 1)
           : node.attrs.order;
         if (order !== node.attrs.order) updates.push({ position, order });
-        preceding.set(marker, order + node.childCount);
+        preceding.set(marker, order + liveListItemCount(node));
+        if (moveKey) destinations.set(moveKey, order);
       }
       if (node.childCount && !node.isTextblock) walk(node, position + 1);
     });
   }
   walk(doc, 0);
+  for (const { position, node, key } of ghosts) {
+    const order = destinations.get(key);
+    if (node.attrs.continuePrevious && order != null && order !== node.attrs.order) updates.push({ position, order });
+  }
   return updates;
 }
 export function continuedLists() {

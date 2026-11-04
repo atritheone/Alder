@@ -18,25 +18,35 @@ export function editorSession(identity: string) {
 
 const active = new Map<
   string,
-  { projectId: string; state: () => EditorState }
+  { projectId: string; state: () => EditorState; discarded: boolean }
 >();
 export function registerEditorSession(
   projectId: string,
   identity: string,
   state: () => EditorState,
 ) {
-  const entry = { projectId, state };
+  const entry = { projectId, state, discarded: false };
   active.set(identity, entry);
-  return () => {
-    if (active.get(identity) === entry) active.delete(identity);
+  return (save?: EditorState) => {
+    if (active.get(identity) !== entry) return;
+    active.delete(identity);
+    if (save && !entry.discarded) rememberEditorSession(identity, save);
   };
+}
+/** Closing a document releases cached model/history references. Its mounted
+ * view may unmount after React commits the new tab; do not cache it again then. */
+export function forgetEditorSessions(projectId: string) {
+  for (const identity of sessions.keys())
+    if (identity.startsWith(projectId + ":")) sessions.delete(identity);
+  for (const entry of active.values())
+    if (entry.projectId === projectId) entry.discarded = true;
 }
 export function captureEditorSessions(projectId: string) {
   const result = new Map(
     [...sessions].filter(([id]) => id.startsWith(projectId + ":")),
   );
   for (const [id, entry] of active)
-    if (entry.projectId === projectId)
+    if (entry.projectId === projectId && !entry.discarded)
       result.set(id, portableEditorState(entry.state()));
   return result;
 }

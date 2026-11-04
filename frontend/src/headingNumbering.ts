@@ -64,6 +64,7 @@ export function chapterHeadingStarts(project: Project, chapterId: string) {
     if (!cached || cached.styles !== project.styles) {
       const items: [number, number | null][] = [];
       const visit = (node: DocNode) => {
+        if((node.attrs?.revisionMove||node.attrs?.revisionBlock)?.kind==='deletion')return;
         if (node.type === "heading" && enabled(node.attrs || {}, styles))
           items.push([
             node.attrs?.level || 1,
@@ -90,6 +91,7 @@ export function headingLabels(
     counts = [...initial],
     result: { position: number; label: string }[] = [];
   doc.descendants((node, position) => {
+    if((node.attrs.revisionMove||node.attrs.revisionBlock)?.kind==='deletion')return false;
     if (node.type.name === "heading" && enabled(node.attrs, resolved))
       result.push({
         position,

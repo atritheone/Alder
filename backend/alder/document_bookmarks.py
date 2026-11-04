@@ -1,5 +1,26 @@
 """Portable named destinations and ranges. Bookmarks never add spoken text."""
 import re
+import hashlib
+
+
+def moved_bookmark_name(name):
+    return 'AlMove_'+hashlib.sha256(name.encode('utf-8')).hexdigest()[:32]
+
+
+def restore_moved_bookmark_names(document):
+    """Recognise only our deterministic export alias, inside a paired move."""
+    from .tracked_block_moves import moved_object_aliases
+    aliases=moved_object_aliases(document);starts={};ends=[]
+    def walk(node):
+        if node['type']=='bookmark':starts[node['attrs']['blockId']]=node['attrs']
+        if node['type']=='bookmark_end':ends.append(node['attrs'])
+        for child in node.get('content',[]):walk(child)
+    walk(document)
+    for ghost,live in aliases.items():
+        if ghost in starts and live in starts and starts[ghost]['name']==moved_bookmark_name(starts[live]['name']):
+            starts[ghost]['name']=starts[live]['name']
+            for end in ends:
+                if end['targetId']==ghost:end['name']=starts[live]['name']
 
 
 def bookmark_name(name, used, warnings):
@@ -18,20 +39,27 @@ def bookmark_name(name, used, warnings):
 def publication_bookmarks(sections, warnings):
     """Resolve identity links on the detached publication, across all sections."""
     used, by_id, by_name, locations = set(), {}, {}, {}
-    nodes = []
+    nodes = [];bookmarks=[]
+    from .tracked_block_moves import moved_object_aliases
+    aliases=moved_object_aliases({'type':'doc','content':[node for section in sections for node in section['blocks']]})
     def collect(node, section):
         nodes.append(node)
         if node.get('type') == 'bookmark':
-            attrs = node['attrs']
-            original = attrs['name']
-            name = bookmark_name(original, used, warnings)
-            attrs['name'] = name
-            by_name.setdefault(original, name)
-            if attrs.get('blockId'): by_id.setdefault(attrs['blockId'], name)
-            locations[name] = section
+            bookmarks.append((node['attrs'],section))
         for child in node.get('content', []): collect(child, section)
     for index, section in enumerate(sections):
         for node in section['blocks']: collect(node, index)
+    for attrs,section in sorted(bookmarks,key=lambda entry:entry[0].get('blockId') in aliases):
+        original=attrs['name'];live=aliases.get(attrs.get('blockId'))
+        if live in by_id:
+            name=moved_bookmark_name(by_id[live])
+            if name.lower() in used:raise ValueError('A moved bookmark conflicts with another exported bookmark name. Rename that bookmark before exporting.')
+            used.add(name.lower())
+        else:
+            name=bookmark_name(original,used,warnings);by_name.setdefault(original,name)
+        attrs['name']=name
+        if attrs.get('blockId'):by_id.setdefault(attrs['blockId'],name)
+        locations[name]=section
     starts, ends = {}, {}
     for index, node in enumerate(nodes):
         attrs = node.get('attrs', {})

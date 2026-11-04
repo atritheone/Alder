@@ -252,9 +252,9 @@ export function paginateColumns(
         columns.count;
     const boundary = view.state.doc.nodeAt(region.from),
       resolved = view.state.doc.resolve(region.from),
-      section = boundary?.type.name === "section_break";
+      section = !region.endnoteOnly && boundary?.type.name === "section_break";
     const forced =
-      boundary?.type.name === "page_break" ||
+      (!region.endnoteOnly && boundary?.type.name === "page_break") ||
       section ||
       resolved.parent.attrs.pageBreakBefore;
     if (forced) column = 0;
@@ -353,6 +353,11 @@ export function paginateColumns(
         bandOffset -
         (region.frame?.top ?? index * (layout.height + PAGE_GAP)),
     });
+    if (region.noteHTML) {
+      const shift = shifts.at(-1)!;
+      current.noteHTML = (current.noteHTML || "") + `<div style="position:absolute;left:${shift.x}px;top:${bandOffset}px;width:${source.width}px;height:${source.height}px">${region.noteHTML}</div>`;
+      current.endnoteBottom = Math.max(current.endnoteBottom || 0, bandOffset + (region.endnoteBottom || 0));
+    }
     column = (column + 1) % columns.count;
   });
   layoutParagraphPaint(view, virtual, regions, layout.runningStyles, true);

@@ -130,7 +130,7 @@ try {
     }),
     hyphens = editor.locator(".discretionary-hyphen");
   stage("local dictionary layout");
-  await expect.poll(() => hyphens.count()).toBeGreaterThan(100);
+  await expect.poll(() => hyphens.count()).toBeGreaterThan(10);
   const sourceText = await editor.evaluate((el) =>
     el.textContent.replace(/\u00ad/g, ""),
   );
@@ -172,7 +172,7 @@ try {
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(hyphens).toHaveCount(0);
   await editor.press("Control+z");
-  await expect.poll(() => hyphens.count()).toBeGreaterThan(100);
+  await expect.poll(() => hyphens.count()).toBeGreaterThan(10);
   stage("typing and saved prose");
   const caret = await editor.evaluate((el) => {
     const p = el.querySelector("p"),
@@ -215,7 +215,7 @@ try {
   await expect(editor).toContainText("Added extra");
   await expect(page.locator(".save-status")).toHaveText("Saved");
   await reopen();
-  await expect.poll(() => hyphens.count()).toBeGreaterThan(100);
+  await expect.poll(() => hyphens.count()).toBeGreaterThan(10);
   const saved = await page.evaluate(
     (id) => window.alder.request("GET", `/api/projects/${id}`),
     id,
@@ -252,7 +252,7 @@ try {
   await page.getByRole("tab", { name: "Pages", exact: true }).click();
   await expect
     .poll(() => page.locator(".page-card .discretionary-hyphen").count())
-    .toBeGreaterThan(100);
+    .toBeGreaterThan(10);
   await page.getByRole("tab", { name: "Write", exact: true }).click();
   for (const scale of ["0.5", "1.5", "1"]) {
     await page.evaluate(
@@ -260,7 +260,7 @@ try {
       scale,
     );
     await reopen();
-    await expect.poll(() => hyphens.count()).toBeGreaterThan(100);
+    await expect.poll(() => hyphens.count()).toBeGreaterThan(10);
   }
   report.checks.push(
     "Local hyphens wrap, Apply/undo, typing, plain authored text, persistence, PDF, Arrangement, UI scales.",

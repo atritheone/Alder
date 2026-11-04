@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { Annotation, Project } from "./types";
@@ -75,7 +76,7 @@ export default function BookProofreading({
       for (let index = 0; index < chapters.length; index++) {
         if (token.cancelled) break;
         const chapter = chapters[index];
-        setMessage(`Checking chapter ${index + 1} of ${chapters.length}…`);
+        setMessage(`Checking chapter ${formatInteger(index + 1)} of ${formatInteger(chapters.length)}…`);
         let job = await api<ProofreadingResult>(
           "/api/proofreading/check",
           "POST",
@@ -175,7 +176,7 @@ export default function BookProofreading({
               </button>
               {stale
                 ? " — changed; recheck required"
-                : ` — ${result.annotations.length} issues (${result.status})`}
+                : ` — ${formatInteger(result.annotations.length)} issues (${result.status})`}
               {!stale &&
                 result.warnings.map((warning) => (
                   <p key={warning}>{warning}</p>

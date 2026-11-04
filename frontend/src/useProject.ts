@@ -14,6 +14,7 @@ import {
   captureEditorSessions,
   rememberEditorSession,
   restoreEditorSessions,
+  forgetEditorSessions,
 } from "./editorSessions";
 export function useProject() {
   const [project, setProject] = useState<Project | null>(null),
@@ -150,6 +151,7 @@ export function useProject() {
         if (replace) {
           opened.current.delete(replace);
           timelines.current.delete(replace);
+          forgetEditorSessions(replace);
           pristine.current.delete(replace);
           forgetSessionPosition(documentPositionKey(replace));
           setDocuments((previous) =>
@@ -188,6 +190,7 @@ export function useProject() {
         }
         opened.current.delete(id);
         timelines.current.delete(id);
+        forgetEditorSessions(id);
         pristine.current.delete(id);
         forgetSessionPosition(documentPositionKey(id));
         setDocuments((previous) => previous.filter((item) => item.id !== id));

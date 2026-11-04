@@ -1,6 +1,8 @@
+import { formatInteger } from "./numberDisplay";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { DOMSerializer, type Node as PMNode } from "prosemirror-model";
+import type { Node as PMNode } from "prosemirror-model";
+import { outlinePreviewFragment } from "./outlineLists";
 import { X } from "lucide-react";
 import { reviewChanges, reviewedDocument } from "./trackedReview";
 import type { ReviewView } from "./trackedChanges";
@@ -14,6 +16,7 @@ export default function ReviewDialog({
   onResolve,
   onGo,
   onClose,
+  book,
 }: {
   doc: PMNode;
   selection: { from: number; to: number };
@@ -22,10 +25,36 @@ export default function ReviewDialog({
   onResolve: (ids: ReadonlySet<string>, decision: "accept" | "reject") => void;
   onGo: (from: number, to: number) => void;
   onClose: () => void;
+  book?: {
+    sources: { id: string; title: string; doc: PMNode }[];
+    currentId: string;
+    onResolve: (
+      ids: ReadonlySet<string>,
+      decision: "accept" | "reject",
+    ) => void;
+    onGo: (id: string, from: number, to: number) => void;
+  };
 }) {
   const dialog = useRef<HTMLDialogElement>(null),
     preview = useRef<HTMLDivElement>(null);
-  const changes = useMemo(() => reviewChanges(doc), [doc]);
+  const [coverage, setCoverage] = useState("chapter");
+  const changes = useMemo(
+    () =>
+      coverage === "book" && book
+        ? book.sources.flatMap((source) =>
+            reviewChanges(source.doc).map((c) => ({
+              ...c,
+              chapterId: source.id,
+              chapterTitle: source.title,
+            })),
+          )
+        : reviewChanges(doc).map((c) => ({
+            ...c,
+            chapterId: book?.currentId || "",
+            chapterTitle: "",
+          })),
+    [doc, book, coverage],
+  );
   const [selected, setSelected] = useState(changes[0]?.id || ""),
     [author, setAuthor] = useState(preferences.author),
     [filter, setFilter] = useState(""),
@@ -34,23 +63,23 @@ export default function ReviewDialog({
     [error, setError] = useState("");
   const visible = changes.filter((c) => !filter || c.author === filter),
     current = visible.find((c) => c.id === selected) || visible[0];
+  const previewDoc =
+    coverage === "book"
+      ? book?.sources.find((s) => s.id === current?.chapterId)?.doc || doc
+      : doc;
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
   useEffect(() => {
     try {
-      const document = reviewedDocument(doc, view);
-      preview.current?.replaceChildren(
-        DOMSerializer.fromSchema(doc.type.schema).serializeFragment(
-          document.content,
-        ),
-      );
+      const document = reviewedDocument(previewDoc, view);
+      preview.current?.replaceChildren(outlinePreviewFragment(document));
       setError("");
     } catch (cause) {
       preview.current?.replaceChildren();
       setError((cause as Error).message);
     }
-  }, [doc, view]);
+  }, [previewDoc, view]);
   const saveAuthor = () => {
     if (author.trim() && author.trim() !== preferences.author)
       onPreferences({ ...preferences, author: author.trim() });
@@ -75,7 +104,10 @@ export default function ReviewDialog({
             : [];
   const resolve = (decision: "accept" | "reject") => {
     try {
-      onResolve(new Set(targets.map((c) => c.id)), decision);
+      (coverage === "book" && book ? book.onResolve : onResolve)(
+        new Set(targets.map((c) => c.id)),
+        decision,
+      );
       setError("");
     } catch (cause) {
       setError((cause as Error).message);
@@ -101,6 +133,23 @@ export default function ReviewDialog({
           </button>
         </header>
         <div className="word-dialog-fields">
+          {book && (
+            <label>
+              Review
+              <select
+                aria-label="Review coverage"
+                value={coverage}
+                onChange={(e) => {
+                  setCoverage(e.target.value);
+                  setScope("current");
+                  setFilter("");
+                }}
+              >
+                <option value="chapter">Current chapter</option>
+                <option value="book">All chapters</option>
+              </select>
+            </label>
+          )}
           <label>
             Author
             <input
@@ -126,8 +175,9 @@ export default function ReviewDialog({
             />
           </label>
           <p className="review-support">
-            Track text, character and paragraph formatting, and paragraph breaks.
-            Other structural edits require reviewing pending changes first.
+            Track text, moves, formatting, paragraph breaks, and complete table
+            or row insertions and deletions. Select all connected rows when
+            changing a vertically merged cell.
           </p>
           <div className="comments-actions">
             <label>
@@ -146,7 +196,7 @@ export default function ReviewDialog({
               </select>
             </label>
             <span>
-              {visible.length} {visible.length === 1 ? "change" : "changes"}
+              {formatInteger(visible.length)} {visible.length === 1 ? "change" : "changes"}
             </span>
             <button
               type="button"
@@ -181,6 +231,7 @@ export default function ReviewDialog({
                 onClick={() => setSelected(change.id)}
               >
                 <strong>{change.author || "Unnamed author"}</strong>
+                {coverage === "book" && <small>{change.chapterTitle}</small>}
                 <small>
                   {change.date
                     ? new Date(change.date).toLocaleString()
@@ -189,7 +240,7 @@ export default function ReviewDialog({
                 {change.ranges
                   .map(
                     (r) =>
-                      `${r.kind === "formatting" ? "Formatting" : r.kind === "insertion" ? "Inserted" : "Deleted"}: ${r.text}`,
+                      `${change.move ? (r.kind === "insertion" ? "Moved to" : "Moved from") : r.kind === "formatting" ? "Formatting" : r.kind === "insertion" ? "Inserted" : "Deleted"}: ${r.text}`,
                   )
                   .join(" · ")
                   .slice(0, 240)}
@@ -207,7 +258,9 @@ export default function ReviewDialog({
                 <option value="current">Current change</option>
                 <option
                   value="selection"
-                  disabled={selection.from === selection.to}
+                  disabled={
+                    coverage === "book" || selection.from === selection.to
+                  }
                 >
                   Selection
                 </option>
@@ -237,10 +290,17 @@ export default function ReviewDialog({
               onClick={() => {
                 if (current) {
                   saveAuthor();
-                  onGo(
-                    Math.min(...current.ranges.map((r) => r.from)),
-                    Math.max(...current.ranges.map((r) => r.to)),
-                  );
+                  try {
+                    (coverage === "book" && book
+                      ? (from: number, to: number) =>
+                          book.onGo(current.chapterId, from, to)
+                      : onGo)(
+                      Math.min(...current.ranges.map((r) => r.from)),
+                      Math.max(...current.ranges.map((r) => r.to)),
+                    );
+                  } catch (cause) {
+                    setError((cause as Error).message);
+                  }
                 }
               }}
             >

@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 from audiobook_qa import compare
 
-ROOT = Path(os.environ.get("CHATTERBOX_AUDIOBOOK_ROOT", str(Path(os.environ["LOCALAPPDATA"]) / "chatterbox/audiobooks/her-many-faces")))
+from audiobook_project import project_root
+ROOT = project_root()
 
 
 def update(part):

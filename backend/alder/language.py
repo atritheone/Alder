@@ -308,7 +308,7 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
         for sentence in sentences:
             count = len(WORDS.findall(sentence.group()))
             if count > threshold:
-                add("sentence-length", sentence.start(), sentence.end(), f"This sentence has {count} words. A pause or split may improve readability.")
+                add("sentence-length", sentence.start(), sentence.end(), f"This sentence has {count:,} words. A pause or split may improve readability.")
     if "sentence-openings" in enabled:
         previous = None
         for sentence in sentences:

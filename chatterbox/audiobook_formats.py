@@ -11,7 +11,8 @@ from mutagen.flac import FLAC, Picture
 import numpy as np
 
 DATA = Path(os.environ["LOCALAPPDATA"]) / "chatterbox"
-ROOT = Path(os.environ.get("CHATTERBOX_AUDIOBOOK_ROOT", str(DATA / "audiobooks/her-many-faces")))
+from audiobook_project import project_root
+ROOT = project_root()
 
 
 def sha256(path):
@@ -19,7 +20,7 @@ def sha256(path):
 
 
 def flac_fields(plan, track):
-    author = plan.get("author", "Natalie")
+    author = plan["author"]
     total = str(len(plan["tracks"]))
     fields = {"TITLE": track.get("metadata_title", track["title"]), "ALBUM": plan["title"],
               "ARTIST": author, "ALBUMARTIST": author, "COMPOSER": author, "AUTHOR": author,

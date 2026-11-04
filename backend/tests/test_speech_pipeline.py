@@ -60,6 +60,100 @@ def finish(s, job, states=('ready', 'needs_review', 'failed', 'cancelled', 'buff
     raise AssertionError(s.get_job(job['id']))
 
 
+def test_staged_sections_continue_through_event_batches_and_export(service, monkeypatch):
+    monkeypatch.setattr('alder.speech_planning.PLAN_THRESHOLD', 1)
+    monkeypatch.setattr('alder.speech_planning.PLAN_BATCH', 3)
+    text = ' '.join(f'This is sentence {n}.' for n in range(10))
+    job = submit(service, text)
+    assert len(job['chunks']) == 3 and job['hasMoreText']
+    assert not any(k.startswith('_') for k in job)
+    done = finish(service, job)
+    assert done['status'] == 'ready', done
+    assert not done['hasMoreText'] and len(done['chunks']) == 10
+    assert done['progress'] == 1 and service.audio_path(done['id']).exists()
+    assert all(c['playbackEligible'] and text[c['sourceStart']:c['sourceEnd']] == c['text'] for c in done['chunks'])
+    events = service.events(job['id'], job['eventSequence'], 0)['events']
+    assert any(e['header'].get('hasMoreText') is False for e in events)
+    assert any(len(e.get('order', [])) == 10 for e in events)
+    assert all(not e['header'].get('audioUrl') for e in events if e['header'].get('hasMoreText'))
+
+
+def test_large_submission_prepares_bounded_metadata_and_retains_durable_plan(service, monkeypatch):
+    monkeypatch.setattr(service, '_enqueue', lambda job: None)
+    text = 'Alder reads this long document clearly.\n\n' * 53_000
+    assert len(text) > 2_000_000
+    job = submit(service, text, interactive=True)
+    assert len(job['chunks']) == 64 and job['hasMoreText']
+    assert not service.generated and not job.get('audioUrl')
+    saved = json.loads((service.root / 'jobs' / job['id'] / 'manifest.json').read_text(encoding='utf-8'))
+    assert saved['_narrationPlan']['cursor'] == 64
+    assert len(saved['_narrationPlan']['parts']) == 53_000
+    # A boundary demand is valid while more source remains, and arbitrary skips are not.
+    assert service.demand(job['id'], {'index': 64, 'mode': 'buffering'})['ok']
+    with pytest.raises(ValueError, match='Unknown reading section'):
+        service.demand(job['id'], {'index': 65})
+    saved['status'] = 'interrupted'
+    with service._lock:
+        service._jobs[job['id']] = saved
+    resumed = service.resume(job['id'])
+    assert resumed['hasMoreText'] and len(resumed['chunks']) == 64
+    with service._lock:
+        service._append_narration(saved)
+    assert len(saved['chunks']) == 128
+    assert saved['chunks'][64]['sourceStart'] == text.index('Alder', saved['chunks'][63]['sourceEnd'])
+    assert len({c['id'] for c in saved['chunks']}) == 128
+
+
+def test_staged_interactive_audio_is_still_bounded_and_resume_keeps_cursor(service, monkeypatch):
+    monkeypatch.setattr('alder.speech_planning.PLAN_THRESHOLD', 1)
+    monkeypatch.setattr('alder.speech_planning.PLAN_BATCH', 3)
+    text = ' '.join(f'This is a longer sentence numbered {n} to read aloud.' for n in range(100))
+    job = submit(service, text, interactive=True)
+    done = finish(service, job, states=('buffered', 'failed'))
+    assert done['status'] == 'buffered' and done['hasMoreText']
+    eligible = [c for c in done['chunks'] if c['playbackEligible']]
+    assert 0 < len(eligible) < 35 and done['progress'] < .4
+    count = len(done['chunks'])
+    service.cancel(job['id'])
+    finish(service, job, states=('cancelled',))
+    service.resume(job['id'])
+    service.demand(job['id'], {'index': count, 'mode': 'buffering'})
+    done = finish(service, job, states=('buffered', 'failed'))
+    assert done['status'] == 'buffered' and len(done['chunks']) > count
+    assert done['chunks'][count]['playbackEligible']
+
+
+def test_later_planning_failure_is_delivered_and_not_overwritten(service, monkeypatch):
+    monkeypatch.setattr('alder.speech_planning.PLAN_THRESHOLD', 1)
+    monkeypatch.setattr('alder.speech_planning.PLAN_BATCH', 2)
+    rules = [{'word': 'Oversized', 'spoken': 'unbounded ' * 70}]
+    job = service.submit({'id': 'test', 'revision': 0, 'pronunciation': rules},
+                         {'scope': 'selection', 'voiceId': 'default', 'text': 'First sentence. Second sentence. Third sentence. Oversized.'})
+    done = finish(service, job, states=('failed',))
+    deadline = time.monotonic() + 3
+    while service._inflight and time.monotonic() < deadline:
+        time.sleep(.01)
+    done = service.get_job(job['id'])
+    assert done['status'] == 'failed' and 'replacement is too long' in done['error']
+    assert len(done['chunks']) == 2 and done['hasMoreText']
+    events = service.events(job['id'], job['eventSequence'], 0)['events']
+    assert events[-1]['header']['status'] == 'failed'
+
+
+def test_empty_planned_tail_finishes_without_empty_audio(service, monkeypatch):
+    from alder.pronunciation import import_rex
+    monkeypatch.setattr('alder.speech_planning.PLAN_THRESHOLD', 1)
+    monkeypatch.setattr('alder.speech_planning.PLAN_BATCH', 2)
+    rules = import_rex(b'omitted[.]=', 'omit.rex')['rules']
+    job = service.submit({'id': 'test', 'revision': 0, 'pronunciation': rules},
+                         {'scope': 'selection', 'voiceId': 'default',
+                          'text': 'First sentence. Second sentence. omitted. omitted. omitted.'})
+    assert job['hasMoreText'] and len(job['chunks']) == 2
+    done = finish(service, job)
+    assert done['status'] == 'ready' and not done['hasMoreText']
+    assert len(done['chunks']) == 2 and len(service.generated) == 2
+
+
 def test_acceptance_required_even_for_legacy_clients(service):
     done = finish(service, submit(service, verify=False))
     assert done['status'] == 'ready'
@@ -722,6 +816,50 @@ def test_sapi_overlapping_progress_is_accepted_without_regenerating(service, mon
     assert done['status']=='ready', done
     assert calls==['Alder reads clearly.'] and not service.checked
     assert [w['text'] for w in done['chunks'][0]['wordTimings']]==['Alder','reads','clearly']
+
+
+def test_native_playback_does_not_wait_for_neural_preparation_and_keeps_cache_deduplication(service, monkeypatch):
+    monkeypatch.setattr('alder.sapi.voices', lambda: [{'id':'sapi-test','name':'Test','kind':'sapi','hash':'test'}])
+    preparing, release, rendered = threading.Event(), threading.Event(), threading.Event()
+    failures, calls = [], []
+    original = service._invoke_worker
+    def neural(payload, **kwargs):
+        if payload.get('operation') == 'prepare':
+            preparing.set()
+            if not release.wait(8): raise TimeoutError('Test did not release preparation')
+            return {'ok': True}
+        return original(payload, **kwargs)
+    monkeypatch.setattr(service, '_invoke_worker', neural)
+    monkeypatch.setattr(service, '_prepare_checker', lambda: {'ok': True})
+    def prepare():
+        try: service.prepare('default')
+        except Exception as error: failures.append(error)
+    def render(voice, text, path, *args):
+        calls.append(text)
+        pcm(path, 1)
+        rendered.set()
+        return {'words': [
+            {'text':'Alder','start':0,'length':5,'seconds':0},
+            {'text':'reads','start':6,'length':5,'seconds':.5},
+        ]}
+    monkeypatch.setattr('alder.sapi.render', render)
+    thread = threading.Thread(target=prepare)
+    thread.start()
+    try:
+        assert preparing.wait(2)
+        jobs = [service.submit({'id':'test','revision':0,'pronunciation':[]},
+            {'scope':'selection','text':'Alder reads.','voiceId':'sapi-test','interactive':True}) for _ in range(2)]
+        assert rendered.wait(2), 'Native speech waited for unrelated neural preparation'
+        for job in jobs:
+            done = finish(service, job)
+            assert done['status'] == 'ready', done
+            assert done['chunks'][0]['playbackEligible']
+        assert calls == ['Alder reads.']
+        assert thread.is_alive()
+    finally:
+        release.set()
+        thread.join(3)
+    assert not failures and not thread.is_alive()
 
 
 def test_spoken_ranges_preserve_source_mapping_and_explicit_pronunciation():

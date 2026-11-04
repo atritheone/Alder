@@ -15,9 +15,10 @@ def set_font_family(font, family):
 
 class NumberingWriter:
     def __init__(self, document):
+        self.document = document
         self.root = document.part.numbering_part.element
 
-    def create(self, ordered, start=1, marker=None):
+    def create(self, ordered, start=1, marker=None, continuation=False, relative=True):
         from .list_formatting import NUMBER_FORMATS, BULLETS
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
@@ -26,6 +27,7 @@ class NumberingWriter:
         number_id = max([int(e.get(qn("w:numId"))) for e in root.findall(qn("w:num"))] + [0]) + 1
         abstract = OxmlElement("w:abstractNum")
         abstract.set(qn("w:abstractNumId"), str(abstract_id))
+        name=OxmlElement('w:name');name.set(qn('w:val'),('AlderRelative' if relative else 'AlderOrdinary')+('Continuation' if continuation else 'List'));abstract.append(name)
         for level in range(9):
             item = OxmlElement("w:lvl")
             item.set(qn("w:ilvl"), str(level))
@@ -266,11 +268,12 @@ def table_grid(rows):
     return columns, placed
 
 
-def import_table(table, container, warnings=None):
+def import_table(table, container, warnings=None, row_changes=None, cell_changes=None,table_formats=None):
     from docx.table import _Cell
     from docx.oxml.ns import qn
     from .table_formatting import read_docx_cell, row_vertical_inset
-    rows, anchors, margins = [], {}, []
+    rows, anchors, margins, changed_cells = [], {}, [], []
+    anchor_changes={}
     widths = [round(col.w.pt * 96 / 72, 6) if col.w else None for col in table._tbl.tblGrid.gridCol_lst]
     for row_index, row in enumerate(table.rows):
         result, column = [], 0
@@ -279,6 +282,10 @@ def import_table(table, container, warnings=None):
             width = element.grid_span
             if element.vMerge == "continue":
                 anchor = anchors.get(column)
+                change=(cell_changes or {}).get(element);owner=anchor_changes.get(id(anchor))
+                if change or owner:
+                    if not change or not owner or anchor['attrs']['colspan']!=width or any(change.get(k)!=owner.get(k) for k in ('before','after')) or any(change['stamp'].get(k)!=owner['stamp'].get(k) for k in ('author','date')):
+                        raise ValueError('Review partial or conflicting formatting inside a merged Word cell before importing. The original file has not been changed.')
                 if anchor is not None: anchor["attrs"]["rowspan"] += 1
                 column += width
                 continue
@@ -294,6 +301,8 @@ def import_table(table, container, warnings=None):
             colwidth = widths[column:column + width]
             if len(colwidth) == width and all(colwidth): attrs["colwidth"] = colwidth
             node = {"type": "table_header" if header else "table_cell", "attrs": attrs, "content": container(cell)}
+            if cell_changes and element in cell_changes:
+                changed_cells.append((node,cell_changes[element]));anchor_changes[id(node)]=cell_changes[element]
             result.append(node)
             for c in range(column, column + width): anchors[c] = node
             column += width
@@ -303,6 +312,8 @@ def import_table(table, container, warnings=None):
         row_attrs = {'minHeight': min(1440, row.height.pt + inset)} if row.height is not None else {}
         cant_split = row._tr.trPr.find(qn('w:cantSplit')) if row._tr.trPr is not None else None
         row_attrs['allowSplit'] = cant_split is None or cant_split.get(qn('w:val'), '1').lower() in ('0', 'false', 'off')
+        if row_changes and row._tr in row_changes:
+            change=row_changes[row._tr];row_attrs.update(revisionBlock=change,blockId=change['originalId'])
         if warnings is not None:
             from docx.enum.table import WD_ROW_HEIGHT_RULE
             message = 'Fixed DOCX row heights are imported as minimum heights to keep all cell content visible.'
@@ -317,6 +328,31 @@ def import_table(table, container, warnings=None):
                     message='Word applies the largest vertical cell margins in each row; imported cell padding reflects that rendered layout.'
                     if message not in warnings:warnings.append(message)
                 cell['attrs'][key]=value
+    from .cell_revisions import attach_cell_revision,validate_word_cell_changes
+    for cell,change in changed_cells:attach_cell_revision(cell,change)
+    if changed_cells:validate_word_cell_changes(rows)
+    if table_formats:
+        from .table_revisions import attach_table_revision
+        from .paragraph_revisions import paragraph_format
+        _,placed=table_grid(rows)
+        for index,row in enumerate(rows):
+            native_row=table.rows[index]._tr
+            if native_row not in table_formats:continue
+            cells=[cell.get('attrs',{}) for start,col,height,width,cell in placed if start<=index<start+height]
+            oldcells=[paragraph_format(c['revisionProperties'],True)['attrs'] if c.get('revisionProperties') else c for c in cells]
+            attach_table_revision(row,table_formats[native_row],row_vertical_inset(oldcells,authored=False))
     from docx.enum.table import WD_TABLE_ALIGNMENT
     align = {WD_TABLE_ALIGNMENT.LEFT: 'left', WD_TABLE_ALIGNMENT.CENTER: 'center', WD_TABLE_ALIGNMENT.RIGHT: 'right'}.get(table.alignment, 'left')
-    return {"type": "table", "attrs": {'align': align}, "content": rows}
+    attrs={'align':align}
+    revisions=[row.get('attrs',{}).get('revisionBlock') for row in rows]
+    if revisions and all(revisions):
+        first=revisions[0]
+        if any(change['kind']!=first['kind'] or change['stamp']!=first['stamp'] for change in revisions):
+            raise ValueError('Review incompatible whole-table changes in Word before importing.')
+        from uuid import uuid4
+        identity='block_'+uuid4().hex
+        attrs.update(blockId=identity,revisionBlock={'kind':first['kind'],'stamp':first['stamp'],'originalId':identity})
+        for row in rows:row['attrs'].pop('revisionBlock')
+    result={"type": "table", "attrs": attrs, "content": rows}
+    if table_formats and table._tbl in table_formats:attach_table_revision(result,table_formats[table._tbl])
+    return result

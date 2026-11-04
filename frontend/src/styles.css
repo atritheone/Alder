@@ -2868,6 +2868,23 @@ button.accent {
 .open-progress button {
   margin-left: 12px;
 }
+.document-opening-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 40px);
+}
+.document-opening-progress span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-opening-progress progress {
+  width: 64px;
+  flex: 0 0 64px;
+  accent-color: #243b5b;
+}
 @media (max-width: 1000px) {
   .window-document small {
     display: none;

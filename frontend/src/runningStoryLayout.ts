@@ -21,8 +21,12 @@ if (typeof document !== "undefined")
 
 /** Only tabs/exact leading need measurement. Repeated stories reuse frozen
  * paint; no editor, timers or mutation observers survive this operation. */
-export function renderRunningStory(element: HTMLElement, doc: PMNode) {
-  doc=normaliseListOrders(doc);
+export function renderRunningStory(
+  element: HTMLElement,
+  doc: PMNode,
+  outlineLabels?: ReadonlyMap<number, string | null>,
+) {
+  doc = normaliseListOrders(doc);
   let measured = false;
   doc.descendants((node) => {
     if (
@@ -48,6 +52,7 @@ export function renderRunningStory(element: HTMLElement, doc: PMNode) {
     element.style.fontFamily,
     hyphenationPaintVersion,
     runningImageVersion,
+    outlineLabels ? [...outlineLabels] : null,
   ]);
   const existing = cache.get(key);
   if (existing !== undefined) {
@@ -62,7 +67,7 @@ export function renderRunningStory(element: HTMLElement, doc: PMNode) {
     state: EditorState.create({
       doc,
       plugins: [
-        outlineLists(),
+        outlineLists(outlineLabels),
         new Plugin({
           props: { decorations: (state) => frozenHyphenation(state.doc) },
         }),

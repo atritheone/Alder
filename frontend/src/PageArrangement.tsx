@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { pageFrame } from "./sectionLayout";
 import { contiguousPage } from "./pageRanges";
 import type { FlowPage } from "./pageFlow";
@@ -527,7 +528,7 @@ export default function PageArrangement({
                 className={`page-card${focusedPage?.index === i ? " is-focus-source" : ""}${held ? " is-held" : ""}${selection?.pages.includes(i) ? " is-selected" : ""}`}
                 key={i}
                 data-page={i}
-                aria-label={`Page ${i + 1}`}
+                aria-label={`Page ${formatInteger(i + 1)}`}
                 tabIndex={0}
                 aria-keyshortcuts="Enter Shift+F10 Alt+ArrowUp Alt+ArrowDown"
                 onKeyDown={(event) => {
@@ -597,7 +598,7 @@ export default function PageArrangement({
                         : []),
                     ],
                     {
-                      label: `Page ${i + 1} actions`,
+                      label: `Page ${formatInteger(i + 1)} actions`,
                       className: "arrangement-context-menu",
                     },
                   );
@@ -679,7 +680,7 @@ export default function PageArrangement({
                     dangerouslySetInnerHTML={{ __html: snapshot }}
                   />
                 </div>
-                <span className="page-card-number">{i + 1}</span>
+                <span className="page-card-number">{formatInteger(i + 1)}</span>
               </article>
             );
           })}
@@ -687,7 +688,7 @@ export default function PageArrangement({
       </div>
       {selection && (
         <div className="arrange-selection-actions">
-          <span>{selection.pages.length} selected</span>
+          <span>{formatInteger(selection.pages.length)} selected</span>
           <button
             disabled={selection.pages.length < 2}
             onClick={() => {
@@ -726,7 +727,7 @@ export default function PageArrangement({
           ref={focusRef}
           className="arrangement-page-focus"
           role="dialog"
-          aria-label={`Page ${focusedPage.index + 1} focused view`}
+          aria-label={`Page ${formatInteger(focusedPage.index + 1)} focused view`}
           tabIndex={-1}
           onDoubleClick={(event) => {
             if (
@@ -772,7 +773,7 @@ export default function PageArrangement({
                 }}
               />
             </div>
-            <span className="page-card-number">{focusedPage.index + 1}</span>
+            <span className="page-card-number">{formatInteger(focusedPage.index + 1)}</span>
           </div>
         </div>
       )}

@@ -52,7 +52,7 @@ export function trackRangeTransaction(
       invalid = true;
     if (
       tr.getMeta("uiEvent") === "paste" &&
-      (node.attrs.revisionProperties ||
+      (node.attrs.revisionMove || node.attrs.revisionBlock || node.attrs.revisionProperties ||
         node.marks.some((mark) => mark.type.name.startsWith("revision_")))
     )
       invalid = true;

@@ -10,6 +10,18 @@ export function preparePublicationSemantics(sheet: HTMLElement) {
     // aria-hidden. The img role supplies one atomic alternative for the math.
     equation.querySelector('math')?.removeAttribute('aria-hidden');
   }
+  // Chromium omits bare SVG paths from its tagged PDF tree. A self-contained
+  // SVG image keeps vector paint and supplies one Figure with alternative text.
+  for (const shape of sheet.querySelectorAll<HTMLElement>("[data-document-shape]")) {
+    const svg=shape.querySelector("svg");if(!svg)continue;
+    svg.setAttribute("xmlns","http://www.w3.org/2000/svg");
+    const picture=document.createElement("img");
+    picture.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(new XMLSerializer().serializeToString(svg));
+    picture.alt=shape.getAttribute("aria-hidden")==="true"?"":shape.getAttribute("aria-label")||"";
+    picture.style.cssText="display:block;width:100%;height:100%;max-width:none";
+    shape.setAttribute("role","presentation");shape.removeAttribute("aria-label");
+    svg.replaceWith(picture);
+  }
   for (const figure of sheet.querySelectorAll("figure"))
     figure.setAttribute("role", "presentation");
   for (const object of sheet.querySelectorAll(
@@ -18,7 +30,7 @@ export function preparePublicationSemantics(sheet: HTMLElement) {
     object.setAttribute("aria-hidden", "true");
   const hasContent = (element: Element) =>
     !!element.querySelector(
-      '[data-publication-top],img:not([aria-hidden="true"]):not([data-image-decorative="true"])',
+      '[data-publication-top],[data-document-shape]:not([aria-hidden="true"]),img:not([aria-hidden="true"]):not([data-image-decorative="true"])',
     );
   for (const row of sheet.querySelectorAll<HTMLTableRowElement>(
     "table[data-publication-table] tr",

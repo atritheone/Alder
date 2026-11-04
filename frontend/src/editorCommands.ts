@@ -232,7 +232,9 @@ export function toggleList(name: "bullet_list" | "ordered_list"): Command {
             view,
           );
         dispatch?.(
-          state.tr.setNodeMarkup($from.before(depth), state.schema.nodes[name]),
+          state.tr.setNodeMarkup($from.before(depth), state.schema.nodes[name], {
+            ...node.attrs, listStyle: null, listTemplate: null, order: 1, continuePrevious: false,
+          }),
         );
         return true;
       }

@@ -1,7 +1,9 @@
 import type { Node as PMNode } from "prosemirror-model";
 import type { DocNode } from "./types";
+export const deletedBlock=(node:DocNode)=> ((node.attrs?.revisionMove||node.attrs?.revisionBlock) as {kind?:string}|undefined)?.kind==='deletion';
 
 export function documentText(node: DocNode): string {
+  if(deletedBlock(node))return '';
   if (node.marks?.some((mark) => mark.type === "revision_deletion")) return "";
   if (node.type === "text") return node.text || "";
   if (["hardBreak", "hard_break"].includes(node.type)) return "\n";
@@ -9,6 +11,7 @@ export function documentText(node: DocNode): string {
   if (node.type === "text_box")
     return "\n" + (node.content || []).map(documentText).join("") + "\n";
   return (node.content || [])
+    .filter(child=>!deletedBlock(child))
     .map(documentText)
     .join(
       ["tableRow", "table_row"].includes(node.type)
@@ -50,6 +53,7 @@ const silent = new Set([
   "index_entry",
   "image",
   "inline_image",
+  "shape",
   "horizontal_rule",
   "horizontalRule",
   "page_break",
@@ -76,6 +80,7 @@ export function textLanguageSpans(
     offset += length;
   };
   const visit = (node: DocNode, inherited: string) => {
+    if(deletedBlock(node))return;
     if (
       node.marks?.some((mark) => mark.type === "revision_deletion") ||
       silent.has(node.type)
@@ -99,7 +104,7 @@ export function textLanguageSpans(
       return;
     }
     if (node.type === "text_box") append(1, language);
-    node.content?.forEach((child, i) => {
+    node.content?.filter(child=>!deletedBlock(child)).forEach((child, i) => {
       if (
         i &&
         (separated.has(node.type) ||
@@ -123,6 +128,7 @@ export function generatedTextSpans(document: DocNode) {
   const spans: { start: number; end: number }[] = [];
   let offset = 0;
   const visit = (node: DocNode) => {
+    if(deletedBlock(node))return;
     if (
       node.marks?.some((mark) => mark.type === "revision_deletion") ||
       silent.has(node.type)
@@ -143,7 +149,7 @@ export function generatedTextSpans(document: DocNode) {
       return;
     }
     if (node.type === "text_box") offset++;
-    node.content?.forEach((child, index) => {
+    node.content?.filter(child=>!deletedBlock(child)).forEach((child, index) => {
       if (
         index &&
         (separated.has(node.type) ||
@@ -177,36 +183,68 @@ export function intersectsTextSpans(
 // highlighting and page updates instead of allocating one entry per character
 // for every spoken word. Bound retention even when undo history holds old docs.
 const projections = new Map<PMNode, TextProjection>();
+type ProjectionRun = { at: number; position: number; linear: boolean };
+const projectionRuns = new WeakMap<TextProjection, ProjectionRun[]>();
+
+/** Source boundary without allocating a character-sized map. The packed map
+ * remains available for consumers that need all boundaries at once. */
+export function projectionPosition(projection: TextProjection, offset: number) {
+  const runs = projectionRuns.get(projection);
+  if (!runs) return projection.map[offset];
+  let low = 0, high = runs.length;
+  while (low + 1 < high) {
+    const middle = (low + high) >>> 1;
+    if (runs[middle].at <= offset) low = middle;
+    else high = middle;
+  }
+  const run = runs[low];
+  return run.position + (run.linear ? offset - run.at : 0);
+}
+
+export function projectionOffset(projection: TextProjection, position: number) {
+  let low = 0, high = projection.text.length + 1;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (projectionPosition(projection, middle) < position) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 export function projectText(doc: PMNode): TextProjection {
   const cached = projections.get(doc);
   if (cached) return cached;
-  // The projection cannot contain more UTF-16 units than the node's own
-  // content and boundary tokens. Fill one packed buffer directly instead of
-  // allocating/copying a character array at every ancestor in a long document.
-  const boundaries = new Uint32Array(doc.nodeSize + 1);
+  // A paragraph's ordinary text maps linearly. Keep those runs compact so a
+  // keystroke or caret move need not fill a buffer for the entire manuscript.
+  const runs: ProjectionRun[] = [];
   const chunks: string[] = [];
   let at = 0;
+  const boundary = (position: number, linear = false) => {
+    if (runs.at(-1)?.at === at) runs.pop();
+    runs.push({ at, position, linear });
+  };
   function visit(node: PMNode, position: number, isRoot = false) {
+    if((node.attrs.revisionMove||node.attrs.revisionBlock)?.kind==='deletion'){boundary(position+node.nodeSize);return;}
     if (node.marks.some((mark) => mark.type.name === "revision_deletion")) {
-      boundaries[at] = position + node.nodeSize;
+      boundary(position + node.nodeSize);
       return;
     }
     if (node.isText) {
       const text = node.text || "";
       chunks.push(text);
-      for (let i = 0; i <= text.length; i++) boundaries[at + i] = position + i;
+      boundary(position, true);
       at += text.length;
       return;
     }
     const kind = node.type.name;
     if (kind === "hard_break" || kind === "hardBreak") {
       chunks.push("\n");
-      boundaries[at] = position;
-      boundaries[++at] = position + node.nodeSize;
+      boundary(position);
+      at++; boundary(position + node.nodeSize);
       return;
     }
     if (silent.has(kind)) {
-      boundaries[at] = position + node.nodeSize;
+      boundary(position + node.nodeSize);
       return;
     }
     const contentStart = isRoot ? 0 : position + 1;
@@ -218,11 +256,13 @@ export function projectText(doc: PMNode): TextProjection {
           : "";
     if (kind === "text_box") {
       chunks.push("\n");
-      boundaries[at++] = position;
+      boundary(position); at++;
     }
-    boundaries[at] = contentStart;
-    node.forEach((child, offset, index) => {
-      if (index && separator) {
+    boundary(contentStart);
+    let visible=0;
+    node.forEach((child, offset) => {
+      if((child.attrs.revisionMove||child.attrs.revisionBlock)?.kind==='deletion'){boundary(contentStart+offset+child.nodeSize);return;}
+      if (visible++ && separator) {
         chunks.push(separator);
         at++;
       }
@@ -232,14 +272,25 @@ export function projectText(doc: PMNode): TextProjection {
     });
     if (kind === "text_box") {
       chunks.push("\n");
-      boundaries[++at] = position + node.nodeSize;
+      at++; boundary(position + node.nodeSize);
     }
   }
   visit(doc, 0, true);
-  const projection = {
+  let packed: Uint32Array | undefined;
+  const projection: TextProjection = {
     text: chunks.join(""),
-    map: boundaries.subarray(0, at + 1),
+    get map() {
+      if (!packed) {
+        packed = new Uint32Array(at + 1);
+        runs.forEach((run, index) => {
+          const end = runs[index + 1]?.at ?? at + 1;
+          for (let i = run.at; i < end; i++) packed![i] = run.position + (run.linear ? i - run.at : 0);
+        });
+      }
+      return packed;
+    },
   };
+  projectionRuns.set(projection, runs);
   if (projections.size >= 4)
     projections.delete(projections.keys().next().value!);
   projections.set(doc, projection);
@@ -254,17 +305,8 @@ function splitsSurrogate(text: string, offset: number): boolean {
 }
 
 export function selectionOffsets(doc: PMNode, from: number, to: number) {
-  const { map } = projectText(doc);
-  const offset = (position: number) => {
-    let low = 0,
-      high = map.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (map[middle] < position) low = middle + 1;
-      else high = middle;
-    }
-    return Math.min(low, map.length - 1);
-  };
+  const projection = projectText(doc);
+  const offset = (position: number) => Math.min(projectionOffset(projection, position), projection.text.length);
   return { start: offset(from), end: offset(to) };
 }
 
@@ -293,8 +335,8 @@ export function projectedRange(
       "This text range is no longer valid. Run the check again.",
     );
   }
-  const from = projection.map[start];
-  let to = projection.map[end];
+  const from = projectionPosition(projection, start);
+  let to = projectionPosition(projection, end);
   // One text boundary has right affinity in the cached projection. At the end
   // of a match use left affinity so a text-box boundary is never deleted along
   // with its last word, or included with the prose immediately before it.
@@ -324,6 +366,7 @@ export function projectedRange(
           "document_note",
           "comment_anchor",
           "inline_image",
+  "shape",
         ].includes(before.type.name))
     )
       break;
@@ -375,6 +418,7 @@ export function wordAtPosition(doc: PMNode, position: number) {
           "bookmark_end",
           "comment_anchor",
           "inline_image",
+  "shape",
         ].includes(before.type.name))
     )
       break;

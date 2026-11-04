@@ -31,6 +31,7 @@ export type PublicationPage = {
   fragments?: readonly PageRange[];
 };
 export type PagePublication = {
+  chapterContext?: import("./bookPageContext").ChapterPageContext[];
   mixedNoteGeometry?: boolean;
   overflowingRows?: string[];
   textBoxes?: Record<string, { width: number; height: number }>;
@@ -120,9 +121,9 @@ export function capturePagePublication(
   const noteDestinations = new Set<string>();
   const noteGeometry=new Map<string,string>();let mixedNoteGeometry=false;
   view.state.doc.descendants((node, pos) => {
-    if(node.type.name==='equation'){
+    if(['equation','shape'].includes(node.type.name)){
       const index=physicalPageAtPosition(pages,pos);
-      if(index===null)throw new Error('An equation has not been placed on a page.');
+      if(index===null)throw new Error(`The ${node.type.name} has not been placed on a page.`);
       const frame=pageFrame(pages,index,layout),insets=pageInsets(frame.layout),element=view.nodeDOM(pos) as HTMLElement;
       const rect=element.getBoundingClientRect(),columns=frame.layout.columns;
       const count=columns?.count||1,gap=(columns?.gapMm||0)*96/25.4;
@@ -130,7 +131,7 @@ export function capturePagePublication(
       const cell=element.closest('td,th');
       if(cell){const css=getComputedStyle(cell);width=Math.min(width,cell.getBoundingClientRect().width/scale-parseFloat(css.paddingLeft||'0')-parseFloat(css.paddingRight||'0'));}
       if(rect.width/scale>width+1 || rect.height/scale>frame.layout.height-insets.top-insets.bottom+1)
-        throw new Error('An equation is too large for its page, column or table cell. Shorten it, reduce the paragraph font size or use a larger page before publishing.');
+        throw new Error(node.type.name==='shape'?'A shape is too large for its page, column or table cell. Resize it or use a larger page before publishing.':'An equation is too large for its page, column or table cell. Shorten it, reduce the paragraph font size or use a larger page before publishing.');
       return false;
     }
     if (node.type.name === "document_note") {
@@ -235,7 +236,7 @@ export function capturePagePublication(
         const clone = clones[at];
         // MathML lays out its own operators and arguments. Painting its tokens
         // as ordinary HTML spans destroys fractions, roots and script sizing.
-        if(original.parentElement?.closest('[data-equation]'))return;
+        if(original.parentElement?.closest('[data-equation],[data-document-shape]'))return;
         const style = getComputedStyle(original);
         if (original.matches(".discretionary-hyphen"))
           clone.dataset.printHyphen = String(
@@ -244,7 +245,7 @@ export function capturePagePublication(
         for (const property of paintProperties)
           clone.style.setProperty(property, style.getPropertyValue(property));
         copyExactLeading(original, clone);
-        if(original.matches('[data-equation]')){
+        if(original.matches('[data-equation],[data-document-shape]')){
           const box=original.getBoundingClientRect();
           const owner=physicalPageAtPosition(pages,view.posAtDOM(original,0));
           if(owner!==index){clone.style.visibility='hidden';clone.setAttribute('aria-hidden','true');}

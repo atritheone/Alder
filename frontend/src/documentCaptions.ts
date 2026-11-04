@@ -1,6 +1,7 @@
 import type { NodeSpec } from "prosemirror-model";
 import {
   TextSelection,
+  NodeSelection,
   type Command,
   type EditorState,
 } from "prosemirror-state";
@@ -10,6 +11,7 @@ import { selectedImage } from "./imageFormatting";
 import { tableContext } from "./tableFormatting";
 import type { DocNode, Project } from "./types";
 import { documentText } from "./textProjection";
+import { movedInlineAliases } from "./movedInlineAliases";
 
 export type CaptionLabel = "Figure" | "Table";
 
@@ -98,7 +100,7 @@ export const sequenceSpec: NodeSpec = {
 };
 
 export function captionObject(state: EditorState) {
-  const image = selectedImage(state);
+  const image = selectedImage(state) || (state.selection instanceof NodeSelection && state.selection.node.type.name === "shape" ? {node: state.selection.node, pos:state.selection.from} : null);
   if (image) {
     const point = state.doc.resolve(image.pos);
     // An inline picture's caption sits outside its text paragraph.
@@ -142,7 +144,7 @@ export function addCaption(
       if (node.attrs.captionTargetId === id) existing = true;
       if (
         node.attrs.blockId === id &&
-        ["image", "inline_image", "table"].includes(node.type.name)
+        ["image", "inline_image", "shape", "table"].includes(node.type.name)
       ) {
         const point = state.doc.resolve(pos);
         const at = node.isInline ? point.before(point.depth) : pos;
@@ -180,12 +182,16 @@ export function addCaption(
         ],
       );
       const tr = closeHistory(state.tr).insert(at, caption);
-      const numbers = { ...starts };
+      const values: string[] = [];
+      const collect = (node: DocNode) => {
+        if (node.type === "sequence") values.push(documentText(node));
+        node.content?.forEach(collect);
+      };
+      collect(numberedDocument(tr.doc.toJSON(), { ...starts }));
+      let index = 0;
       tr.doc.descendants((node, pos) => {
         if (node.type.name !== "sequence") return;
-        const value = String(
-          ++numbers[node.attrs.sequenceName as CaptionLabel],
-        );
+        const value = values[index++];
         if (node.textContent !== value)
           tr.replaceWith(
             tr.mapping.slice(1).map(pos + 1),
@@ -209,19 +215,27 @@ export function numberedDocument(
   document: DocNode,
   counts: Record<CaptionLabel, number>,
 ): DocNode {
-  if (document.type === "sequence") {
-    const text = String(++counts[document.attrs!.sequenceName as CaptionLabel]);
-    return documentText(document) === text
-      ? document
-      : { ...document, content: [{ type: "text", text }] };
-  }
-  if (!document.content) return document;
-  const content = document.content.map((node) =>
-    numberedDocument(node, counts),
-  );
-  return content.every((node, index) => node === document.content![index])
-    ? document
-    : { ...document, content };
+  const values = new Map<DocNode, string>(), live = new Map<string, string>();
+  const collect = (node: DocNode) => {
+    if ((node.attrs?.revisionMove || node.attrs?.revisionBlock)?.kind === "deletion" || node.marks?.some(mark => mark.type === "revision_deletion")) return;
+    if (node.type === "sequence") {
+      const value = String(++counts[node.attrs!.sequenceName as CaptionLabel]);
+      values.set(node, value);
+      if (node.attrs?.blockId) live.set(node.attrs.blockId, value);
+    }
+    node.content?.forEach(collect);
+  };
+  collect(document);
+  const aliases = movedInlineAliases(document, "sequence");
+  const apply = (node: DocNode): DocNode => {
+    const value = values.get(node) ?? live.get(aliases.get(node.attrs?.blockId) || "");
+    if (node.type === "sequence" && value != null)
+      return documentText(node) === value ? node : { ...node, content: [{ type: "text", text: value }] };
+    if (!node.content) return node;
+    const content = node.content.map(apply);
+    return content.every((child, index) => child === node.content![index]) ? node : { ...node, content };
+  };
+  return apply(document);
 }
 export function numberProjectCaptions(project: Project) {
   const counts = { Figure: 0, Table: 0 };
@@ -243,6 +257,7 @@ function sequenceCounts(node: DocNode): Record<CaptionLabel, number> {
   const cached = captionCounts.get(node);
   if (cached) return cached;
   const counts = { Figure: 0, Table: 0 };
+  if ((node.attrs?.revisionMove || node.attrs?.revisionBlock)?.kind === "deletion" || node.marks?.some(mark => mark.type === "revision_deletion")) return counts;
   if (node.type === "sequence")
     counts[node.attrs!.sequenceName as CaptionLabel]++;
   for (const child of node.content || []) {

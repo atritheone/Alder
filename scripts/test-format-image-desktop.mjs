@@ -98,11 +98,11 @@ try {
     name: "square.png",
     mimeType: "image/png",
     buffer: Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=",
+      "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAPElEQVR4nO3RQREAMAjEwKNq6qJW8K+iEsKHX1bAMRPqvs6ms7oeDwz4A2QiZCJkImQiZCJkImQiZKKQD/vQAQdjv4jtAAAAAElFTkSuQmCC",
       "base64",
     ),
   });
-  const img = editor.locator("img");
+  const img = editor.locator("img[data-asset-id]");
   await expect(img).toHaveCount(1);
   await expect(sandbox).toHaveText("Separate sandbox wording");
   await expect(sandbox.locator("img")).toHaveCount(0);
@@ -113,13 +113,14 @@ try {
     "Write image action targets Write even when Sandbox previously had focus",
   );
   await expect(page.locator(".save-status")).toHaveText("Saved");
-  // Insertion leaves an image selection; use the accessible menu rather than
-  // attempting to point at the one-pixel fixture before it has been resized.
+  // Inline insertion leaves a text caret. Select the authored picture before
+  // opening its contextual properties; the caret separator is not an image.
   await expect
     .poll(() =>
       img.evaluate((element) => element.complete && element.naturalWidth),
     )
-    .toBe(1);
+    .toBe(32);
+  await img.click();
   await toolbar.getByRole("button", { name: "More formatting" }).click();
   await page
     .getByRole("menuitem", { name: "Image properties…", exact: true })
@@ -129,6 +130,7 @@ try {
     exact: true,
   });
   await dialog.getByLabel("Image width (mm)").fill("50.8");
+  await dialog.getByLabel("Image placement").selectOption("block");
   await dialog.getByLabel("Image alignment").selectOption("right");
   await dialog
     .getByLabel("Image alternative text")

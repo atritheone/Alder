@@ -1,3 +1,7 @@
+import {
+  identifiedGeneratedContents,
+  generatedLabelAttrs,
+} from "./generatedIdentities";
 import type { NodeSpec, Node as PMNode } from "prosemirror-model";
 import { TextSelection, type Command } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
@@ -5,12 +9,39 @@ import type { DocNode } from "./types";
 import type { ContentsOptions } from "./documentContents";
 import { documentText } from "./textProjection";
 import { documentBookmarks } from "./documentBookmarks";
+import { indexCollator } from "./indexCollation";
 
-export type IndexEntry = { terms: string[]; see?: string | null; rangeId?: string | null };
+export type IndexEntry = {
+  terms: string[];
+  see?: string | null;
+  rangeId?: string | null;
+  indexGroup?: string | null;
+  sortTerms?: string[] | null;
+};
+export const indexGroup = (value?: string | null) =>
+  (value || "I").toUpperCase();
+export const validIndexGroup = (value: unknown) =>
+  value == null || (typeof value === "string" && /^[A-Za-z]$/.test(value));
+const indexKey = (value: { terms: string[]; sortTerms?: string[] | null }) =>
+  JSON.stringify([
+    value.terms,
+    value.sortTerms?.some(Boolean) ? value.sortTerms : null,
+  ]);
 export const validIndexEntry = (value: unknown): value is IndexEntry => {
   if (!value || typeof value !== "object") return false;
   const entry = value as IndexEntry;
   return (
+    validIndexGroup(entry.indexGroup) &&
+    (entry.sortTerms == null ||
+      (Array.isArray(entry.sortTerms) &&
+        entry.sortTerms.length <= entry.terms?.length &&
+        entry.sortTerms.every(
+          (term) =>
+            typeof term === "string" &&
+            term.length <= 200 &&
+            term.trim() === term &&
+            !/[\u0000-\u001f\u007f]/u.test(term),
+        ))) &&
     Array.isArray(entry.terms) &&
     entry.terms.length >= 1 &&
     entry.terms.length <= 3 &&
@@ -22,7 +53,9 @@ export const validIndexEntry = (value: unknown): value is IndexEntry => {
         !!term &&
         !/[\u0000-\u001f\u007f]/u.test(term),
     ) &&
-    (entry.rangeId == null || (typeof entry.rangeId === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(entry.rangeId))) &&
+    (entry.rangeId == null ||
+      (typeof entry.rangeId === "string" &&
+        /^[A-Za-z0-9_.-]{1,128}$/.test(entry.rangeId))) &&
     !(entry.rangeId && entry.see) &&
     (entry.see == null ||
       (typeof entry.see === "string" &&
@@ -56,6 +89,8 @@ export const indexEntrySpec: NodeSpec = {
     terms: { default: [] },
     see: { default: null },
     rangeId: { default: null },
+    indexGroup: { default: null },
+    sortTerms: { default: null },
   },
   parseDOM: [
     {
@@ -79,6 +114,8 @@ export const indexEntrySpec: NodeSpec = {
         terms: node.attrs.terms,
         see: node.attrs.see,
         rangeId: node.attrs.rangeId,
+        indexGroup: node.attrs.indexGroup,
+        sortTerms: node.attrs.sortTerms,
       }),
       "data-index-id": node.attrs.blockId,
       class: "document-index-entry",
@@ -97,6 +134,7 @@ export const indexReferenceSpec: NodeSpec = {
     blockId: { default: null },
     terms: { default: [] },
     targetIds: { default: [] },
+    sortTerms: { default: null },
     unresolved: { default: false },
   },
   parseDOM: [
@@ -120,6 +158,7 @@ export const indexReferenceSpec: NodeSpec = {
       "data-index-reference": JSON.stringify({
         terms: node.attrs.terms,
         targetIds: node.attrs.targetIds,
+        sortTerms: node.attrs.sortTerms,
         unresolved: node.attrs.unresolved,
       }),
       "data-cross-reference": node.attrs.targetIds[0] || null,
@@ -139,9 +178,12 @@ export function indexEntries(doc: PMNode) {
     terms: string[];
     see: string | null;
     rangeId: string | null;
+    indexGroup: string | null;
+    sortTerms: string[] | null;
     context: string;
   }[] = [];
   doc.descendants((node, pos, parent) => {
+    if ((node.attrs.revisionMove || node.attrs.revisionBlock)?.kind === "deletion" || node.marks.some(mark => mark.type.name === "revision_deletion")) return false;
     if (node.type.name === "table_of_contents") return false;
     if (node.type.name === "index_entry")
       entries.push({
@@ -150,6 +192,8 @@ export function indexEntries(doc: PMNode) {
         terms: node.attrs.terms,
         see: node.attrs.see,
         rangeId: node.attrs.rangeId,
+        indexGroup: node.attrs.indexGroup,
+        sortTerms: node.attrs.sortTerms,
         context: parent?.textContent.slice(0, 100) || "",
       });
   });
@@ -158,7 +202,13 @@ export function indexEntries(doc: PMNode) {
 export function setIndexEntry(value: IndexEntry | null, id?: string): Command {
   return (state, dispatch) => {
     if (value && !validIndexEntry(value)) return false;
-    if(value?.rangeId && !documentBookmarks(state.doc).some(b=>b.id===value.rangeId && b.end!=null && !b.incomplete))return false;
+    if (
+      value?.rangeId &&
+      !documentBookmarks(state.doc).some(
+        (b) => b.id === value.rangeId && b.end != null && !b.incomplete,
+      )
+    )
+      return false;
     const existing = id
       ? indexEntries(state.doc).find((entry) => entry.id === id)
       : undefined;
@@ -201,28 +251,47 @@ export type IndexSource = {
   terms: string[];
   see?: string | null;
   chapter?: string;
+  indexGroup?: string | null;
+  sortTerms?: string[] | null;
 };
 type IndexTree = Map<
   string,
-  { term: string; children: IndexTree; ids: string[]; see: Set<string> }
+  {
+    term: string;
+    sort: string;
+    children: IndexTree;
+    ids: string[];
+    see: Set<string>;
+  }
 >;
-const sortKey = (text: string) =>
-  text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
-export function indexGroups(entries: IndexSource[]) {
+export function indexGroups(
+  entries: IndexSource[],
+  groupName?: string | null,
+  useSortText = true,
+  language?: string | null,
+) {
+  const collator = indexCollator(language);
   const tree: IndexTree = new Map();
   for (const entry of entries) {
-    if (!validIndexEntry(entry)) continue;
+    if (
+      !validIndexEntry(entry) ||
+      indexGroup(entry.indexGroup) !== indexGroup(groupName)
+    )
+      continue;
     let branch = tree;
     for (let i = 0; i < entry.terms.length; i++) {
-      const term = entry.terms[i];
-      if (!branch.has(term))
-        branch.set(term, {
+      const term = entry.terms[i],
+        sort = (useSortText && entry.sortTerms?.[i]) || term,
+        key = JSON.stringify([term, sort]);
+      if (!branch.has(key))
+        branch.set(key, {
           term,
+          sort,
           children: new Map(),
           ids: [],
           see: new Set(),
         });
-      const group = branch.get(term)!;
+      const group = branch.get(key)!;
       if (i === entry.terms.length - 1) {
         if (entry.see) group.see.add(entry.see);
         else group.ids.push(entry.id);
@@ -230,27 +299,29 @@ export function indexGroups(entries: IndexSource[]) {
       branch = group.children;
     }
   }
-  const result: { terms: string[]; ids: string[]; see: string[] }[] = [];
-  const visit = (branch: typeof tree, parent: string[]) => {
+  const result: {
+    terms: string[];
+    ids: string[];
+    see: string[];
+    sortTerms?: string[];
+  }[] = [];
+  const visit = (branch: typeof tree, parent: string[], sorts: string[]) => {
     for (const group of [...branch.values()].sort((a, b) => {
-      const ak = sortKey(a.term),
-        bk = sortKey(b.term);
-      return ak < bk
-        ? -1
-        : ak > bk
-          ? 1
-          : a.term < b.term
-            ? -1
-            : a.term > b.term
-              ? 1
-              : 0;
+      return collator.compare(a.sort, b.sort) || collator.compare(a.term, b.term) ||
+        (a.term < b.term ? -1 : a.term > b.term ? 1 : a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0);
     })) {
-      const terms = [...parent, group.term];
-      result.push({ terms, ids: group.ids, see: [...group.see] });
-      visit(group.children, terms);
+      const terms = [...parent, group.term],
+        sortTerms = [...sorts, group.sort === group.term ? "" : group.sort];
+      result.push({
+        terms,
+        ids: group.ids,
+        see: [...group.see],
+        ...(sortTerms.some(Boolean) ? { sortTerms } : {}),
+      });
+      visit(group.children, terms, sortTerms);
     }
   };
-  visit(tree, []);
+  visit(tree, [], []);
   return result;
 }
 export function refreshedIndex(node: DocNode, entries: IndexSource[]): DocNode {
@@ -261,7 +332,7 @@ export function refreshedIndex(node: DocNode, entries: IndexSource[]): DocNode {
       (child) => child.type === "index_reference",
     );
     if (reference)
-      previous.set(JSON.stringify(reference.attrs?.terms), paragraph);
+      previous.set(indexKey(reference.attrs as IndexEntry), paragraph);
   }
   const fallback = { ...previous.values().next().value?.attrs };
   delete fallback.blockId;
@@ -269,15 +340,20 @@ export function refreshedIndex(node: DocNode, entries: IndexSource[]): DocNode {
     ? [
         {
           type: "paragraph",
-          attrs: { keepWithNext: true },
+          attrs: { ...generatedLabelAttrs(node, true), keepWithNext: true },
           content: [
             { type: "text", text: options.title, marks: [{ type: "strong" }] },
           ],
         },
       ]
     : [];
-  for (const group of indexGroups(entries)) {
-    const prior = previous.get(JSON.stringify(group.terms)),
+  for (const group of indexGroups(
+    entries,
+    options.indexGroup,
+    options.useSortText !== false,
+    options.indexLanguage,
+  )) {
+    const prior = previous.get(indexKey(group)),
       old = prior?.content?.find((child) => child.type === "index_reference");
     content.push({
       type: "paragraph",
@@ -296,7 +372,9 @@ export function refreshedIndex(node: DocNode, entries: IndexSource[]): DocNode {
         {
           type: "index_reference",
           attrs: {
+            blockId: old?.attrs?.blockId ?? null,
             terms: group.terms,
+            sortTerms: group.sortTerms || null,
             targetIds: options.pageNumbers === false ? [] : group.ids,
             unresolved: old?.attrs?.unresolved || false,
           },
@@ -326,9 +404,10 @@ export function refreshedIndex(node: DocNode, entries: IndexSource[]): DocNode {
   if (content.length === (options.title ? 1 : 0))
     content.push({
       type: "paragraph",
+      attrs: generatedLabelAttrs(node, false),
       content: [{ type: "text", text: "No index entries available." }],
     });
-  const next = { ...node, content };
+  const next = identifiedGeneratedContents({ ...node, content });
   return JSON.stringify(next) === JSON.stringify(node) ? node : next;
 }
 export function indexPageText(

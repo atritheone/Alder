@@ -10,6 +10,7 @@ import {
   type CitationSource,
 } from "./citationTypes";
 import type { CitationInput, CitationOutput } from "./citationProcessor";
+import { movedInlineAliases } from "./movedInlineAliases";
 const fresh = () => "block_" + crypto.randomUUID();
 export const citationSpec: NodeSpec = {
   inline: true,
@@ -115,6 +116,7 @@ export const validBibliography = (attrs: any) =>
 export function citationNodes(document: DocNode): DocNode[] {
   const output: DocNode[] = [];
   const visit = (node: DocNode) => {
+    if ((node.attrs?.revisionMove || node.attrs?.revisionBlock)?.kind === "deletion") return;
     if (node.marks?.some((mark) => mark.type === "revision_deletion")) return;
     if (node.type === "citation") {
       output.push(node);
@@ -265,6 +267,16 @@ export function applyCitationOutput(
   output: CitationOutput,
   style: CitationStyle,
 ): DocNode {
+  // A moved citation is processed once at its live destination. Its review
+  // copy displays that same result without becoming another CSL occurrence.
+  const citations = { ...output.citations };
+  for (const [ghost, live] of movedInlineAliases(document, "citation")) {
+    const result = output.citations[live];
+    if (result != null) citations[ghost] = result;
+  }
+  return applyOutput(document, { ...output, citations }, style);
+}
+function applyOutput(document: DocNode, output: CitationOutput, style: CitationStyle): DocNode {
   if (document.type === "citation") {
     const html = output.citations[document.attrs!.blockId];
     if (html == null) return document;
@@ -351,7 +363,7 @@ export function applyCitationOutput(
   }
   if (!document.content) return document;
   const content = document.content.map((node) =>
-    applyCitationOutput(node, output, style),
+    applyOutput(node, output, style),
   );
   return content.every((node, i) => node === document.content![i])
     ? document

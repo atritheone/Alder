@@ -3,6 +3,7 @@ import { Mapping, StepMap } from "prosemirror-transform";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { pageInsets, type PageGeometry } from "./pageGeometry";
 import { TableMap } from "prosemirror-tables";
+import { repeatingTableHeaders } from "./repeatingTableHeaders";
 import { documentCanvasWidth, sectionLayout, pageAtY } from "./sectionLayout";
 import { tableRowBoundary,parallelCellStories } from "./tableStructure";
 import {tableHeaderHeight,type FlowHeader} from "./tablePageHeaders";
@@ -14,12 +15,16 @@ import {
   clearHyphenationLayoutChange,
 } from "./hyphenation";
 import { layoutExactLeading } from "./exactLeading";
+import { flowEndnoteBank, type EndnoteBank } from "./sectionEndnotes";
+import { mirroredPageLayout } from "./mirroredMargins";
 import {
   physicalPageAtPosition,
   contiguousPage,
   type PageRange,
 } from "./pageRanges";
 import { tablePageFragments } from "./tablePageFragments";
+import { pageText } from "./pageText";
+import { createDecorations } from "./decorationTree";
 import {tableAlignmentBase,alignedTableCells} from './tableCellAlignment';
 import {mergedTableRows,mergedRowHeights} from './mergedTableRows';
 import {
@@ -40,9 +45,10 @@ export type PageLayout = PageGeometry & {
   // Derived note layout; these are never stored as authored page settings.
   pageReserves?: number[];
   pageMinimums?: {pos:number;page:number}[];
+  sectionEndnotes?: EndnoteBank[];
   columns?: import('./columnLayout').Columns;
   columnSource?: PageLayout;
-  columnLimits?: {from:number;to:number;height:number;regions?:number}[];
+  columnLimits?: {from:number;to:number;height:number;regions?:number;noteEnd?:number;startRegion?:number}[];
   mirrorMargins?: boolean;
   language?: string;
   lineHeight: number;
@@ -62,6 +68,8 @@ export type PageLayout = PageGeometry & {
   headingContext?: HeadingContext;
 };
 export type FlowPage = {
+  endnoteOnly?: boolean;
+  endnoteBottom?: number;
   overflowingNoteRows?:string[];
   lineNumbers?:{x:number;y:number;number:number;fontFamily:string}[];
   noteHTML?:string;
@@ -139,7 +147,7 @@ export function paginatePages(
   if (hyphenChange && hyphenChange.doc !== doc) invalidate = true;
   const hasSections = Array.from({ length: doc.childCount }, (_, i) =>
     doc.child(i),
-  ).some((n) => n.type.name === "section_break");
+  ).some((n) => n.type.name === "section_break") || !!layout.sectionEndnotes?.length;
   const hasNumberRestarts =
     hasSections &&
     Array.from({ length: doc.childCount }, (_, i) => doc.child(i)).some(
@@ -161,6 +169,7 @@ export function paginatePages(
     layout.columnLimits,
     layout.pageReserves,
     layout.pageMinimums,
+    layout.sectionEndnotes,
     layout.noteOptions,
     layout.noteStarts,
     layout.width,
@@ -187,7 +196,7 @@ export function paginatePages(
     return candidate.renderedPages || candidate.pages;
   }
   const previous =
-    candidate?.pages.some((page) => page.fragments) ||
+    layout.sectionEndnotes?.length || candidate?.pages.some((page) => page.fragments) ||
     hasSections !== !!candidate?.pages.some((page) => page.frame)
       ? undefined
       : candidate;
@@ -236,12 +245,13 @@ export function paginatePages(
   // one paragraph at a time. Removing hundreds of distant spacers makes the
   // browser collapse/rebuild the entire manuscript for a local edit. Complex
   // containers and keep-with-next chains still use the complete measurement.
-  const plainProse = !!previous && !!endDiff && !hasSections &&
+  const simpleProse = !hasSections &&
     !layout.columnSource && !layout.pageReserves?.some(Boolean) &&
     !layout.pageMinimums?.length &&
     Array.from({length:doc.childCount},(_,i)=>doc.child(i)).every(node=>
       node.type.name==='paragraph' && !node.attrs.styleId && !node.attrs.keepWithNext &&
       Array.from({length:node.childCount},(_,i)=>node.child(i)).every(child=>child.isText||child.type.name==='hard_break'));
+  const plainProse = !!previous && !!endDiff && simpleProse;
   let futureSpacers = plainProse ? previous!.spacers.filter(spacer=>spacer.pos>=endDiff!.a && spacer.pos+(endDiff!.b-endDiff!.a)>=restart).map(spacer=>({...spacer,pos:spacer.pos+endDiff!.b-endDiff!.a})) : [];
   let stable = false;
   const prefix =
@@ -429,7 +439,7 @@ export function paginatePages(
             ),
       ),
     ];
-    if (plainProse) {
+    if (simpleProse) {
       // Retain the decoration tree for untouched paragraphs, as well as their
       // DOM widgets. Rebuilding the tree defeats ProseMirror's subtree reuse
       // when it combines these spacers with thousands of hyphenation marks.
@@ -441,7 +451,7 @@ export function paginatePages(
         else added.push(item);
       }
       decorations = decorations.remove(existing.filter(item=>!retained.has(item))).add(doc,added);
-    } else decorations = DecorationSet.create(doc,desired);
+    } else decorations = createDecorations(doc,desired);
     const base = decorations;
     decorations = base.add(doc, [...rowHeights]);
     apply(decorations);
@@ -497,6 +507,7 @@ export function paginatePages(
     };
   };
   let page = hasSections ? frames.length - 1 : retained;
+  const sectionNotes = new Map<number, string>(), sectionNoteBottoms = new Map<number,number>(), endnoteOnly = new Set<number>();
   let parallelTable = false;
   let parallelInsets = {top:0,bottom:0};
   let parallelHeader: FlowHeader[] | undefined;
@@ -511,6 +522,11 @@ export function paginatePages(
     const current=frames[index]?.layout||layout,inset=pageInsets(current);
     let height=current.height-inset.top-inset.bottom;
     for(const limit of layout.columnLimits||[]){
+      if (endnoteOnly.has(index) && starts[index] === limit.from && limit.noteEnd == null) continue;
+      if (limit.noteEnd != null) {
+        if (index >= (limit.startRegion || 0) && (starts[index] < limit.noteEnd || (starts[index] === limit.noteEnd && endnoteOnly.has(index)))) height=Math.min(height,limit.height);
+        continue;
+      }
       const first=starts.findIndex(start=>start>=limit.from);
       if(starts[index]>=limit.from&&starts[index]<limit.to&&(limit.regions==null||index<first+limit.regions))height=Math.min(height,limit.height);
     }
@@ -662,6 +678,27 @@ export function paginatePages(
       }
     }
   };
+  const placeEndnotes = (bank:EndnoteBank,pos:number,originalTop:number) => {
+    const placed = flowEndnoteBank(bank, Math.max(0, originalTop - bodyTop()),
+      () => {
+        const inset = pageInsets(currentLayout), pending = pendingLayout && pageInsets(pendingLayout);
+        // A continuous section already owns its horizontal text area; the
+        // current sheet retains its vertical margins and running stories.
+        const paint = pending ? {...currentLayout, margins:{...inset,left:pending.left,right:pending.right}} : currentLayout;
+        return {page, layout:mirroredPageLayout(paint,page), reserve:currentLayout.height-inset.top-inset.bottom-regionHeight(page)};
+      },
+      () => {
+        const prior = frames.at(-1)!;
+        currentLayout = pendingLayout || currentLayout;
+        pendingLayout = undefined;
+        frames.push({top:prior.top+prior.layout.height+PAGE_GAP,left:(canvasWidth-currentLayout.width)/2,layout:currentLayout});
+        page++; starts.push(pos); endnoteOnly.add(page);
+        bodyHeight = regionHeight(page);
+      });
+    for (const [index, html] of placed.html) sectionNotes.set(index, (sectionNotes.get(index) || "") + html);
+    for (const [index, bottom] of placed.bottoms) sectionNoteBottoms.set(index, bottom);
+    return bodyTop() + placed.used + 4;
+  };
   const visit = (node: PMNode, pos: number): boolean | undefined => {
     if (stable || pos + node.nodeSize <= restart) return false;
     if (futureSpacers.length && node.isTextblock) {
@@ -684,16 +721,10 @@ export function paginatePages(
       // Ordinary rows and complete vertical-merge groups can move together.
       // Oversized groups retain the existing line splitting fallback.
       if (map.problems?.length) return;
-      let headerRows = 0;
-      while (
-        headerRows < node.childCount &&
-        node.child(headerRows).childCount &&
-        Array.from({ length: node.child(headerRows).childCount }, (_, i) =>
-          node.child(headerRows).child(i),
-        ).every((cell) => cell.type.name === "table_header")
-      )
-        headerRows++;
-      if (!tableRowBoundary(map, headerRows)) headerRows = 0;
+      const headerRows = repeatingTableHeaders(Array.from({ length: node.childCount }, (_, row) => Array.from({ length: node.child(row).childCount }, (_, col) => {
+        const cell = node.child(row).child(col);
+        return { header: cell.type.name === "table_header", rowspan: Number(cell.attrs.rowspan || 1) };
+      })));
       const positions: number[] = [];
       node.forEach((_row, offset) => positions.push(pos + 1 + offset));
       const bounds = (row: number) =>
@@ -855,6 +886,10 @@ export function paginatePages(
     }
     if (node.type.name === "section_break") {
       const element = view.nodeDOM(pos) as HTMLElement;
+      const bank = layout.sectionEndnotes?.find(bank => bank.pos === pos);
+      const originalTop = (element.getBoundingClientRect().top - rootTop()) / scale;
+      let afterNotes: number | undefined;
+      if (bank) afterNotes = placeEndnotes(bank,pos,originalTop);
       const inherited = pendingLayout || currentLayout;
       const nextLayout: PageLayout = {
         ...sectionLayout(inherited, node.attrs.page),
@@ -879,6 +914,10 @@ export function paginatePages(
         Math.abs(nextLayout.width - currentLayout.width) < 0.01 &&
         Math.abs(nextLayout.height - currentLayout.height) < 0.01
       ) {
+        if (afterNotes != null) {
+          spacers.push({pos, nodeSize:node.nodeSize, height:Math.max(0, afterNotes-originalTop)});
+          render();
+        }
         // Word keeps the current sheet's running stories, vertical margins and
         // page label. New horizontal margins already apply via block widths;
         // the remaining section settings take effect at the next sheet.
@@ -895,7 +934,7 @@ export function paginatePages(
       }
       nextPage(
         pos,
-        (element.getBoundingClientRect().top - rootTop()) / scale,
+        originalTop,
         node.nodeSize,
         false,
         undefined,
@@ -921,7 +960,7 @@ export function paginatePages(
       const wrappedImages: HTMLElement[] = [];
       inlineImageRects = undefined;
       node.forEach((child, offset) => {
-        if (["inline_image","text_box","equation"].includes(child.type.name)) {
+        if (["inline_image","text_box","equation","shape"].includes(child.type.name)) {
           const image = view.nodeDOM(pos + offset + 1);
           if(["text_box","equation"].includes(child.type.name) && image instanceof HTMLElement)textBoxes.push({from:pos+offset+1,to:pos+offset+1+child.nodeSize,element:image});
           if (image instanceof HTMLElement)
@@ -1073,12 +1112,15 @@ export function paginatePages(
     }
   };
   doc.descendants(visit);
+  const finalBank=layout.sectionEndnotes?.find(bank=>bank.pos===doc.content.size);
+  if(finalBank)placeEndnotes(finalBank,doc.content.size,y(Math.max(0,doc.content.size-1)).bottom+4);
   const sectionStarts = [0];
   if (hasSections)
     doc.forEach((node, pos) => {
       if (node.type.name === "section_break") sectionStarts.push(pos);
     });
   let section = 0;
+  const textForPage = pageText(doc);
   let pages: FlowPage[] = starts.map((from, i) => {
     while (
       section + 1 < sectionStarts.length &&
@@ -1088,9 +1130,11 @@ export function paginatePages(
     return {
       from,
       to: starts[i + 1] ?? doc.content.size,
-      text: doc.textBetween(from, starts[i + 1] ?? doc.content.size, "\n"),
+      text: textForPage(from, starts[i + 1] ?? doc.content.size),
       ...(layout.columnSource?{columnHeight:regionHeight(i)}:{}),
       ...(hasSections ? { frame: frames[i], section } : {}),
+      ...(endnoteOnly.has(i) && (starts[i+1] ?? doc.content.size) === from ? {endnoteOnly:true, section:Math.max(0,section-1)} : {}),
+      ...(sectionNotes.has(i) ? {noteHTML:sectionNotes.get(i),endnoteBottom:sectionNoteBottoms.get(i)} : {}),
     };
   });
   for (const spacer of spacers) {

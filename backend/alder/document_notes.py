@@ -40,7 +40,7 @@ def validate_note(attrs):
             raise ValueError('Invalid note content.')
         if node.get('type') not in NODES or any(mark.get('type') not in MARKS for mark in node.get('marks', [])):
             raise ValueError('Notes support formatted paragraphs, lists, tables, images and links.')
-        if node.get('attrs', {}).get('revisionProperties') or node.get('attrs', {}).get('captionLabel'):
+        if node.get('attrs', {}).get('revisionBlock') or node.get('attrs', {}).get('revisionMove') or node.get('attrs', {}).get('revisionProperties') or node.get('attrs', {}).get('captionLabel'):
             raise ValueError('Review changes and captions are not supported inside a note.')
         if node.get('type')=='document_field' and node.get('attrs',{}).get('fieldKind')!='merge':
             raise ValueError('Only merge fields are supported inside notes.')
@@ -55,6 +55,7 @@ def validate_note(attrs):
 def notes(documents):
     result = []
     def walk(node):
+        if (node.get('attrs',{}).get('revisionMove') or node.get('attrs',{}).get('revisionBlock') or {}).get('kind')=='deletion':return
         if any(mark['type'] == 'revision_deletion' for mark in node.get('marks', [])): return
         if node['type'] == 'document_note': result.append(node)
         for child in node.get('content', []): walk(child)
@@ -81,6 +82,7 @@ class WordNotesWriter:
         self.section_options=[self.options]
         self.document = document
         self.pending = {kind: [] for kind in KINDS}
+        self.endnote_placements=set()
 
     def section(self, options=None):
         from .note_options import note_options
@@ -90,6 +92,10 @@ class WordNotesWriter:
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
         kind = node['attrs']['kind']
+        if kind=='endnote':
+            self.endnote_placements.add(self.section_options[-1]['endnote']['placement'])
+            if len(self.endnote_placements)>1:
+                raise ValueError('Word uses one endnote placement for the document. Use the same endnote placement in every section with endnotes, or export desktop PDF to keep mixed placement.')
         identifier = len(self.pending[kind]) + 1
         self.pending[kind].append((identifier, node))
         run = paragraph.add_run()
@@ -144,6 +150,9 @@ class WordNotesWriter:
                 paragraphs = list(temporary)[2:] if temporary[0].tag == qn('w:tcPr') else list(temporary)[1:]
                 for element in paragraphs: note.append(element)
                 first = next(element for element in note if element.tag == qn('w:p'))
+                if node['attrs']['body']['content'][0]['type']!='paragraph':
+                    from .word_note_prefix import mark_prefix
+                    mark_prefix(first,self.document)
                 run = OxmlElement('w:r'); properties = OxmlElement('w:rPr'); vertical = OxmlElement('w:vertAlign'); vertical.set(qn('w:val'), 'superscript'); properties.append(vertical); run.append(properties); run.append(OxmlElement('w:' + kind + 'Ref'))
                 text_run = OxmlElement('w:r'); text = OxmlElement('w:t'); text.set(qn('xml:space'), 'preserve'); text.text = ' '; text_run.append(text)
                 at = 1 if first.find(qn('w:pPr')) is not None else 0
@@ -157,7 +166,9 @@ class WordNotesWriter:
                 for key, value in [('pos', options.get('placement','docEnd')), ('numFmt', options['format']), ('numStart', str(options['start'])), ('numRestart', {'section':'eachSect','page':'eachPage'}.get(options['restart'],'continuous'))]:
                     for old in list(properties.findall(qn('w:' + key))): properties.remove(old)
                     child = OxmlElement('w:' + key); child.set(qn('w:val'), value); properties.append(child)
-            write_options(properties,self.options[kind])
+            global_options=dict(self.options[kind])
+            if kind=='endnote' and self.endnote_placements:global_options['placement']=next(iter(self.endnote_placements))
+            write_options(properties,global_options)
             for section,options in zip(self.document.sections,self.section_options):
                 old=section._sectPr.find(qn('w:'+kind+'Pr'))
                 if old is not None:section._sectPr.remove(old)
@@ -186,7 +197,7 @@ class WordNotesReader:
                     if note.get(qn('w:type'), 'normal') != 'normal': continue
                     self.items[(kind, note.get(qn('w:id')))] = (note, part)
 
-    def reference(self, element, paragraph, container=None):
+    def reference(self, element, paragraph, container=None, strict=False):
         from docx.oxml.ns import qn
         from docx.text.paragraph import Paragraph
         from uuid import uuid4
@@ -196,13 +207,18 @@ class WordNotesReader:
         entry = self.items.get((kind, element.get(qn('w:id'))))
         if not entry: raise ValueError('A Word note reference has no note body. The source file has been preserved.')
         note, part = entry
+        if strict and any(n.tag.rsplit('}',1)[-1] in ('object','pict','altChunk','subDoc','contentPart','control') for n in note.iter()):
+            raise ValueError('An object in this tracked note could not be retained. The source file has been preserved.')
         if any(node.tag in (qn('w:footnoteReference'),qn('w:endnoteReference')) for node in note.iter()):
             raise ValueError('Nested Word notes are unsupported. The source file has been preserved.')
         owner = type('NoteOwner', (), {'part': part})()
         content = []
         if container is not None:
             from docx.blkcntnr import BlockItemContainer
-            content = container(BlockItemContainer(copy.deepcopy(note),owner))
+            story=copy.deepcopy(note)
+            from .word_note_prefix import is_prefix
+            if len(story)>1 and is_prefix(story[0],kind):story.remove(story[0])
+            content = container(BlockItemContainer(story,owner))
             first = content[0] if content else None
             # The note reference is a silent native field. Strip only its
             # separating space, never list numbering or the first authored word.
@@ -228,6 +244,10 @@ class WordNotesReader:
                 if message not in self.warnings: self.warnings.append(message)
         from .publishing import _normalise_import_blocks
         body = _normalise_import_blocks({'type':'doc', 'content':content or [{'type':'paragraph'}]})
+        if strict:
+            def pictures(node):return int(node['type'] in ('image','inline_image'))+sum(pictures(child) for child in node.get('content',[]))
+            if len(list(note.iter(qn('w:drawing'))))!=pictures(body):
+                raise ValueError('An image in this tracked note could not be retained. The source file has been preserved.')
         value = {'blockId':'note_' + uuid4().hex, 'kind':kind, 'body':body}
         validate_note(value)
         return {'type':'document_note', 'attrs':value}
@@ -238,7 +258,7 @@ def html_note(attrs, number, resources=None):
     from .running_matter import portable_story
     value = {'kind':attrs['kind'],'body':portable_story(attrs['body'],resources)}
     identifier = attrs['blockId']
-    return '<sup data-document-note="' + html.escape(json.dumps(value, ensure_ascii=False), quote=True) + '" data-note-id="' + html.escape(identifier, quote=True) + '"><a href="#note_' + html.escape(identifier, quote=True) + '">' + html.escape(str(number)) + '</a></sup>'
+    return '<sup data-document-note="' + html.escape(json.dumps(value, ensure_ascii=False), quote=True) + '" data-note-id="' + html.escape(identifier, quote=True) + '"><a href="#note_' + html.escape(attrs.get('_noteTarget',identifier), quote=True) + '">' + html.escape(str(number)) + '</a></sup>'
 
 
 def number_notes(documents,settings=None):
@@ -248,6 +268,7 @@ def number_notes(documents,settings=None):
     counters=dict.fromkeys(KINDS,0);totals=dict.fromkeys(KINDS,0)
     def walk(node):
         nonlocal options
+        if (node.get('attrs',{}).get('revisionMove') or node.get('attrs',{}).get('revisionBlock') or {}).get('kind')=='deletion':return
         if any(mark['type']=='revision_deletion' for mark in node.get('marks',[])) or node['type']=='table_of_contents':return
         if node['type']=='section_break':
             if node.get('attrs',{}).get('noteOptions') is not None:options=note_options(node['attrs']['noteOptions'])
@@ -258,6 +279,24 @@ def number_notes(documents,settings=None):
             attrs['_noteLabel']=format_page_number(count+options[kind]['start']-1,options[kind]['format'])
         for child in node.get('content',[]):walk(child)
     for document in documents:walk(document)
+
+    # Keep the ghost's reference legible and linked to the one live note bank.
+    moves={};ghosts=[]
+    def pairs(node):
+        move=node.get('attrs',{}).get('revisionMove')
+        if move:
+            key=(move['stamp']['id'],move.get('part',0))
+            if move['kind']=='insertion':moves[key]=node
+            else:ghosts.append((key,node))
+        for child in node.get('content',[]):pairs(child)
+    for document in documents:pairs(document)
+    for key,node in ghosts:
+        target=moves.get(key)
+        if not target:continue
+        for child,actual in zip(node.get('content',[]),target.get('content',[])):
+            if child['type']==actual['type']=='document_note':
+                child['attrs']['_noteLabel']=actual['attrs'].get('_noteLabel','1')
+                child['attrs']['_noteTarget']=actual['attrs']['blockId']
 
 
 def text_with_note_references(document):

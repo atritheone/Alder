@@ -3,7 +3,7 @@ import copy
 FORMATS = ('decimal','lowerRoman','upperRoman','lowerLetter','upperLetter')
 
 def note_options(value=None):
-    defaults = {'footnote':{'format':'decimal','start':1,'restart':'continuous','placement':'pageBottom'},'endnote':{'format':'lowerRoman','start':1,'restart':'continuous'}}
+    defaults = {'footnote':{'format':'decimal','start':1,'restart':'continuous','placement':'pageBottom'},'endnote':{'format':'lowerRoman','start':1,'restart':'continuous','placement':'docEnd'}}
     if value is None: return defaults
     if not isinstance(value,dict) or set(value)-set(defaults):raise ValueError('Invalid note settings.')
     result=copy.deepcopy(defaults)
@@ -14,6 +14,7 @@ def note_options(value=None):
         if row['format'] not in FORMATS or type(row['start']) is not int or not 1<=row['start']<=32767 or row['restart'] not in (('continuous','section','page') if kind=='footnote' else ('continuous','section')):
             raise ValueError('Choose a supported note number format, start and restart rule.')
     if result['footnote']['placement'] not in ('pageBottom','beneathText'):raise ValueError('Invalid footnote placement.')
+    if result['endnote']['placement'] not in ('docEnd','sectEnd'):raise ValueError('Invalid endnote placement.')
     return result
 
 def read_word_section_options(document,warnings):
@@ -29,10 +30,10 @@ def read_word_section_options(document,warnings):
             number_format=value('numFmt',row['format'])
             start=value('numStart',str(row['start']));restart=value('numRestart',{'section':'eachSect','page':'eachPage'}.get(row['restart'],'continuous'))
             position=value('pos',row.get('placement','docEnd'))
-            supported=number_format in FORMATS and start.isdigit() and 1<=int(start)<=32767 and restart in (('continuous','eachSect','eachPage') if kind=='footnote' else ('continuous','eachSect')) and position in (('pageBottom','beneathText') if kind=='footnote' else ('docEnd',))
+            supported=number_format in FORMATS and start.isdigit() and 1<=int(start)<=32767 and restart in (('continuous','eachSect','eachPage') if kind=='footnote' else ('continuous','eachSect')) and position in (('pageBottom','beneathText') if kind=='footnote' else ('docEnd','sectEnd'))
             if supported:
                 row.update(format=number_format,start=int(start),restart={'eachSect':'section','eachPage':'page'}.get(restart,'continuous'))
-                if kind=='footnote':row['placement']=position
+                row['placement']=position
             else:
                 message='Word note numbering or placement was converted to continuous decimal footnotes at page bottoms and Roman endnotes after the document.'
                 if message not in warnings:warnings.append(message)

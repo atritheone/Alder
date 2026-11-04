@@ -67,21 +67,28 @@ export default function NoteOptionsFields({
                 )}
               </select>
             </label>
-            {kind === "footnote" && (
-              <label className="settings-row">
-                Placement
-                <select
-                  aria-label="Footnotes placement"
-                  value={options.footnote.placement}
-                  onChange={(event) =>
-                    change(kind, { placement: event.target.value })
-                  }
-                >
-                  <option value="pageBottom">Bottom of page</option>
-                  <option value="beneathText">Below text</option>
-                </select>
-              </label>
-            )}
+            <label className="settings-row">
+              Placement
+              <select
+                aria-label={`${label} placement`}
+                value={row.placement}
+                onChange={(event) =>
+                  change(kind, { placement: event.target.value })
+                }
+              >
+                {kind === "footnote" ? (
+                  <>
+                    <option value="pageBottom">Bottom of page</option>
+                    <option value="beneathText">Below text</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="docEnd">End of document</option>
+                    <option value="sectEnd">End of section</option>
+                  </>
+                )}
+              </select>
+            </label>
           </details>
         );
       })}

@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
@@ -41,7 +42,7 @@ export default function AccessibilityDialog({
         <p role="status">
           {scope} ·{" "}
           {issues.length
-            ? `${issues.length} ${issues.length === 1 ? "item" : "items"} to review`
+            ? `${formatInteger(issues.length)} ${issues.length === 1 ? "item" : "items"} to review`
             : "No issues found by these checks"}
         </p>
         <p className="muted">

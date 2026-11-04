@@ -3,6 +3,7 @@ import { Plugin } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import type { NamedStyle } from "./types";
 import { resolveStyles } from "./styleResolution";
+import { indexedDecorations } from "./indexedDecorations";
 
 type ExactBlock = { pos: number; node: PMNode; runs: string[] };
 type Presentation = {
@@ -89,7 +90,7 @@ export function exactLeading(
     props: {
       decorations(state) {
         index(state.doc);
-        return decorations;
+        return indexedDecorations(decorations);
       },
     },
     view(view) {

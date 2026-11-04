@@ -91,6 +91,7 @@ export function accessibilityIssues(
   ) => {
     let previousHeading = initialHeading;
     const walk = (node: DocNode, anchor: AccessibilityTarget) => {
+      if((node.attrs?.revisionMove||node.attrs?.revisionBlock)?.kind==='deletion')return;
       if (node.marks?.some((mark) => mark.type === "revision_deletion")) return;
       const here = {
         ...anchor,
@@ -146,6 +147,8 @@ export function accessibilityIssues(
           "Image needs a description",
           "Add alternative text in Image properties, or mark the image as decorative if it conveys no information.",
         );
+      if (node.type === "shape" && !node.attrs?.decorative && !String(node.attrs?.alt || "").trim())
+        add(here,"shape-description",location,"Shape needs a description","Add a description in Shape properties, or mark the shape as decorative if it conveys no information.");
       if (node.type === "table" && documentText(node).trim()) {
         const rows = node.content || [],
           first = rows[0]?.content || [];

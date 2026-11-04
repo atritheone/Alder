@@ -1,4 +1,7 @@
 import { screenPageGeometry } from "./pageGeometry";
+import { sectionLayout } from "./sectionLayout";
+import { chapterSectionContext } from "./bookSectionContext";
+import { formatInteger, parseInteger } from "./numberDisplay";
 import { chapterRunningMatter } from "./runningMatter";
 import { chapterHeadingContext } from "./runningHeadings";
 import { chapterCaptionStarts } from "./documentCaptions";
@@ -11,7 +14,7 @@ import {
   type DocumentPosition,
 } from "./documentPosition";
 import { useStoredPreference } from "./useStoredPreference";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -36,9 +39,8 @@ import {
 import { words } from "./api";
 import {
   indexWords,
-  countWords,
-  estimatedReadingTime,
 } from "./readingEstimate";
+import { readingStatus, readingStatusKey } from "./readingStatus";
 import { usePlaybackSettings } from "./usePlaybackSettings";
 import { countSentences } from "./textCounts";
 import type { Annotation, Chapter, Project } from "./types";
@@ -49,6 +51,7 @@ import DocumentReader from "./DocumentReader";
 import { sourceForChapter, parseRawSource, rawTextDocument } from "./rawSource";
 import { documentText } from "./textProjection";
 import type { ReadingPosition } from "./readingCursor";
+import {resolveBookReview} from './bookReview';
 
 type Props = {
   flush: () => Promise<void>;
@@ -91,6 +94,13 @@ export default function BookWorkspace(p: Props) {
     [chapters],
   );
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
+  const pendingReviewNavigation=useRef<{id:string;from:number;to:number}|null>(null);
+  useEffect(()=>{
+    const target=pendingReviewNavigation.current;
+    if(!target||chapter?.id!==target.id)return;
+    const frame=requestAnimationFrame(()=>{if(p.editorRef.current?.getIdentity()===`${p.project.id}:${target.id}:formatted`){p.editorRef.current.selectReviewRange(target.from,target.to);pendingReviewNavigation.current=null;}});
+    return()=>cancelAnimationFrame(frame);
+  },[chapter?.id,p.project.id,p.editorRef]);
   const headingStarts = useMemo(
     () => chapterHeadingStarts(p.project, chapter?.id || ""),
     [chapters, p.project.styles, chapter?.id],
@@ -171,8 +181,8 @@ export default function BookWorkspace(p: Props) {
         {
           ...position,
           offset:
-            speechPlaying && readingPosition?.chapterId === chapter?.id
-              ? readingPosition.offset
+            speechPlaying && liveReadingPosition.current?.chapterId === chapter?.id
+              ? liveReadingPosition.current.offset
               : position.offset,
           chapter: Math.max(
             0,
@@ -229,34 +239,33 @@ export default function BookWorkspace(p: Props) {
     p.onPlaybackChange?.(speechPlaying);
   }, [speechPlaying, p.onPlaybackChange]);
   useEffect(() => () => p.onPlaybackChange?.(false), [p.onPlaybackChange]);
-  const [readingPosition, setReadingPosition] =
-    useState<ReadingPosition | null>(null);
+  const liveReadingPosition = useRef<ReadingPosition | null>(null);
+  const readingPosition = liveReadingPosition.current;
+  const [, repaintReadingStatus] = useState(0);
+  const statusForPosition = useRef<(position: ReadingPosition | null) => string>(() => "");
+  const paintedReadingStatus = useRef("");
+  const setReadingPosition = useCallback((next: ReadingPosition | null) => {
+    liveReadingPosition.current = next;
+    const key = statusForPosition.current(next);
+    if (key !== paintedReadingStatus.current) {
+      paintedReadingStatus.current = key;
+      repaintReadingStatus(value => value + 1);
+    }
+  }, []);
   const { speed } = usePlaybackSettings("reading");
   const selectedPages = selection
     ? Math.max(1, pagesInRange(pages, selection.from, selection.to).length)
     : 0;
-  let estimateWords = selection?.words ?? totalWords;
-  const readingIndex = chapters.findIndex(
-    (item) => item.id === readingPosition?.chapterId,
-  );
-  const showingRemaining =
-    speechPlaying && readingPosition !== null && readingIndex >= 0 && !showRaw;
-  if (showingRemaining) {
-    if (selection) {
-      if (selection.chapterId === readingPosition.chapterId)
-        estimateWords = countWords(
-          wordIndexes[readingIndex],
-          Math.max(selection.start, readingPosition.offset),
-          selection.end,
-        );
-    } else {
-      estimateWords =
-        countWords(wordIndexes[readingIndex], readingPosition.offset) +
-        wordCounts
-          .slice(readingIndex + 1)
-          .reduce((sum, count) => sum + count, 0);
-    }
-  }
+  const statusContext = {
+    chapterIds: chapters.map(c => c.id), wordIndexes, selection,
+    playing: speechPlaying, raw: showRaw, speed,
+  };
+  const status = readingStatus(readingPosition, statusContext);
+  const showingRemaining = status.remaining;
+  statusForPosition.current = next => readingStatusKey(next, statusContext,
+    next?.chapterId === chapter?.id && speechPlaying && !showRaw
+      ? p.editorRef.current?.pageAtTextOffset(next.offset, next.note) ?? null : null);
+  paintedReadingStatus.current = statusForPosition.current(readingPosition);
   const [readerKeyboardOpen, setReaderKeyboardOpen] = useState(false);
   const [readingRange, setReadingRange] = useState<{
     start: number;
@@ -278,11 +287,12 @@ export default function BookWorkspace(p: Props) {
       readingPosition.offset,
       readingPosition.note,
     );
-    if (page !== null && page !== undefined) setPageNumber(String(page + 1));
+    if (page !== null && page !== undefined) setPageNumber(formatInteger(page + 1));
   }, [speechPlaying, readingPosition, pages, chapter?.id, showRaw]);
   const layout = useMemo(() => {
     const running = chapterRunningMatter(p.project, chapter?.id || "");
-    return {
+    const context = chapterSectionContext(p.project, chapter?.id || "");
+    const base = {
       ...screenPageGeometry(p.project.settings),
       lineHeight: p.project.settings.lineHeight,
       language: p.project.language,
@@ -298,10 +308,11 @@ export default function BookWorkspace(p: Props) {
       noteOptions: p.project.settings.noteOptions,
       runningStyles: p.project.styles,
       firstPageNumber: p.project.settings.firstPageNumber || 1,
-      pageNumberFormat: p.project.settings.pageNumberFormat,
+      pageNumberFormat: context.pageNumberFormat,
       fontFamily: p.project.settings.fontFamily,
       zoom,
     };
+    return context.page ? sectionLayout(base, context.page) : base;
   }, [
     p.project.settings.orientation,
     p.project.language,
@@ -427,13 +438,13 @@ export default function BookWorkspace(p: Props) {
                     setPages([]);
                   }}
                 >
-                  <small>{String(index + 1).padStart(2, "0")}</small>
+                  <small>{formatInteger(index + 1).padStart(2, "0")}</small>
                   <span>
                     {item.title || p.project.name}
                     <small>
                       {item.role !== "chapter" &&
                         `${chapterRoleLabel(item.role)} · `}
-                      {wordCounts[index]} words
+                      {formatInteger(wordCounts[index])} words
                       {!item.include ? " · excluded" : ""}
                     </small>
                   </span>
@@ -589,6 +600,7 @@ export default function BookWorkspace(p: Props) {
           >
             <Editor
               language={p.project.language}
+              reviewBook={!showRaw&&chapters.length>1?{chapterId:chapter.id,sources:chapters.map(c=>({id:c.id,title:c.title,document:c.document})),onResolve:(sources,ids,decision)=>p.change(draft=>resolveBookReview(draft,sources,ids,decision)),onGo:(id,from,to)=>{if(id===chapter.id)p.editorRef.current?.selectReviewRange(from,to);else{pendingReviewNavigation.current={id,from,to};p.onChapter(id);}}}:undefined}
               ref={p.editorRef}
               review={{
                 tracking: p.project.settings.trackChanges === true,
@@ -677,7 +689,7 @@ export default function BookWorkspace(p: Props) {
                   document.activeElement?.getAttribute("aria-label") !==
                     "Go To Page"
                 )
-                  setPageNumber(String(page + 1));
+                  setPageNumber(formatInteger(page + 1));
               }}
               onPages={(next) =>
                 setPages((old) =>
@@ -703,12 +715,13 @@ export default function BookWorkspace(p: Props) {
               aria-label="Chapter Pages"
               onSubmit={(e) => {
                 e.preventDefault();
-                const value = Number(pageNumber);
+                const value = parseInteger(pageNumber);
                 if (
                   Number.isInteger(value) &&
                   value >= 1 &&
                   value <= Math.max(1, pages.length)
                 ) {
+                  setPageNumber(formatInteger(value));
                   if (p.view === "Pages")
                     arrangementRef.current
                       ?.querySelector(`.page-card[data-page="${value - 1}"]`)
@@ -722,7 +735,7 @@ export default function BookWorkspace(p: Props) {
                   className="selection-page-count"
                   title="Pages covered by the selection"
                 >
-                  {selectedPages} {selectedPages === 1 ? "Page" : "Pages"}
+                  {formatInteger(selectedPages!)} {selectedPages === 1 ? "Page" : "Pages"}
                 </span>
               ) : (
                 <>
@@ -730,17 +743,30 @@ export default function BookWorkspace(p: Props) {
                     Page{" "}
                     <input
                       aria-label="Go To Page"
-                      type="number"
-                      min="1"
-                      max={Math.max(1, pages.length)}
-                      step="1"
+                      type="text"
+                      inputMode="numeric"
+                      role="spinbutton"
+                      aria-valuemin={1}
+                      aria-valuemax={Math.max(1, pages.length)}
+                      aria-valuenow={Number.isFinite(parseInteger(pageNumber)) ? parseInteger(pageNumber) : undefined}
                       value={pageNumber}
                       style={{ width: `${Math.max(1, pageNumber.length)}ch` }}
                       onChange={(e) => setPageNumber(e.target.value)}
+                      onBlur={() => {
+                        const value = parseInteger(pageNumber);
+                        if (Number.isFinite(value)) setPageNumber(formatInteger(value));
+                      }}
+                      onKeyDown={(e) => {
+                        if (!['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+                        const value = parseInteger(pageNumber);
+                        if (!Number.isFinite(value)) return;
+                        e.preventDefault();
+                        setPageNumber(formatInteger(Math.max(1, Math.min(pages.length || 1, value + (e.key === 'ArrowUp' ? 1 : -1)))));
+                      }}
                       data-help="Type a page number and press Enter to go to that page."
                     />
                   </label>
-                  <span>of {Math.max(1, pages.length)}</span>
+                  <span>of {formatInteger(Math.max(1, pages.length))}</span>
                 </>
               )}
               <span className="writing-counts">
@@ -748,7 +774,7 @@ export default function BookWorkspace(p: Props) {
                   className="writing-word-count"
                   title={selection ? "Words in selection" : "Words in document"}
                 >
-                  {selection?.words ?? totalWords} Words
+                  {formatInteger(selection?.words ?? totalWords)} Words
                 </span>
                 <span
                   className="writing-sentence-count"
@@ -758,15 +784,15 @@ export default function BookWorkspace(p: Props) {
                       : "Sentences in document"
                   }
                 >
-                  {` \u00a0${selection?.sentences ?? totalSentences} Sentences`}
+                  {` \u00a0${formatInteger(selection?.sentences ?? totalSentences)} Sentences`}
                 </span>
                 <span
                   className="reading-estimate"
                   title={`Estimated ${showingRemaining ? "time remaining" : "reading time"}${selection ? " for selection" : " for document"} (hours:minutes)`}
                 >
-                  {estimatedReadingTime(estimateWords, speed)}
+                  {status.estimate}
                 </span>
-                {isBook && !selection && ` · ${chapters.length} Chapters`}
+                {isBook && !selection && ` · ${formatInteger(chapters.length)} Chapters`}
               </span>
               {p.view === "Write" &&
                 !showRaw &&
@@ -776,17 +802,7 @@ export default function BookWorkspace(p: Props) {
                     aria-label="Reading progress"
                     title="TTS position through this chapter's text"
                   >
-                    {Math.max(
-                      0,
-                      Math.min(
-                        100,
-                        readingPosition.length
-                          ? (100 * readingPosition.offset) /
-                              readingPosition.length
-                          : 0,
-                      ),
-                    ).toFixed(0)}
-                    %
+                    {status.progress}
                   </span>
                 )}
               <label className="writing-zoom">

@@ -18,34 +18,150 @@ import {
 } from "./pageReferences";
 import { speechText } from "./speechText";
 import { projectContentsIndex } from "./documentReferences";
-import {documentBookmarks} from './documentBookmarks';
-import {clipboardSlice} from './pasteText';
-import {DOMSerializer} from 'prosemirror-model';
+import { documentBookmarks } from "./documentBookmarks";
+import { clipboardSlice } from "./pasteText";
+import { DOMSerializer } from "prosemirror-model";
 import type { Project } from "./types";
 const p = (text: string) => schema.node("paragraph", null, [schema.text(text)]);
 describe("anchored document indexes", () => {
-  it('resolves bookmarked page ranges, follows copies, and reports broken ranges',()=>{
-    const doc=parseEditorDocument({type:'doc',content:[
-      {type:'paragraph',content:[{type:'bookmark',attrs:{blockId:'passage',name:'Passage',range:true}},{type:'text',text:'First page.'}]},
-      {type:'paragraph',content:[{type:'text',text:'Last page.'},{type:'bookmark_end',attrs:{targetId:'passage',name:'Passage'}}]},
-      {type:'paragraph',content:[{type:'index_entry',attrs:{blockId:'entry',terms:['Topic'],rangeId:'passage'}}]},
-    ]}).document!;
-    const split=doc.child(0).nodeSize,layout={width:500,height:700,margin:40,lineHeight:1.5,zoom:1,firstPageNumber:4};
-    const pages=[{from:0,to:split,text:'First'},{from:split,to:doc.content.size,text:'Last'}];
-    expect(pageReferenceValues(doc,pages,layout).references.entry).toBe('4–5');
-    expect(pageReferenceValues(doc,[{from:0,to:doc.content.size,text:''}],layout).references.entry).toBe('4');
-    let state=EditorState.create({schema,doc,plugins:[history()]});
-    expect(setIndexEntry({terms:['Renamed'],rangeId:'passage'},'entry')(state,tr=>state=state.apply(tr))).toBe(true);
-    expect(indexEntries(state.doc)[0].rangeId).toBe('passage');
-    undo(state,tr=>state=state.apply(tr));expect(indexEntries(state.doc)[0].terms).toEqual(['Topic']);
-    const host=document.createElement('div');host.append(DOMSerializer.fromSchema(schema).serializeFragment(doc.content));
-    const copied=clipboardSlice(schema,'',host.innerHTML,'source');
-    const copiedDoc=schema.node('doc',null,copied.content),range=documentBookmarks(copiedDoc)[0];
-    expect(range.id).not.toBe('passage');expect(indexEntries(copiedDoc)[0].rangeId).toBe(range.id);
-    const end=documentBookmarks(doc)[0].end!,broken=state.tr.delete(end,end+1).doc;
-    expect(pageReferenceValues(broken,pages,layout).references.entry).toBeUndefined();
-    state=EditorState.create({schema,doc:broken});
-    expect(setIndexEntry({terms:['Invalid'],rangeId:'passage'},'entry')(state)).toBe(false);
+  it("keeps separate index groups and sorts each hierarchy level with optional sort text", () => {
+    const entries = [
+      { id: "a", terms: ["Alpha"], indexGroup: "P", sortTerms: ["Zeta"] },
+      { id: "z", terms: ["Zebra"], indexGroup: "P", sortTerms: ["Alpha"] },
+      { id: "general", terms: ["Ordinary"] },
+      {
+        id: "child-a",
+        terms: ["Trees", "Alder"],
+        indexGroup: "S",
+        sortTerms: ["", "Zebra"],
+      },
+      {
+        id: "child-z",
+        terms: ["Trees", "Zebra"],
+        indexGroup: "S",
+        sortTerms: ["", "Alpha"],
+      },
+    ];
+    expect(indexGroups(entries).map((g) => g.ids)).toEqual([["general"]]);
+    expect(indexGroups(entries, "P").map((g) => g.ids)).toEqual([["z"], ["a"]]);
+    expect(indexGroups(entries, "P", false).map((g) => g.ids)).toEqual([
+      ["a"],
+      ["z"],
+    ]);
+    expect(indexGroups(entries, "S").map((g) => g.terms)).toEqual([
+      ["Trees"],
+      ["Trees", "Zebra"],
+      ["Trees", "Alder"],
+    ]);
+    const doc = schema.node("doc", null, [p("Authored text.")]);
+    let state = EditorState.create({ schema, doc, plugins: [history()] });
+    expect(
+      setIndexEntry({
+        terms: ["Entry"],
+        indexGroup: "P",
+        sortTerms: ["After"],
+      })(state, (tr) => (state = state.apply(tr))),
+    ).toBe(true);
+    const entry = indexEntries(state.doc)[0];
+    expect(entry.indexGroup).toBe("P");
+    expect(entry.sortTerms).toEqual(["After"]);
+    const host = document.createElement("div");
+    host.append(
+      DOMSerializer.fromSchema(schema).serializeFragment(state.doc.content),
+    );
+    const copied = clipboardSlice(schema, "", host.innerHTML, "source");
+    expect(
+      indexEntries(schema.node("doc", null, copied.content))[0],
+    ).toMatchObject({ indexGroup: "P", sortTerms: ["After"] });
+    undo(state, (tr) => (state = state.apply(tr)));
+    expect(indexEntries(state.doc)).toHaveLength(0);
+  });
+  it("resolves bookmarked page ranges, follows copies, and reports broken ranges", () => {
+    const doc = parseEditorDocument({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "bookmark",
+              attrs: { blockId: "passage", name: "Passage", range: true },
+            },
+            { type: "text", text: "First page." },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Last page." },
+            {
+              type: "bookmark_end",
+              attrs: { targetId: "passage", name: "Passage" },
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "index_entry",
+              attrs: { blockId: "entry", terms: ["Topic"], rangeId: "passage" },
+            },
+          ],
+        },
+      ],
+    }).document!;
+    const split = doc.child(0).nodeSize,
+      layout = {
+        width: 500,
+        height: 700,
+        margin: 40,
+        lineHeight: 1.5,
+        zoom: 1,
+        firstPageNumber: 4,
+      };
+    const pages = [
+      { from: 0, to: split, text: "First" },
+      { from: split, to: doc.content.size, text: "Last" },
+    ];
+    expect(pageReferenceValues(doc, pages, layout).references.entry).toBe(
+      "4–5",
+    );
+    expect(
+      pageReferenceValues(
+        doc,
+        [{ from: 0, to: doc.content.size, text: "" }],
+        layout,
+      ).references.entry,
+    ).toBe("4");
+    let state = EditorState.create({ schema, doc, plugins: [history()] });
+    expect(
+      setIndexEntry({ terms: ["Renamed"], rangeId: "passage" }, "entry")(
+        state,
+        (tr) => (state = state.apply(tr)),
+      ),
+    ).toBe(true);
+    expect(indexEntries(state.doc)[0].rangeId).toBe("passage");
+    undo(state, (tr) => (state = state.apply(tr)));
+    expect(indexEntries(state.doc)[0].terms).toEqual(["Topic"]);
+    const host = document.createElement("div");
+    host.append(
+      DOMSerializer.fromSchema(schema).serializeFragment(doc.content),
+    );
+    const copied = clipboardSlice(schema, "", host.innerHTML, "source");
+    const copiedDoc = schema.node("doc", null, copied.content),
+      range = documentBookmarks(copiedDoc)[0];
+    expect(range.id).not.toBe("passage");
+    expect(indexEntries(copiedDoc)[0].rangeId).toBe(range.id);
+    const end = documentBookmarks(doc)[0].end!,
+      broken = state.tr.delete(end, end + 1).doc;
+    expect(
+      pageReferenceValues(broken, pages, layout).references.entry,
+    ).toBeUndefined();
+    state = EditorState.create({ schema, doc: broken });
+    expect(
+      setIndexEntry({ terms: ["Invalid"], rangeId: "passage" }, "entry")(state),
+    ).toBe(false);
   });
   it("marks without replacing selection text, retains the marker in sentence moves, and undoes", () => {
     let state = EditorState.create({
@@ -103,9 +219,23 @@ describe("anchored document indexes", () => {
       },
       sources,
     );
+    const identities: string[] = [];
+    const collect = (node: typeof original) => {
+      if (node.type !== "text") identities.push(node.attrs!.blockId);
+      node.content?.forEach(collect);
+    };
+    collect(original);
+    expect(
+      identities.every((id) => typeof id === "string" && id.length > 0),
+    ).toBe(true);
+    expect(new Set(identities).size).toBe(identities.length);
+    expect(refreshedIndex(original, sources)).toBe(original);
     original.content![3].attrs!.fontSize = 17;
     original.content![3].content![2].content = [{ type: "text", text: "3, 7" }];
     const refreshed = refreshedIndex(original, sources);
+    expect(refreshed).toBe(original);
+    const empty = refreshedIndex(refreshed, []);
+    expect(refreshedIndex(empty, [])).toBe(empty);
     expect(refreshed.content![3].attrs!.fontSize).toBe(17);
     expect(refreshed.content![3].content![2].content![0].text).toBe("3, 7");
     expect(

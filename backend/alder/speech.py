@@ -112,11 +112,16 @@ def split_narration(text: str, max_chars=240, max_words=45):
         for match in re.finditer(r"[.!?]+[\"'”’»)]*(?=\s|$)", raw):
             if any(m.start() <= match.start() < m.end() for m in numbered):
                 continue
-            prefix = raw[:match.start()]
-            previous = re.search(r"([\w.]+)$", prefix)
-            token = previous.group(1).lower() if previous else ""
-            if match.group().startswith(".") and (token in ABBREVIATIONS or re.fullmatch(r"(?:[A-Za-z]\.)*[A-Za-z]", token)):
-                continue
+            if match.group().startswith("."):
+                # Only the immediately preceding token can be an abbreviation.
+                # Searching an ever-growing prefix at every sentence boundary
+                # made a long, single-newline manuscript quadratic to prepare.
+                token_end = token_start = match.start()
+                while token_start and (raw[token_start - 1].isalnum() or raw[token_start - 1] in "_."):
+                    token_start -= 1
+                token = raw[token_start:token_end].lower()
+                if token in ABBREVIATIONS or re.fullmatch(r"(?:[A-Za-z]\.)*[A-Za-z]", token):
+                    continue
             boundaries.append(match.end())
         boundaries = sorted(set([*boundaries, len(raw)]))
         paragraph_chunks = []
@@ -129,7 +134,7 @@ def split_narration(text: str, max_chars=240, max_words=45):
                 while stop < len(tokens) and stop - at < max_words and tokens[stop].end() - tokens[at].start() <= max_chars:
                     stop += 1
                 if stop == at:
-                    raise ValueError(f"A word exceeds {max_chars} characters; check pasted URLs or missing spaces.")
+                    raise ValueError(f"A word exceeds {max_chars:,} characters; check pasted URLs or missing spaces.")
                 if stop < len(tokens):
                     # Prefer a complete clause over cutting a phrase at the hard limit.
                     minimum = at + max(3, (stop - at) // 3)
@@ -458,12 +463,30 @@ class SpeechService:
             result.append({"text": placement.get("frozenText") if placement.get("frozenText") is not None else chosen_text(clip, placement.get("variantId")), "clipId": clip["id"], "sectionId": placement.get("sectionId"), "placementId": placement["id"], "voiceId": voice(clip)})
         return result
 
+    def _narration_chunk(self, job, chunk, source, source_offset, occurrences):
+        voice = source['voice']
+        spoken, mappings = chunk['spokenText'], chunk['pronunciationMap']
+        content = _hash({'text': spoken, 'voice': voice.get('hash', 'default'), 'segmentVersion': job.get('segmentVersion', SEGMENT_VERSION)})
+        chunk_seed = (job['seed'] + int(content[:8], 16)) % 2**32
+        key = _hash({'content': content, 'seed': chunk_seed, 'settings': {k: v for k, v in job['settings'].items() if k != 'pauseSeconds'}, 'model': job['modelRevision'], 'source': job['sourceFingerprint'], 'watermark': True})
+        occurrences[key] = occurrences.get(key, 0) + 1
+        return {**chunk, 'id': key[:20] + '-' + str(occurrences[key]), 'cacheKey': key, 'spokenText': spoken, 'pronunciationMap': mappings, 'voiceId': voice['id'], 'voiceHash': voice.get('hash', 'default'), 'provider': voice.get('provider', 'chatterbox-turbo'), 'culture': voice.get('culture', 'en'), 'buffering': 'immediate' if system_voices.is_system(voice['id']) else 'reserve', 'seed': chunk_seed, 'clipId': source.get('clipId'), 'sectionId': source.get('sectionId'), 'sourceStart': chunk['sourceStart'] + source_offset, 'sourceEnd': chunk['sourceEnd'] + source_offset, 'status': 'queued'}
+
+    def _append_narration(self, job):
+        from .speech_planning import append_sections
+        return append_sections(job, lambda chunk, source, offset, occurrences: self._narration_chunk(job, chunk, source, offset, occurrences))
+
     def submit(self, project: dict, request: dict):
         sources = self._sources(project, request)
         source_text = "\n\n".join(source["text"] for source in sources)
         if not source_text.strip():
             raise ValueError("Enter some text to narrate.")
-        if len(source_text) > 2_000_000:
+        staged = getattr(self, 'staged_narration', False)
+        if staged:
+            from .speech_planning import MAX_SOURCE_BYTES
+            if len(source_text) > MAX_SOURCE_BYTES or len(source_text.encode('utf-8')) > MAX_SOURCE_BYTES:
+                raise ValueError('This narration exceeds the 40 MB authored-text limit.')
+        elif len(source_text) > 2_000_000:
             raise ValueError("Split this narration into jobs of at most 2 million characters.")
         for unsupported in ("exaggeration", "cfgWeight", "minP", "ssml", "phonemes", "exactWpm"):
             if unsupported in request:
@@ -497,22 +520,28 @@ class SpeechService:
         disabled_dictionaries = set(project.get("settings", {}).get("disabledPronunciationDictionaries", []))
         pronunciation = [rule for rule in project.get("pronunciation", [])
                          if (rule.get("dictionary") or "My Rules") not in disabled_dictionaries]
+        from .speech_planning import narration_plan, PLAN_THRESHOLD
+        plan = narration_plan(sources, pronunciation, self._voice, request.get('interactive')) if staged and len(source_text) > PLAN_THRESHOLD else None
         chunks, source_offset, occurrences = [], 0, {}
-        for source in sources:
+        parameters = {'seed': seed, 'settings': settings, 'modelRevision': self.runtime['modelRevision'], 'sourceFingerprint': self.runtime['sourceRevision']}
+        for source in ([] if plan else sources):
             voice = self._voice(source["voiceId"])
             if voice.get("available") is False:
                 raise ValueError(f'{voice["name"]} is not installed on this computer. Choose an available replacement voice.')
             from .speech_quality import projected_sections
             lead_chars = 80 if request.get("interactive") and not chunks and not system_voices.is_system(voice["id"]) else None
             for chunk in projected_sections(source["text"], pronunciation, voice["id"], lead_chars=lead_chars):
-                spoken, mappings = chunk["spokenText"], chunk["pronunciationMap"]
-                content = _hash({"text": spoken, "voice": voice.get("hash", "default"), "segmentVersion": SEGMENT_VERSION})
-                chunk_seed = (seed + int(content[:8], 16)) % 2**32
-                key = _hash({"content": content, "seed": chunk_seed, "settings": {k: v for k, v in settings.items() if k != "pauseSeconds"}, "model": self.runtime["modelRevision"], "source": self.runtime["sourceRevision"], "watermark": True})
-                occurrences[key] = occurrences.get(key, 0) + 1
-                chunks.append({**chunk, "id": key[:20] + "-" + str(occurrences[key]), "cacheKey": key, "spokenText": spoken, "pronunciationMap": mappings, "voiceId": voice["id"], "voiceHash": voice.get("hash", "default"), "provider": voice.get("provider", "chatterbox-turbo"), "culture": voice.get("culture", "en"), "buffering": "immediate" if system_voices.is_system(voice["id"]) else "reserve", "seed": chunk_seed, "clipId": source.get("clipId"), "sectionId": source.get("sectionId"), "sourceStart": chunk["sourceStart"] + source_offset, "sourceEnd": chunk["sourceEnd"] + source_offset, "status": "queued"})
+                chunks.append(self._narration_chunk(parameters, chunk, {**source, 'voice': voice}, source_offset, occurrences))
             source_offset += len(source["text"]) + 2
         job = {"id": uuid.uuid4().hex, "projectId": project["id"], "sourceRevision": project.get("revision", 0), "status": "queued", "progress": 0, "message": "Queued for narration.", "text": source_text, "chunks": chunks, "createdAt": _now(), "updatedAt": _now(), "request": copy.deepcopy(request), "settings": settings, "format": output_format, "engine": next(iter({c["provider"] for c in chunks})) if len({c["provider"] for c in chunks}) == 1 else "mixed", "modelRevision": self.runtime["modelRevision"], "sourceFingerprint": self.runtime["sourceRevision"], "sourceOffsetUnit": "unicodeCodePoint", "seed": seed, "follow": bool(request.get("follow", False)), "verify": verify, "verificationRetries": verification_retries, "verificationModelRevision": self.runtime.get("qaModelRevision") if verify else None}
+        if plan:
+            providers = {source['voice'].get('provider', 'chatterbox-turbo') for source in plan['sources']}
+            job.update(_narrationPlan=plan, hasMoreText=True, segmentVersion=SEGMENT_VERSION, engine=next(iter(providers)) if len(providers) == 1 else 'mixed')
+            self._append_narration(job)
+            while not job['chunks'] and job.get('hasMoreText'):
+                self._append_narration(job)
+        if not job['chunks']:
+            raise ValueError('Enter some text to narrate.')
         with self._lock:
             self._initialize_job(job, project, request)
             self._jobs[job["id"]] = job
@@ -528,7 +557,7 @@ class SpeechService:
         _atomic_json(self.root / "jobs" / job["id"] / "manifest.json", job, compact=True)
 
     def _public(self, job):
-        result = copy.deepcopy(job)
+        result = copy.deepcopy({k: v for k, v in job.items() if not k.startswith('_') and k != 'request'})
         result.pop("request", None)
         accepted = 0
         for chunk in result["chunks"]:
@@ -708,7 +737,7 @@ class SpeechService:
         with self._lock:
             job["status"] = "generating"
             chunk["status"] = "generating"
-            job["message"] = f"Generating chunk {job['chunks'].index(chunk) + 1} of {len(job['chunks'])}."
+            job["message"] = f"Generating chunk {job['chunks'].index(chunk) + 1:,} of {len(job['chunks']):,}."
             self._persist(job)
         cached = self.root / "cache" / (chunk["cacheKey"] + ".wav")
         valid_cache = False
@@ -844,7 +873,7 @@ class SpeechService:
                 if job.get("verify"):
                     unresolved = sum(c.get("qa", {}).get("status") != "matched" for c in job["chunks"])
                     review_status = "needs_review" if unresolved else "content_checked"
-                    message = f"Narration ready; {unresolved} chunk(s) need listening review after speech recognition checks." if unresolved else "Narration ready. The recognised words match the spoken text; listen to assess pronunciation and delivery."
+                    message = f"Narration ready; {unresolved:,} chunk(s) need listening review after speech recognition checks." if unresolved else "Narration ready. The recognised words match the spoken text; listen to assess pronunciation and delivery."
                     job["verificationSummary"] = {"matched": len(job["chunks"]) - unresolved, "needsReview": unresolved, "model": "faster-whisper-base.en", "modelRevision": job.get("verificationModelRevision"), "comparisonVersion": QA_COMPARISON_VERSION}
                 job.update({"status": "ready", "progress": 1, "message": message, "seconds": position / first["sampleRate"], "audioUrl": f"/api/speech/jobs/{job['id']}/audio", "reviewStatus": review_status, "alignment": "word" if any(c.get("wordTimings") for c in job["chunks"]) else "chunk"})
             self._persist(job)
@@ -867,7 +896,7 @@ class SpeechService:
                     break
                 job["status"] = "checking"
                 chunk["status"] = "checking"
-                job["message"] = f"Checking spoken content in chunk {job['chunks'].index(chunk) + 1}, take {attempt_index + 1}."
+                job["message"] = f"Checking spoken content in chunk {job['chunks'].index(chunk) + 1:,}, take {attempt_index + 1:,}."
                 self._persist(job)
             take = next((a for a in attempts if a.get("index") == attempt_index), None)
             take_path = destination.with_name(chunk["id"] + f".take-{attempt_index + 1}.wav")

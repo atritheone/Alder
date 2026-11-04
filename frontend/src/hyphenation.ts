@@ -3,6 +3,10 @@ import { Plugin } from "prosemirror-state";
 import { Mapping } from "prosemirror-transform";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { api } from "./api";
+import { indexedDecorations } from "./indexedDecorations";
+import { createDecorations, addDecorations, filterDecorations } from "./decorationTree";
+import { HyphenationUsage } from "./hyphenationUsage";
+import { hasHyphenationPosition, changedHyphenationPositions, type HyphenationPositions } from "./hyphenationPositions";
 import { resolveStyles } from "./styleResolution";
 import type { NamedStyle, DocNode } from "./types";
 import type { RunningMatter } from "./runningMatter";
@@ -44,9 +48,49 @@ export function hyphenationWords(node: PMNode): Word[] {
   wordsByNode.set(node, words);
   return words;
 }
+const wordGroupsByNode = new WeakMap<PMNode, Map<string, number[]>>();
+/** Dictionary/range bookkeeping is once per distinct word; painting still
+ * retains every occurrence and its exact UTF-16 position. */
+function hyphenationWordGroups(node: PMNode) {
+  let groups = wordGroupsByNode.get(node);
+  if (!groups) {
+    groups = new Map();
+    for (const { word, from } of hyphenationWords(node)) {
+      const offsets = groups.get(word);
+      if (offsets) offsets.push(from);
+      else groups.set(word, [from]);
+    }
+    wordGroupsByNode.set(node, groups);
+  }
+  return groups;
+}
+
 type Status = { pending: boolean; error: string };
 const statuses = new WeakMap<EditorView, Status>();
-const breakPositions = new WeakMap<PMNode, Set<number>>();
+const simpleLayouts = new WeakMap<PMNode, boolean>();
+const simpleHyphenationLayout = (doc: PMNode) => {
+  let result = simpleLayouts.get(doc);
+  if (result === undefined) {
+    result = doc.content.content.every(node => {
+      let plain = simpleLayouts.get(node);
+      if (plain === undefined) {
+        plain = ['paragraph', 'heading'].includes(node.type.name) &&
+          node.content.content.every(child => child.isText || child.type.name === 'hard_break');
+        simpleLayouts.set(node, plain);
+      }
+      return plain;
+    });
+    simpleLayouts.set(doc, result);
+  }
+  return result;
+};
+const presentations = new WeakMap<EditorView, { expand: () => void; settle: (deferDuringTyping?: boolean) => void }>();
+/** A settled plain-prose layout needs only the opportunities that actually
+ * break a line. Restore the others before geometry changes, never by editing
+ * authored text or intercepting the browser's selection APIs. */
+export function expandHyphenation(view: EditorView) { presentations.get(view)?.expand(); }
+export function settleHyphenation(view: EditorView, deferDuringTyping = false) { presentations.get(view)?.settle(deferDuringTyping); }
+const breakPositions = new WeakMap<PMNode, HyphenationPositions>();
 const layoutChanges = new WeakMap<
   EditorView,
   { doc: PMNode; from: number; to: number }
@@ -56,7 +100,7 @@ export const hyphenationLayoutChange = (view: EditorView) =>
 export const clearHyphenationLayoutChange = (view: EditorView) =>
   layoutChanges.delete(view);
 export const hasDiscretionaryBreak = (doc: PMNode, pos: number) =>
-  breakPositions.get(doc)?.has(pos) || false;
+  hasHyphenationPosition(breakPositions.get(doc) || [], pos);
 export const hyphenationStatus = (view: EditorView) =>
   statuses.get(view) || { pending: false, error: "" };
 const storyCache = new WeakMap<DocNode, PMNode>();
@@ -93,7 +137,7 @@ export function frozenHyphenation(doc: PMNode) {
         decos.push(marker(pos + 1 + word.from + point));
     return false;
   });
-  return DecorationSet.create(doc, decos);
+  return createDecorations(doc, decos);
 }
 /** Unused opportunities must retain their layout boxes, but not contribute
  * invisible characters to the PDF text stream. Never reshape a print copy. */
@@ -126,7 +170,12 @@ export function discretionaryHyphens(
     lastEpoch = -1,
     decos = DecorationSet.empty;
   let mappedDocument: PMNode | undefined, pendingMapping: Mapping | undefined;
-  let wordRanges = new Map<string, { from: number; to: number }>();
+  let settled = new WeakSet<PMNode>();
+  let compacted = false;
+  let editedAt = -Infinity;
+  const usage = new HyphenationUsage(node => hyphenationWordGroups(node).keys());
+  const wordRanges = usage.ranges;
+  const paragraphPositions = new WeakMap<PMNode, ReadonlySet<number>>();
   const updatedWords = new Set<string>();
   const cache = new Map<string, number[]>(),
     requests = new Map<string, { language: string; word: string }>(),
@@ -185,6 +234,7 @@ export function discretionaryHyphens(
       init: () => null,
       apply(tr, value) {
         if (tr.docChanged) {
+          editedAt = performance.now();
           if (mappedDocument === tr.before && pendingMapping)
             pendingMapping.appendMapping(tr.mapping);
           else if (lastDoc === tr.before) {
@@ -199,6 +249,11 @@ export function discretionaryHyphens(
     props: {
       decorations(state) {
         const opts = options();
+        if (compacted && !simpleHyphenationLayout(state.doc)) {
+          compacted = false;
+          settled = new WeakSet();
+          lastDoc = undefined;
+        }
         const sameOptions =
           (lastOptions?.styles === opts.styles ||
             (!lastOptions?.styles.length && !opts.styles.length)) &&
@@ -206,12 +261,15 @@ export function discretionaryHyphens(
           lastOptions?.enabled === opts.enabled &&
           lastOptions?.runningMatter === opts.runningMatter;
         if (lastDoc === state.doc && lastEpoch === epoch && sameOptions)
-          return decos;
+          return indexedDecorations(decos);
+        const reuseUsage = sameOptions && lastDoc === state.doc;
+        const usageMapping = sameOptions && lastDoc === state.doc ? new Mapping()
+          : sameOptions && mappedDocument === state.doc ? pendingMapping : undefined;
         // Mapping retains unchanged paragraph subtrees. Rebuilding a flat set
         // of every discretionary break is quadratic in long manuscripts.
         let changed: { from: number; to: number } | undefined;
         let retained = DecorationSet.empty;
-        const positions = new Set<number>();
+        const positions: { from: number; points: ReadonlySet<number> }[] = [];
         if (
           lastDoc &&
           lastDoc !== state.doc &&
@@ -247,14 +305,6 @@ export function discretionaryHyphens(
                 .find(changed.from, changed.to)
                 .filter((d) => d.from >= changed!.from && d.to <= changed!.to),
             );
-            for (const old of breakPositions.get(lastDoc) || []) {
-              const mapped = pendingMapping.mapResult(old, -1);
-              if (
-                !mapped.deleted &&
-                (mapped.pos < changed.from || mapped.pos > changed.to)
-              )
-                positions.add(mapped.pos);
-            }
           }
         }
         if (
@@ -282,8 +332,6 @@ export function discretionaryHyphens(
                   .find(from, to)
                   .filter((d) => d.from >= from && d.to <= to),
               );
-              for (const old of breakPositions.get(state.doc) || [])
-                if (old < from || old > to) positions.add(old);
             }
           }
         }
@@ -295,8 +343,7 @@ export function discretionaryHyphens(
         lastEpoch = epoch;
         status.error = "";
         const decorations: Decoration[] = [];
-        const used = new Set<string>();
-        const nextWordRanges = new Map<string, { from: number; to: number }>();
+        const usedParagraphs: { node: PMNode; from: number; to: number; language: string }[] = [];
         storyKeys.clear();
         let styles: ReturnType<typeof resolveStyles> = new Map();
         try {
@@ -325,13 +372,12 @@ export function discretionaryHyphens(
                   status.error = failures.get(language)!;
                   return false;
                 }
-                for (const word of hyphenationWords(node)) {
-                  const id = language + "\0" + word.word;
-                  used.add(id);
+                for (const word of hyphenationWordGroups(node).keys()) {
+                  const id = language + "\0" + word;
                   storyKeys.add(id);
                   const points = cache.get(id);
                   if (points) paintBreaks(id, points);
-                  else requests.set(id, { language, word: word.word });
+                  else requests.set(id, { language, word });
                 }
                 return false;
               });
@@ -343,9 +389,11 @@ export function discretionaryHyphens(
             if (node.type.name === "section_break")
               collectStories(node.attrs.runningMatter);
             if (!node.isTextblock) return;
+            const end = pos + node.nodeSize;
             const repaint =
               !changed ||
-              (pos < changed.to && pos + node.nodeSize > changed.from);
+              (pos < changed.to && end > changed.from);
+            if (repaint) settled.delete(node);
             const inherited = styles.get(node.attrs.styleId),
               language =
                 node.attrs.textLanguage ||
@@ -358,7 +406,7 @@ export function discretionaryHyphens(
               inherited?.textDirection
             )
               decorations.push(
-                Decoration.node(pos, pos + node.nodeSize, {
+                Decoration.node(pos, end, {
                   dir: inherited.textDirection,
                 }),
               );
@@ -369,7 +417,7 @@ export function discretionaryHyphens(
               validTextLanguage(language)
             )
               decorations.push(
-                Decoration.node(pos, pos + node.nodeSize, { lang: language }),
+                Decoration.node(pos, end, { lang: language }),
               );
             if (
               node.type.name === "code_block" ||
@@ -380,69 +428,47 @@ export function discretionaryHyphens(
               status.error = failures.get(language)!;
               return false;
             }
-            for (const word of hyphenationWords(node)) {
-              const id = language + "\0" + word.word;
-              const range = nextWordRanges.get(id);
-              if (range) range.to = pos + node.nodeSize;
-              else
-                nextWordRanges.set(id, { from: pos, to: pos + node.nodeSize });
-              used.add(id);
+            if (!reuseUsage) usedParagraphs.push({ node, from: pos, to: end, language });
+            const pointsForParagraph = repaint ? new Set<number>() : paragraphPositions.get(node)!;
+            positions.push({ from: pos + 1, points: pointsForParagraph });
+            if (repaint) paragraphPositions.set(node, pointsForParagraph);
+            if (!repaint) return false;
+            for (const [word, offsets] of hyphenationWordGroups(node)) {
+              const id = language + "\0" + word;
               const points = cache.get(id);
               if (!points) {
-                requests.set(id, { language, word: word.word });
+                requests.set(id, { language, word });
                 continue;
               }
-              if (!repaint) continue;
-              for (const point of points)
-                if (point > 0 && point < word.word.length) {
-                  positions.add(pos + 1 + word.from + point);
-                  decorations.push(
-                    Decoration.widget(
-                      pos + 1 + word.from + point,
-                      () => {
-                        const span = document.createElement("span");
-                        span.dataset.discretionaryHyphen = "true";
-                        span.className = "discretionary-hyphen";
-                        span.setAttribute("aria-hidden", "true");
-                        span.textContent = "\u00ad";
-                        return span;
-                      },
-                      { side: -1, key: "hyphen", ignoreSelection: true },
-                    ),
-                  );
-                }
+              for (const from of offsets)
+                for (const point of points)
+                  if (point > 0 && point < word.length) {
+                    const position = pos + 1 + from + point;
+                    (pointsForParagraph as Set<number>).add(from + point);
+                    decorations.push(marker(position));
+                  }
             }
             return false;
           });
         // Keep only words belonging to this live document; stale replies can
         // populate the cache, but never insert positions from an earlier edit.
-        wordRanges = nextWordRanges;
-        for (const id of cache.keys()) if (!used.has(id)) cache.delete(id);
+        if (!reuseUsage) usage.update(usedParagraphs, usageMapping);
+        for (const id of cache.keys()) if (!wordRanges.has(id) && !storyKeys.has(id)) cache.delete(id);
         for (const id of requests.keys())
-          if (!used.has(id)) requests.delete(id);
+          if (!wordRanges.has(id) && !storyKeys.has(id)) requests.delete(id);
         status.pending = requests.size > 0 || busy;
         if (requests.size && !scheduled && !busy) {
           scheduled = true;
           queueMicrotask(() => void drain());
         }
         decos = changed
-          ? retained.add(state.doc, decorations)
-          : DecorationSet.create(state.doc, decorations);
+          ? addDecorations(state.doc, retained, decorations)
+          : createDecorations(state.doc, decorations);
         const previous = breakPositions.get(state.doc);
         if (view && previous) {
-          let from = Infinity,
-            to = -Infinity;
-          for (const position of previous)
-            if (!positions.has(position)) {
-              from = Math.min(from, position);
-              to = Math.max(to, position);
-            }
-          for (const position of positions)
-            if (!previous.has(position)) {
-              from = Math.min(from, position);
-              to = Math.max(to, position);
-            }
-          if (from !== Infinity) {
+          const changed = changedHyphenationPositions(previous, positions);
+          if (changed) {
+            const { from, to } = changed;
             const earlier = layoutChanges.get(view);
             layoutChanges.set(view, {
               doc: state.doc,
@@ -452,17 +478,93 @@ export function discretionaryHyphens(
           }
         }
         breakPositions.set(state.doc, positions);
-        return decos;
+        return indexedDecorations(decos);
       },
     },
     view(v) {
       alive = true;
       view = v;
       statuses.set(v, status);
+      let settlement: ReturnType<typeof setTimeout> | undefined;
+      presentations.set(v, {
+        expand() {
+          if (!compacted) return;
+          compacted = false;
+          settled = new WeakSet();
+          lastDoc = undefined;
+          v.updateState(v.state);
+        },
+        settle(deferDuringTyping = false) {
+          clearTimeout(settlement);
+          // Keep the edited paragraph's opportunities throughout a typing
+          // burst. Removing/reinserting them on every key forces an extra DOM
+          // selection/layout pass; their bounded presence does not affect the
+          // settled geometry of the rest of the manuscript.
+          if (deferDuringTyping && performance.now() - editedAt < 140) {
+            settlement = setTimeout(() => presentations.get(v)?.settle(true), 150);
+            return;
+          }
+          // Objects, columns and nested containers can depend on intrinsic
+          // word widths. Keep their complete opportunities available.
+          if (v.composing || !simpleHyphenationLayout(v.state.doc))
+            return;
+          const unused = new Set<number>();
+          // Removing a zero-width run can change fractional glyph rounding.
+          // Keep the full set if that changes a block's height or a physical
+          // page boundary. Horizontal glyph coordinates are always read live.
+          const geometry = (element: HTMLElement) => {
+            const box = element.getBoundingClientRect();
+            return [box.height, ...[...element.querySelectorAll('.pagination-spacer')].map(spacer => spacer.getBoundingClientRect().top - box.top)];
+          };
+          const blocks: { from: number; to: number; element: HTMLElement; geometry: number[] }[] = [];
+          const roots = [...v.dom.children].filter(element => !element.classList.contains('ProseMirror-widget'));
+          v.state.doc.forEach((node, pos, index) => {
+            if (settled.has(node)) return;
+            settled.add(node);
+            const element = roots.length === v.state.doc.childCount ? roots[index] : v.nodeDOM(pos);
+            if (!(element instanceof HTMLElement)) return;
+            const markers = [...element.querySelectorAll<HTMLElement>('.discretionary-hyphen')];
+            const pageBreaks = new Set(markers.filter(marker => marker.textContent === '-').map(marker => v.posAtDOM(marker, 0)));
+            const opportunities = markers.filter(marker => marker.textContent === '\u00ad');
+            const spans = decos.find(pos + 1, pos + node.nodeSize - 1).filter(item => item.spec.key === 'hyphen');
+            // A plain paragraph's widget order is its decoration order. Use
+            // that checked correspondence instead of walking every preceding
+            // root sibling for every invisible marker through posAtDOM.
+            const positions = opportunities.length === spans.length ? spans : undefined;
+            const before = unused.size;
+            for (const [index, marker] of opportunities.entries()) {
+              if (marker.getBoundingClientRect().width > 0.5) continue;
+              const position = positions ? positions[index].from : v.posAtDOM(marker, 0);
+              if (!pageBreaks.has(position)) unused.add(position);
+            }
+            if (unused.size !== before) blocks.push({ from: pos, to: pos + node.nodeSize, element, geometry: geometry(element) });
+          });
+          if (!unused.size) return;
+          const removed = decos.find().filter(item => item.spec.key === 'hyphen' && unused.has(item.from));
+          if (!removed.length) return;
+          decos = filterDecorations(decos, item => item.spec.key !== 'hyphen' || !unused.has(item.from));
+          compacted = true;
+          v.updateState(v.state);
+          const changed = blocks.filter(block => {
+            const after = geometry(block.element);
+            return after.length !== block.geometry.length || after.some((value, index) => Math.abs(value - block.geometry[index]) > 0.01);
+          });
+          if (changed.length) {
+            decos = addDecorations(v.state.doc, decos, removed.filter(item => changed.some(block => item.from > block.from && item.from < block.to)));
+            v.updateState(v.state);
+          }
+        },
+      });
       return {
         destroy() {
+          clearTimeout(settlement);
           alive = false;
+          // A history implementation may retain its most recent plugin array.
+          // The reusable dictionary cache must not keep the destroyed view or
+          // its complete editable DOM alive through that array.
+          view = undefined;
           statuses.delete(v);
+          presentations.delete(v);
           layoutChanges.delete(v);
           requests.clear();
           // ProseMirror also recreates plugin views when the history owner is

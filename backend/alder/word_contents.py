@@ -1,6 +1,7 @@
 """Bounded native Word TOC exchange; arbitrary field instructions are not run."""
 import copy
 import re
+from .document_index import index_instruction,read_index_instruction
 
 
 def indexed_children(root, parent, paragraph, warnings):
@@ -23,7 +24,7 @@ def indexed_children(root, parent, paragraph, warnings):
                 if run.find(qn('w:fldChar')) is not None: break
                 instructions.extend(node.text or '' for node in run.iter(qn('w:instrText')))
         instruction = ''.join(instructions)
-        if not re.fullmatch(r'\s*INDEX\s*(?:\\c\s+"?1"?\s*)?', instruction, re.I):
+        if read_index_instruction(instruction) is None:
             yield first
             at += 1
             continue
@@ -105,7 +106,7 @@ def write_contents(container, node, block, document, style_ids, warnings):
         run = OxmlElement('w:r'); element = OxmlElement('w:fldChar'); element.set(qn('w:fldCharType'), kind); run.append(element); return run
     instruction = OxmlElement('w:r'); text = OxmlElement('w:instrText'); text.set(qn('xml:space'), 'preserve')
     selector = ('\\c "Figure"' if attrs.get('kind') == 'figures' else '\\c "Table"') if captions else f'\\o "1-{attrs.get("depth",3)}" \\u'
-    text.text = ' INDEX \\c "1" ' if is_index else f' TOC {selector} \\h \\z ' + ('\\n ' if not attrs.get('pageNumbers',True) else ''); instruction.append(text)
+    text.text = index_instruction(attrs) if is_index else f' TOC {selector} \\h \\z ' + ('\\n ' if not attrs.get('pageNumbers',True) else ''); instruction.append(text)
     offset = 1 if first.find(qn('w:pPr')) is not None else 0
     for index, element in enumerate([marker('begin'), instruction, marker('separate')]): first.insert(offset + index, element)
     last.append(marker('end'))
@@ -127,7 +128,8 @@ def read_contents(element, parent, paragraph, warnings):
         if control is not None and control.get(qn('w:fldCharType')) == 'separate': break
         instructions += ''.join(n.text or '' for n in run.iter(qn('w:instrText')))
     supported = re.fullmatch(r'\s*TOC\s+\\(?:o\s+"1-([1-6])"|c\s+"(Figure|Table)")\s*(?:\\[hzun]\s*)*', instructions, re.I)
-    is_index=bool(re.fullmatch(r'\s*INDEX\s*(?:\\c\s+"?1"?\s*)?',instructions,re.I))
+    index_options=read_index_instruction(instructions)
+    is_index=index_options is not None
     if not supported and not is_index:
         warnings.append('An edited contents field was retained as ordinary text; its instruction is not supported.')
         return None
@@ -145,7 +147,7 @@ def read_contents(element, parent, paragraph, warnings):
             run.getparent().remove(run)
     entries = [paragraph(Paragraph(p, parent)) for p in content if p.tag == qn('w:p')]
     kind = 'index' if is_index else {'figure':'figures','table':'tables'}.get((supported[2] or '').lower(),'headings')
-    return {'type':'table_of_contents', 'attrs':{'title':title,'depth':3 if is_index else int(supported[1] or 1),'kind':kind,'entryStyle':None,'pageNumbers':'\\n' not in instructions.lower()}, 'content':entries or [{'type':'paragraph'}]}
+    return {'type':'table_of_contents', 'attrs':{'title':title,'depth':3 if is_index else int(supported[1] or 1),'kind':kind,'entryStyle':None,'pageNumbers':'\\n' not in instructions.lower(),**(index_options or {})}, 'content':entries or [{'type':'paragraph'}]}
 
 
 def restore_contents_links(document):

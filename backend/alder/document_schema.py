@@ -5,7 +5,7 @@ import re
 VERSION = 2
 BLOCKS = {
     "citation", "bibliography",
-    "document_note", "text_box", "form_field", "form_block", "equation",
+    "document_note", "text_box", "form_field", "form_block", "equation", "shape",
     "index_entry", "index_reference",
     "table_of_contents",
     "revision_break",
@@ -55,7 +55,10 @@ def migrate_project(project):
             if node['type']=='document_note':reserve(node['attrs']['body'])
         reserve(root)
 
-        def walk(node, path):
+        def walk(node, path, hidden=False):
+            hidden=hidden or (node.get('attrs',{}).get('revisionMove') or {}).get('kind')=='deletion'
+            if node.get('attrs',{}).get('revisionMove'):revision_stamp(node['attrs']['revisionMove']['stamp'])
+            if node.get('attrs',{}).get('revisionBlock'):revision_stamp(node['attrs']['revisionBlock']['stamp'])
             for record in (node.get('attrs', {}).get('revisionProperties') or {}).get('records', []): revision_stamp(record['stamp'])
             if node['type'] == 'revision_break': revision_stamp(node['attrs']['stamp'])
             for mark in node.get('marks', []):
@@ -76,7 +79,7 @@ def migrate_project(project):
                 if identifier and (not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", identifier)):
                     raise ValueError("Invalid document block identity.")
                 old_identifier = identifier
-                destination = node['type'] in ('bookmark', 'heading', 'image', 'inline_image', 'table', 'index_entry', 'document_note') or bool(attrs.get('captionLabel'))
+                destination = node['type'] in ('bookmark', 'heading', 'image', 'inline_image', 'shape', 'table', 'index_entry', 'document_note') or bool(attrs.get('captionLabel'))
                 if not identifier or identifier in occupied or (destination and identifier in bookmark_ids):
                     # Old snapshots and copied subtrees acquire fresh identities;
                     # existing unique identifiers survive moves and normal edits.
@@ -92,11 +95,12 @@ def migrate_project(project):
                 if attrs.get('captionTargetId'): captions.append(attrs)
             if node["type"] == "bookmark":
                 base = node["attrs"]["name"]; name=base; suffix=1
-                while name.lower() in bookmark_names:
+                while not hidden and name.lower() in bookmark_names:
                     suffix += 1; tail=f"_{suffix}"; name=base[:40-len(tail)]+tail
-                node["attrs"]["name"]=name; bookmark_names.add(name.lower())
-                local_bookmarks[name]=node['attrs']['blockId']
-                all_names.setdefault(name,set()).add(node['attrs']['blockId'])
+                node["attrs"]["name"]=name
+                if not hidden:
+                    bookmark_names.add(name.lower());local_bookmarks[name]=node['attrs']['blockId']
+                    all_names.setdefault(name,set()).add(node['attrs']['blockId'])
                 if old_identifier:
                     range_targets[old_identifier] = (node['attrs']['blockId'], name)
             elif node['type'] == 'bookmark_end':
@@ -111,12 +115,30 @@ def migrate_project(project):
                 if mark.get('type')=='link' and mark.get('attrs',{}).get('href','').startswith('#'):
                     link_marks.append(mark)
             for index, child in enumerate(node.get("content", [])):
-                walk(child, f"{path}/{index}")
+                walk(child, f"{path}/{index}", hidden)
             if node['type']=='document_note':walk(node['attrs']['body'],f'{path}/note')
         walk(root, "")
+        moves=[]
+        def moved(node):
+            if node.get('attrs',{}).get('revisionMove'):moves.append(node['attrs'])
+            if node.get('attrs',{}).get('revisionBlock'):node['attrs']['revisionBlock']['originalId']=node['attrs']['blockId']
+            for child in node.get('content',[]):moved(child)
+        moved(root)
+        destinations={(a['revisionMove']['stamp']['id'],a['revisionMove'].get('part',0)):a['blockId'] for a in moves if a['revisionMove']['kind']=='insertion'}
+        for attrs in moves:attrs['revisionMove']['originalId']=destinations[(attrs['revisionMove']['stamp']['id'],attrs['revisionMove'].get('part',0))]
         for attrs in range_ends:
             target = attrs['targetId']
             attrs['targetId'] = bookmark_remap.get(target) or local_bookmarks.get(target) or target
+        from .tracked_block_moves import moved_object_aliases
+        aliases=moved_object_aliases(root);named={}
+        def bookmark_nodes(node):
+            if node['type']=='bookmark':named[node['attrs']['blockId']]=node['attrs']
+            for child in node.get('content',[]):bookmark_nodes(child)
+        bookmark_nodes(root)
+        for ghost,live in aliases.items():
+            if ghost in named and live in named:named[ghost]['name']=named[live]['name']
+        for attrs in range_ends:
+            if attrs['targetId'] in named:attrs['name']=named[attrs['targetId']]['name']
 
     for chapter in project.get("book", {}).get("chapters", []):
         document(chapter["document"], chapter["id"])

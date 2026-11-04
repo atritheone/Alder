@@ -11,6 +11,8 @@ __pycache__/
 *.tsbuildinfo
 chatterbox/outputs/
 desktop.ini
+.DS_Store
+Thumbs.db
 *.log
 .env
 .env.*
@@ -22,9 +24,17 @@ playwright-report/
 
 # Project documents and reference images excluded from source control.
 /Alder-development-plan.md
-/THIRD-PARTY-NOTICES.md
 /images/
 /hardware.txt
+/alder.txt
+/project_notes.txt
+
+# Local audiobook production inputs, one-off tools, and environment inventory.
+/chatterbox/AUDIOBOOK-PRODUCTION.md
+/chatterbox/eternal_night_extract.py
+/chatterbox/audiobook_extract.py
+/chatterbox/audiobook_retag.py
+/chatterbox/local-installed-packages.txt
 
 # Additional local Python environments, caches and coverage output.
 /venv/

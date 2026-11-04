@@ -1,3 +1,4 @@
+import { formatInteger, parseInteger } from "./numberDisplay";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getDocument,
@@ -18,6 +19,7 @@ type Props = {
   onClose?: () => void;
 };
 type Proof = {
+  chapterPages?: import("./bookPageContext").ChapterPageContext[];
   downloadUrl: string;
   filename: string;
   sourceRevision: number;
@@ -66,6 +68,7 @@ export default function PublicationPreview({
   const [proof, setProof] = useState<Proof | null>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
+  const [editingPage, setEditingPage] = useState(false);
   const [zoom, setZoom] = useState("fit");
   const [readerWidth, setReaderWidth] = useState("760");
   const [readerFont, setReaderFont] = useState("18");
@@ -116,7 +119,7 @@ export default function PublicationPreview({
           id: section.id,
           title:
             section.querySelector("h1,h2,h3")?.textContent ||
-            `Section ${index + 1}`,
+            `Section ${formatInteger(index + 1)}`,
         };
       },
     );
@@ -165,7 +168,7 @@ export default function PublicationPreview({
         );
         if (!current) return;
         setProof(result);
-        setStatus(`Loading PDF proof · revision ${result.sourceRevision}…`);
+        setStatus(`Loading PDF proof · revision ${formatInteger(result.sourceRevision)}…`);
         const response = await fetch(mediaUrl(result.downloadUrl), {
           signal: controller.signal,
         });
@@ -189,7 +192,7 @@ export default function PublicationPreview({
         const document = await task.promise;
         if (!current) return;
         setPdf(document);
-        setStatus(`PDF proof · saved revision ${result.sourceRevision}`);
+        setStatus(`PDF proof · saved revision ${formatInteger(result.sourceRevision)}`);
       } catch (cause) {
         if (current) {
           setError(
@@ -272,7 +275,7 @@ export default function PublicationPreview({
       const path = await download(proof.downloadUrl, proof.filename);
       setStatus(
         path
-          ? `Saved PDF proof · revision ${proof.sourceRevision}`
+          ? `Saved PDF proof · revision ${formatInteger(proof.sourceRevision)}`
           : "PDF save cancelled",
       );
     } catch (cause) {
@@ -329,10 +332,16 @@ export default function PublicationPreview({
               Page{" "}
               <input
                 aria-label="PDF page number"
-                type="number"
-                min={1}
-                max={pdf?.numPages || 1}
-                value={page}
+                type="text"
+                inputMode="numeric"
+                role="spinbutton"
+                aria-valuemin={1}
+                aria-valuemax={pdf?.numPages || 1}
+                aria-valuenow={page}
+                value={editingPage ? String(page) : formatInteger(page)}
+                style={{width: `max(45px, ${formatInteger(page).length + 2}ch)`}}
+                onFocus={() => setEditingPage(true)}
+                onBlur={() => setEditingPage(false)}
                 disabled={!pdf}
                 onChange={(event) =>
                   setPage(
@@ -340,13 +349,18 @@ export default function PublicationPreview({
                       1,
                       Math.min(
                         pdf?.numPages || 1,
-                        Number(event.target.value) || 1,
+                        parseInteger(event.target.value) || 1,
                       ),
                     ),
                   )
                 }
+                onKeyDown={(event) => {
+                  if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+                  event.preventDefault();
+                  setPage(value => Math.max(1, Math.min(pdf?.numPages || 1, value + (event.key === 'ArrowUp' ? 1 : -1))));
+                }}
               />
-              <span>of {pdf?.numPages || "—"}</span>
+              <span>of {pdf ? formatInteger(pdf.numPages) : "—"}</span>
             </label>
             <button
               aria-label="Next PDF page"
@@ -370,6 +384,19 @@ export default function PublicationPreview({
                 ))}
               </select>
             </label>
+            {(proof?.chapterPages?.length || 0) > 1 && (
+              <label>
+                Contents{" "}
+                <select aria-label="PDF preview contents" value="" disabled={!pdf}
+                  onChange={(event) => {
+                    const chapter = proof!.chapterPages!.find(c => c.id === event.target.value);
+                    if (chapter) setPage(chapter.pageIndexes[0] + 1);
+                  }}>
+                  <option value="">Go to chapter…</option>
+                  {proof!.chapterPages!.map(chapter => <option key={chapter.id} value={chapter.id}>{chapter.title}</option>)}
+                </select>
+              </label>
+            )}
             <button disabled={!proof} onClick={() => void saveProof()}>
               Save this PDF
             </button>
@@ -471,7 +498,7 @@ export default function PublicationPreview({
       {!!proof?.warnings?.length && (
         <details className="publication-warnings">
           <summary>
-            {proof.warnings.length} publication{" "}
+            {formatInteger(proof.warnings.length)} publication{" "}
             {proof.warnings.length === 1 ? "notice" : "notices"}
           </summary>
           <ul>

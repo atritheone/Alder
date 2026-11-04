@@ -9,7 +9,7 @@ function objects(
 ) {
   fragment.descendants((node) => {
     if (
-      ["image", "inline_image", "table"].includes(node.type.name) &&
+      ["image", "inline_image", "shape", "table"].includes(node.type.name) &&
       node.attrs.blockId
     )
       output.add(node.attrs.blockId);
@@ -23,7 +23,7 @@ function objectLocation(doc: PMNode, id: string) {
     if (found) return false;
     if (
       node.attrs.blockId !== id ||
-      !["image", "inline_image", "table"].includes(node.type.name)
+      !["image", "inline_image", "shape", "table"].includes(node.type.name)
     )
       return;
     const point = doc.resolve(pos);
@@ -33,6 +33,22 @@ function objectLocation(doc: PMNode, id: string) {
     return false;
   });
   return found as { from: number; to: number } | null;
+}
+
+/** Extend a complete body move to include its immediately attached captions.
+ * Tracking must include these paragraphs before the follow plugin runs, so
+ * accepting or rejecting the move also decides the caption's placement.
+ */
+export function captionMoveRange(doc: PMNode, from: number, to: number) {
+  const targets = new Set<string>();
+  objects(doc.slice(from, to).content, targets);
+  const before = doc.resolve(from).nodeBefore;
+  const after = doc.resolve(to).nodeAfter;
+  if (before?.attrs.captionTargetId && targets.has(before.attrs.captionTargetId))
+    from -= before.nodeSize;
+  if (after?.attrs.captionTargetId && targets.has(after.attrs.captionTargetId))
+    to += after.nodeSize;
+  return { from, to };
 }
 
 /** Follow an actual object move, not positional shifts caused by ordinary typing.

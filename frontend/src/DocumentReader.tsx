@@ -97,8 +97,8 @@ export default function DocumentReader(p: Props) {
     p.sandbox ? "sandbox" : "reading",
   );
   const volumeSlider = useWheelSlider(volume, setVolume, 0, 4, 0.05);
-  const [time, setTime] = useState(0),
-    [playing, setPlaying] = useState(false);
+  const time = useRef(0);
+  const [playing, setPlaying] = useState(false);
   const format = "wav";
   const [buffering, setBuffering] = useState(false);
   const [resumeAfterCancel, setResumeAfterCancel] = useState(false);
@@ -300,9 +300,8 @@ export default function DocumentReader(p: Props) {
   const readingTick = useRef(updateReading);
   readingTick.current = updateReading;
   useLayoutEffect(() => {
-    updateReading(time);
+    updateReading(time.current);
   }, [
-    time,
     speed,
     job,
     active,
@@ -337,7 +336,7 @@ export default function DocumentReader(p: Props) {
       readingTick.current(clock, publish);
       if (publish) {
         lastStatus = performance.now();
-        setTime(clock);
+        time.current = clock;
       }
       timer = setTimeout(
         tick,
@@ -545,7 +544,7 @@ export default function DocumentReader(p: Props) {
       lastConfiguration.current = requestedConfiguration;
       bufferPrimed.current = false;
       setJob(next);
-      setTime(0);
+      time.current = 0;
       setChunkIndex(0);
       fullAudio.current = false;
       loaded.current = "";
@@ -596,7 +595,7 @@ export default function DocumentReader(p: Props) {
       if (
         audio.current?.ended &&
         loaded.current === `${job.id}:${chunkIndex}` &&
-        chunkIndex + 1 < next.chunks.length
+        (chunkIndex + 1 < next.chunks.length || next.hasMoreText)
       )
         setChunkIndex((i) => i + 1);
     } catch (e) {
@@ -641,7 +640,7 @@ export default function DocumentReader(p: Props) {
       shouldPlay.current = true;
       transport.prepare();
       const first = job.chunks[0];
-      setTime(0);
+      time.current = 0;
       setChunkIndex(0);
       setActive(true);
       if (first?.playbackEligible && first.audioUrl) {
@@ -703,7 +702,7 @@ export default function DocumentReader(p: Props) {
         (fullAudio.current || loaded.current === `${job.id}:${chunkIndex}`)
       )
         void playAudio().catch((e) => setError(e.message));
-      else if (audio.current?.ended && chunkIndex + 1 < job.chunks.length)
+      else if (audio.current?.ended && (chunkIndex + 1 < job.chunks.length || job.hasMoreText))
         setChunkIndex((i) => i + 1);
     } else if (
       !rendering ||
@@ -735,7 +734,7 @@ export default function DocumentReader(p: Props) {
       lastConfiguration.current = "";
     if (p.sandbox) {
       if (audio.current) audio.current.currentTime = 0;
-      setTime(0);
+      time.current = 0;
       setChunkIndex(0);
       loaded.current = "";
     }
@@ -767,7 +766,17 @@ export default function DocumentReader(p: Props) {
     }
   }, [p.chapter.id, p.chapter.text]);
   useEffect(() => {
-    const chunk = job?.chunks[chunkIndex];
+    // A pronunciation rule may omit the final planned sections. Their
+    // completion must end a boundary wait even when no new audio is appended.
+    if (active && !fullAudio.current && job?.status === "ready" &&
+        !job.hasMoreText && chunkIndex >= job.chunks.length) {
+      shouldPlay.current = false;
+      setBuffering(false);
+      parkCursor(true);
+      setRange(null);
+      p.onHighlight(null);
+      setActive(false);
+    }
     if (
       active &&
       !requesting &&
@@ -1032,12 +1041,18 @@ export default function DocumentReader(p: Props) {
       <audio
         crossOrigin="anonymous"
         ref={audio}
-        onTimeUpdate={(e) =>
-          setTime(
-            e.currentTarget.currentTime +
-              (job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0),
-          )
-        }
+        onTimeUpdate={(e) => {
+          time.current = e.currentTarget.currentTime +
+            (job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0);
+          // The word timer owns live updates. Media events also update paused
+          // or explicitly sought audio without rendering the entire editor.
+          if (!playing) readingTick.current(time.current);
+        }}
+        onSeeked={(e) => {
+          time.current = e.currentTarget.currentTime +
+            (job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0);
+          readingTick.current(time.current);
+        }}
         onPlay={(event) => {
           if (event.currentTarget.paused || !transport.intent) return;
           transport.claim();
@@ -1050,6 +1065,8 @@ export default function DocumentReader(p: Props) {
         }}
         onPause={(event) => {
           if (!event.currentTarget.paused) return;
+          time.current = event.currentTarget.currentTime +
+            (job && !fullAudio.current ? chunkStart(job, chunkIndex) : 0);
           setPlaying(false);
           setBuffering(false);
         }}
@@ -1065,7 +1082,7 @@ export default function DocumentReader(p: Props) {
           if (!event.currentTarget.ended) return;
           setPlaying(false);
           p.onHighlight(null);
-          if (job && !fullAudio.current && chunkIndex + 1 < job.chunks.length) {
+          if (job && !fullAudio.current && (chunkIndex + 1 < job.chunks.length || job.hasMoreText)) {
             if (!job.chunks[chunkIndex + 1]?.playbackEligible)
               bufferPrimed.current = false;
             if (shouldPlay.current) setBuffering(true);

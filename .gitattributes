@@ -7,10 +7,8 @@
 *.jpeg binary
 *.psd binary
 
-# Retain imported upstream formatting and the original notes verbatim.
+# Retain imported upstream formatting.
 chatterbox/** -whitespace linguist-vendored
-project_notes.txt -whitespace
-hardware.txt -whitespace
 
 # Preserve bundled third-party style and font licence text verbatim.
 frontend/src/citationAssets/** -whitespace linguist-vendored

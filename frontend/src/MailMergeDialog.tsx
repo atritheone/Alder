@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DOMSerializer, type Schema } from "prosemirror-model";
@@ -194,7 +195,7 @@ export default function MailMergeDialog({
           {created.length ? (
             <>
               <p role="status">
-                Created {created.length} documents. The template and CSV are
+                Created {formatInteger(created.length)} documents. The template and CSV are
                 unchanged.
               </p>
               <div className="comments-list">
@@ -335,7 +336,7 @@ export default function MailMergeDialog({
                     />
                   </label>
                   <small>
-                    {selected.length} of {data.rows.length} selected
+                    {formatInteger(selected.length)} of {formatInteger(data.rows.length)} selected
                   </small>
                   <label>
                     Preview record

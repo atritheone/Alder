@@ -4,6 +4,7 @@ import { paginateColumns } from "./columnLayout";
 import { pageInsets } from "./pageGeometry";
 import { pageFrame } from "./sectionLayout";
 import { physicalPageAtPosition } from "./pageRanges";
+import type { NoteProgress } from "./noteProgress";
 
 export type NoteLine = {
   html: string;
@@ -11,6 +12,8 @@ export type NoteLine = {
   repeat?: NoteLine[];
   keepWithNext?: boolean;
   sourceFrom?: number;
+  sourceImages?: number;
+  read?: NoteProgress;
 };
 export function noteLineRequirement(lines: NoteLine[], at: number) {
   let height = lines[at].height;
@@ -25,7 +28,14 @@ export type MeasuredFootnote = {
   anchorBottom?: number;
   width?: number;
   maximum?: number;
-  measure?: (width:number, maximum:number, from:number, continued:boolean)=>NoteLine[];
+  measure?: (
+    width: number,
+    maximum: number,
+    from: number,
+    continued: boolean,
+    images?: number,
+    read?: NoteProgress,
+  ) => NoteLine[];
 };
 export type FootnoteFragment = {
   id: string;
@@ -64,7 +74,9 @@ export function allocateFootnotes(
       physicalPageAtPosition(pages, note.pos) || 0,
     ),
     line: 0,
-    emitted:false,
+    emitted: false,
+    readParagraphs: new Map<number, number>(),
+    readPictures: new Set<number>(),
     measuredPage: physicalPageAtPosition(pages, note.pos) || 0,
   }));
   const reserves: number[] = [],
@@ -89,11 +101,40 @@ export function allocateFootnotes(
     let used = separator;
     const pieces: FootnoteFragment[] = [];
     while (at < pending.length && pending[at].page <= page) {
-      const note = pending[at],width=current.width-inset.left-inset.right;
-      if(note.measure && (note.width!==width || note.maximum!==maximum-separator)){
-        const from=note.emitted?note.lines[note.line]?.sourceFrom:0;
-        if(from==null)throw new Error('A rich footnote cannot continue across different page widths yet. Keep the section text widths equal before publishing.');
-        note.lines=note.measure(width,maximum-separator,from,note.emitted);note.line=0;note.width=width;note.maximum=maximum-separator;
+      const note = pending[at],
+        width = current.width - inset.left - inset.right;
+      if (
+        note.measure &&
+        (note.width !== width || note.maximum !== maximum - separator)
+      ) {
+        const from = note.emitted ? note.lines[note.line]?.sourceFrom : 0;
+        if (
+          from == null &&
+          !note.readParagraphs.size &&
+          !note.readPictures.size
+        )
+          throw new Error(
+            "A rich footnote cannot continue across different page widths yet. Keep the section text widths equal before publishing.",
+          );
+        const images = note.emitted ? note.lines[note.line]?.sourceImages : 0;
+        note.lines = note.measure(
+          width,
+          maximum - separator,
+          from ?? 0,
+          note.emitted,
+          images,
+          {
+            paragraphs: [...note.readParagraphs],
+            pictures: [...note.readPictures],
+          },
+        );
+        note.line = 0;
+        note.width = width;
+        note.maximum = maximum - separator;
+      }
+      if (!note.lines.length) {
+        at++;
+        continue;
       }
       const first = note.line;
       if (!note.emitted && first === 0 && note.page < page)
@@ -110,7 +151,8 @@ export function allocateFootnotes(
           "A footnote line is taller than the available page. Reduce its text size or increase the page height.",
         );
       if (
-        !note.emitted && first === 0 &&
+        !note.emitted &&
+        first === 0 &&
         note.measuredPage === page &&
         note.anchorBottom != null
       ) {
@@ -151,7 +193,18 @@ export function allocateFootnotes(
           continued: note.emitted || first > 0,
           lines: [...repeat, ...note.lines.slice(first, note.line)],
         });
-      if(note.line>first)note.emitted=true;
+      if (note.line > first) {
+        note.emitted = true;
+        for (const line of note.lines.slice(first, note.line)) {
+          for (const [paragraph, end] of line.read?.paragraphs || [])
+            note.readParagraphs.set(
+              paragraph,
+              Math.max(note.readParagraphs.get(paragraph) ?? -Infinity, end),
+            );
+          for (const picture of line.read?.pictures || [])
+            note.readPictures.add(picture);
+        }
+      }
       if (note.line === note.lines.length) {
         at++;
         continue;
@@ -221,7 +274,17 @@ export function paginateFootnotes(
         (note) =>
           physicalPageAtPosition(pages, note.pos) ===
           physicalPageAtPosition(previousLayout.pages, note.pos),
-      ) && previousLayout.notes.fragments.every((fragment,index)=>!fragment?.length || JSON.stringify(pageFrame(pages,Math.min(index,pages.length-1),layout).layout)===JSON.stringify(pageFrame(previousLayout.pages,index,layout).layout))
+      ) &&
+      previousLayout.notes.fragments.every(
+        (fragment, index) =>
+          !fragment?.length ||
+          JSON.stringify(
+            pageFrame(pages, Math.min(index, pages.length - 1), layout).layout,
+          ) ===
+            JSON.stringify(
+              pageFrame(previousLayout.pages, index, layout).layout,
+            ),
+      )
     ) {
       const result = {
         pages: appendNotePages(view, pages, previousLayout.notes, layout),

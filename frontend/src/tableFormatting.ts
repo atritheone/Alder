@@ -10,6 +10,9 @@ import {
 } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
 import { parallelCellStories } from "./tableStructure";
+import { parseBlockMove } from "./trackedBlockMoves";
+import { parseBlockChange } from './trackedBlockChanges';
+import { parseParagraphFormat } from './trackedParagraphFormatting';
 import {
   CellSelection,
   isInTable,
@@ -66,7 +69,11 @@ export function cellStyle(attrs: Record<string, any>) {
   if (color(attrs.background)) css.push(`background-color:${attrs.background}`);
   return css.join(";");
 }
-export const tableCellAttributes = Object.fromEntries(
+export const tableCellAttributes = {revisionBlock:{default:null,
+  getFromDOM:(dom:HTMLElement)=>parseBlockChange(dom.getAttribute('data-revision-block')),
+  setDOMAttr:(value:any,attrs:Record<string,any>)=>{if(value){attrs['data-revision-block']=JSON.stringify(value);attrs['data-revision-block-kind']=value.kind;}}},revisionProperties:{default:null,
+  getFromDOM:(dom:HTMLElement)=>parseParagraphFormat(dom.getAttribute('data-revision-paragraph')),
+  setDOMAttr:(value:unknown,attrs:Record<string,any>)=>{if(value)attrs['data-revision-paragraph']=JSON.stringify(value);}},...Object.fromEntries(
   Object.keys(cellDefaults).map((key) => [
     key,
     {
@@ -90,7 +97,7 @@ export const tableCellAttributes = Object.fromEntries(
       },
     },
   ]),
-);
+)};
 
 /** The resizing plugin owns table DOM; keep appearance in that same node view. */
 export class AlderTableView extends TableView {
@@ -105,6 +112,22 @@ export class AlderTableView extends TableView {
     this.table.style.marginRight = align === "center" ? "auto" : "0";
     this.table.dataset.tableAlign = align || "left";
     if (node.attrs.blockId) this.table.dataset.objectId = node.attrs.blockId;
+    if(node.attrs.revisionProperties)this.table.dataset.revisionParagraph=JSON.stringify(node.attrs.revisionProperties);
+    else delete this.table.dataset.revisionParagraph;
+    if (node.attrs.revisionBlock) {
+      this.table.dataset.revisionBlock = JSON.stringify(node.attrs.revisionBlock);
+      this.table.dataset.revisionBlockKind = node.attrs.revisionBlock.kind;
+    } else {
+      delete this.table.dataset.revisionBlock;
+      delete this.table.dataset.revisionBlockKind;
+    }
+    if (node.attrs.revisionMove) {
+      this.table.dataset.revisionBlockMove = JSON.stringify(node.attrs.revisionMove);
+      this.table.dataset.revisionMoveKind = node.attrs.revisionMove.kind;
+    } else {
+      delete this.table.dataset.revisionBlockMove;
+      delete this.table.dataset.revisionMoveKind;
+    }
   }
   update(node: PMNode) {
     const result = super.update(node);
@@ -115,11 +138,14 @@ export class AlderTableView extends TableView {
 export function tableSpec(spec: NodeSpec): NodeSpec {
   return {
     ...spec,
-    attrs: { ...spec.attrs, align: { default: "left" } },
+    attrs: { ...spec.attrs, align: { default: "left" }, revisionMove: { default: null }, revisionBlock: { default: null },revisionProperties:{default:null} },
     parseDOM: [
       {
         tag: "table",
         getAttrs: (dom) => ({
+          revisionMove: parseBlockMove(dom.getAttribute("data-revision-block-move")),
+          revisionBlock: parseBlockChange(dom.getAttribute("data-revision-block")),
+          revisionProperties:parseParagraphFormat(dom.getAttribute('data-revision-paragraph')),
           blockId: /^[A-Za-z0-9_.-]{1,128}$/.test(
             dom.getAttribute("data-object-id") || "",
           )
@@ -140,6 +166,11 @@ export function tableSpec(spec: NodeSpec): NodeSpec {
       {
         "data-table-align": node.attrs.align,
         "data-object-id": node.attrs.blockId,
+        'data-revision-paragraph':node.attrs.revisionProperties?JSON.stringify(node.attrs.revisionProperties):null,
+        "data-revision-block-move": node.attrs.revisionMove ? JSON.stringify(node.attrs.revisionMove) : null,
+        "data-revision-move-kind": node.attrs.revisionMove?.kind || null,
+        "data-revision-block": node.attrs.revisionBlock ? JSON.stringify(node.attrs.revisionBlock) : null,
+        "data-revision-block-kind": node.attrs.revisionBlock?.kind || null,
         style: `margin-left:${node.attrs.align === "left" ? "0" : "auto"};margin-right:${node.attrs.align === "center" ? "auto" : "0"}`,
       },
       ["tbody", 0],
@@ -153,6 +184,9 @@ export function rowSpec(spec: NodeSpec): NodeSpec {
       ...spec.attrs,
       minHeight: { default: null },
       allowSplit: { default: false },
+      revisionMove: { default: null },
+      revisionBlock: { default: null },
+      revisionProperties:{default:null},
     },
     parseDOM: [
       {
@@ -160,6 +194,9 @@ export function rowSpec(spec: NodeSpec): NodeSpec {
         getAttrs: (dom) => ({
           minHeight: points(dom.style.height),
           allowSplit: dom.getAttribute("data-allow-split") === "true",
+          revisionMove: parseBlockMove(dom.getAttribute('data-revision-block-move')),
+          revisionBlock: parseBlockChange(dom.getAttribute('data-revision-block')),
+          revisionProperties:parseParagraphFormat(dom.getAttribute('data-revision-paragraph')),
         }),
       },
     ],
@@ -168,6 +205,11 @@ export function rowSpec(spec: NodeSpec): NodeSpec {
       {
         "data-allow-split": String(node.attrs.allowSplit),
         "data-note-row-id": node.attrs.blockId,
+        'data-revision-paragraph':node.attrs.revisionProperties?JSON.stringify(node.attrs.revisionProperties):null,
+        'data-revision-block-move': node.attrs.revisionMove ? JSON.stringify(node.attrs.revisionMove) : null,
+        'data-revision-move-kind': node.attrs.revisionMove?.kind || null,
+        'data-revision-block': node.attrs.revisionBlock ? JSON.stringify(node.attrs.revisionBlock) : null,
+        'data-revision-block-kind': node.attrs.revisionBlock?.kind || null,
         style: validNumber(node.attrs.minHeight, 1440)
           ? `height:${node.attrs.minHeight}pt`
           : null,
@@ -398,7 +440,7 @@ export function sizeTableColumns(widths: number[] | null): Command {
     return true;
   };
 }
-export function sortTableRows(direction: 1 | -1): Command {
+export function sortTableRows(direction: 1 | -1, language = "en"): Command {
   return (state, dispatch) => {
     const rect = tableContext(state);
     if (!rect || rect.table.childCount < 2) return false;
@@ -421,7 +463,9 @@ export function sortTableRows(direction: 1 | -1): Command {
       header++;
     if (rows.length - header < 2) return false;
     if (!dispatch) return true;
-    const collator = new Intl.Collator(undefined, {
+    let locale = "en";
+    try { locale = Intl.Collator.supportedLocalesOf(language)[0] || locale; } catch { /* Older projects may contain a non-language label. */ }
+    const collator = new Intl.Collator(locale, {
       numeric: true,
       sensitivity: "base",
     });

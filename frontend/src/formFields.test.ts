@@ -89,11 +89,12 @@ it("blocks locked corrections, formatting, raw unlock and deletion but allows su
   for (const tr of [
     state.tr.insertText("x", at + 1, at + 2),
     state.tr.delete(at, at + n.nodeSize),
+    state.tr.delete(at, at + n.nodeSize).setMeta("reviewDecision", true),
     state.tr.setNodeMarkup(at, undefined, { ...n.attrs, lockDelete: false }),
     state.tr.addMark(at + 1, at + 2, schema.marks.em.create()),
   ])
     expect(state.applyTransaction(tr).state.doc.eq(original)).toBe(true);
-  expect(errors).toHaveLength(4);
+  expect(errors).toHaveLength(5);
   expect(
     state.applyTransaction(state.tr.insertText("x", 2)).state.doc.eq(original),
   ).toBe(false);

@@ -1,4 +1,5 @@
 import type { DocNode, Project } from "./types";
+import { formatInteger } from './numberDisplay';
 
 export function mergeFieldKeys(value: unknown): string[] {
   const keys = new Set<string>();
@@ -30,7 +31,7 @@ export function mergeRecordSelection(text: string, count: number): number[] {
     const first = Number(match[1]),
       last = Number(match[2] || match[1]);
     if (first < 1 || last < first || last > count)
-      throw new Error(`Choose records between 1 and ${count}.`);
+      throw new Error(`Choose records between 1 and ${formatInteger(count)}.`);
     if (last - first > 99)
       throw new Error("Select at most 100 records per merge.");
     for (let i = first; i <= last; i++) records.add(i);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import IndexGroupSelect from "./IndexGroupSelect";
 import {
   validIndexEntry,
   type IndexEntry,
@@ -16,7 +17,7 @@ export default function IndexEntriesDialog({
   onClose,
 }: {
   entries: ReturnType<typeof indexEntries>;
-  ranges: {id:string;name:string}[];
+  ranges: { id: string; name: string }[];
   selection: string;
   onApply: (value: IndexEntry | null, id?: string) => boolean;
   onGo: (id: string) => void;
@@ -26,7 +27,9 @@ export default function IndexEntriesDialog({
     [id, setId] = useState(""),
     [terms, setTerms] = useState([selection.slice(0, 200).trim(), "", ""]),
     [see, setSee] = useState(""),
-    [rangeId,setRangeId]=useState(""),
+    [rangeId, setRangeId] = useState(""),
+    [group, setGroup] = useState<string | null>(null),
+    [sortTerms, setSortTerms] = useState(["", "", ""]),
     [error, setError] = useState("");
   useEffect(() => {
     dialog.current?.showModal();
@@ -35,15 +38,24 @@ export default function IndexEntriesDialog({
     dialog.current?.close();
     onClose();
   };
-  const value = {
-    terms: terms
+  const selectedTerms = terms
       .filter((term, index) => index === 0 || terms.slice(index).some(Boolean))
       .map((term) => term.trim()),
+    selectedSorts = sortTerms
+      .slice(0, selectedTerms.length)
+      .map((term) => term.trim());
+  const value = {
+    terms: selectedTerms,
     see: see.trim() || null,
     rangeId: rangeId || null,
+    indexGroup: group,
+    sortTerms: selectedSorts.some(Boolean) ? selectedSorts : null,
   };
   const apply = (remove = false) => {
-    if(!remove && rangeId && !ranges.some(r=>r.id===rangeId)){setError('Choose an available bookmark range, or use the current page.');return;}
+    if (!remove && rangeId && !ranges.some((r) => r.id === rangeId)) {
+      setError("Choose an available bookmark range, or use the current page.");
+      return;
+    }
     if (onApply(remove ? null : value, id || undefined)) close();
     else setError("The document changed. Open Index entries again.");
   };
@@ -91,6 +103,10 @@ export default function IndexEntriesDialog({
                 );
                 setSee(entry?.see || "");
                 setRangeId(entry?.rangeId || "");
+                setGroup(entry?.indexGroup || null);
+                setSortTerms(
+                  [0, 1, 2].map((index) => entry?.sortTerms?.[index] || ""),
+                );
                 setError("");
               }}
             >
@@ -102,6 +118,7 @@ export default function IndexEntriesDialog({
               ))}
             </select>
           </label>
+          <IndexGroupSelect value={group} onChange={setGroup} />
           {["Main entry", "Subentry", "Further subentry"].map(
             (label, index) => (
               <label key={label}>
@@ -124,12 +141,59 @@ export default function IndexEntriesDialog({
           )}
           <label>
             Page range
-            <select aria-label="Index page range" value={rangeId} disabled={!!see.trim()} onChange={e=>setRangeId(e.target.value)}>
+            <select
+              aria-label="Index page range"
+              value={rangeId}
+              disabled={!!see.trim()}
+              onChange={(e) => setRangeId(e.target.value)}
+            >
               <option value="">Current page</option>
-              {rangeId && !ranges.some(r=>r.id===rangeId) && <option value={rangeId}>Unavailable bookmark</option>}
-              {ranges.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+              {rangeId && !ranges.some((r) => r.id === rangeId) && (
+                <option value={rangeId}>Unavailable bookmark</option>
+              )}
+              {ranges.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
             </select>
           </label>
+          <details>
+            <summary>Sorting</summary>
+            {terms.map(
+              (term, index) =>
+                term.trim() && (
+                  <label key={index}>
+                    Sort{" "}
+                    {index === 0
+                      ? "main entry"
+                      : index === 1
+                        ? "subentry"
+                        : "further subentry"}{" "}
+                    as
+                    <input
+                      aria-label={
+                        [
+                          "Sort main entry as",
+                          "Sort subentry as",
+                          "Sort further subentry as",
+                        ][index]
+                      }
+                      placeholder={term}
+                      maxLength={200}
+                      value={sortTerms[index]}
+                      onChange={(event) =>
+                        setSortTerms(
+                          sortTerms.map((old, i) =>
+                            i === index ? event.target.value : old,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                ),
+            )}
+          </details>
           <label>
             Cross-reference
             <input
@@ -142,9 +206,11 @@ export default function IndexEntriesDialog({
             />
           </label>
           <small>
-            Bookmark a passage to index its page range. Leave Cross-reference empty to include page numbers. Insert an
-            index through Table of contents → Index entries. Update fields
-            refreshes the index.
+            Use the same group for entries and their index. Blank sort text uses
+            the entry wording. Bookmark a passage to index its page range. Leave
+            Cross-reference empty to include page numbers. Insert an index
+            through Table of contents → Index entries. Update fields refreshes
+            the index.
           </small>
         </div>
         <footer>

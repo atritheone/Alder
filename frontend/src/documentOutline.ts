@@ -17,6 +17,7 @@ export function documentOutline(doc: PMNode): OutlineHeading[] {
   const headings: OutlineHeading[] = [];
   const parents: OutlineHeading[] = [];
   doc.descendants((node, from) => {
+    if((node.attrs.revisionMove||node.attrs.revisionBlock)?.kind==='deletion')return false;
     if (node.type.name !== "heading") return;
     const level = Number(node.attrs.level || 1);
     while (parents.length && parents.at(-1)!.level >= level) parents.pop();
@@ -68,6 +69,7 @@ export function moveOutlineSection(
       ? destination - (source.to - source.from)
       : destination;
   tr.insert(at, content);
+  tr.setMeta('arrangementMove',{kind:'section',from:source.from,to:source.to,destination});
   tr.setSelection(TextSelection.near(tr.doc.resolve(at + 1)));
   return tr.scrollIntoView();
 }

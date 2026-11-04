@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
 import {
@@ -553,7 +554,7 @@ export default function DefinitionStudio({
               />
             </label>
             <div className="definition-writing-state">
-              <span>{entry.definition.length.toLocaleString()} characters</span>
+              <span>{formatInteger(entry.definition.length)} characters</span>
               <span>{changed ? "Draft changes" : "In project dictionary"}</span>
             </div>
             <button

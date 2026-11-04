@@ -269,7 +269,7 @@ def _prepare_publication(project, options=None, warnings=None):
                    if str(entry.get("word") or "").strip() and str(entry.get("definition") or "").strip()]
         omitted = len(prepared.get("dictionary", [])) - len(entries)
         if omitted:
-            _warn(warnings, f"Glossary omitted {omitted} dictionary entry/entries without both a word and an authored definition.")
+            _warn(warnings, f"Glossary omitted {omitted:,} dictionary entry/entries without both a word and an authored definition.")
         if not entries:
             _warn(warnings, "No authored dictionary definitions were available for the requested glossary.")
         else:
@@ -458,7 +458,7 @@ def _html_node(node, project, resources, warnings, epub=False):
                 value = '<span data-revision-format="' + html.escape(json.dumps(mark['attrs'], ensure_ascii=False), quote=True) + '">' + value + '</span>'
             else:
                 stamp = mark['attrs']; change = mark['type'].removeprefix('revision_')
-                value = '<span data-revision-' + change + '="' + html.escape(stamp['id'], quote=True) + '" data-revision-author="' + html.escape(stamp.get('author', ''), quote=True) + '" data-revision-date="' + html.escape(stamp.get('date', ''), quote=True) + '">' + value + '</span>'
+                value = '<span data-revision-' + change + '="' + html.escape(stamp['id'], quote=True) + '" data-revision-author="' + html.escape(stamp.get('author', ''), quote=True) + '" data-revision-date="' + html.escape(stamp.get('date', ''), quote=True) + '"' + (' data-revision-move="true"' if stamp.get('move') else '') + '>' + value + '</span>'
         return value
     if kind == 'revision_break':
         return '<span data-revision-break="' + attrs['kind'] + '" data-revision-break-content="' + html.escape(json.dumps(attrs, ensure_ascii=False), quote=True) + '"></span>'
@@ -487,6 +487,9 @@ def _html_node(node, project, resources, warnings, epub=False):
             else:
                 _warn(warnings, f"Unsupported text mark '{name}' was omitted; its text was retained.")
         return text
+    if kind == 'shape':
+        from .document_shapes import to_html
+        return to_html(attrs)
     if kind == 'equation':
         from .equations import validate
         value=validate(node);description=node['content'][0]['text']
@@ -512,7 +515,7 @@ def _html_node(node, project, resources, warnings, epub=False):
         from .document_index import html_entry
         return html_entry(attrs)
     if kind=='index_reference':
-        payload={key:attrs[key] for key in ('terms','targetIds','unresolved') if key in attrs}
+        payload={key:attrs[key] for key in ('terms','sortTerms','targetIds','unresolved') if key in attrs}
         value=''.join(_html_node({**child,'marks':node.get('marks',[])+child.get('marks',[])},project,resources,warnings,epub) for child in node.get('content',[]))
         return '<span data-index-reference="'+html.escape(json.dumps(payload,ensure_ascii=False),quote=True)+'">'+value+'</span>'
     if kind == 'document_field':
@@ -576,9 +579,19 @@ def _html_node(node, project, resources, warnings, epub=False):
         tag = f'<img src="{source}" alt="{alternative}" title="{title}" data-image-align="{alignment}" data-image-placement="{placement}"{identity}{crop_metadata}{decoration}{wrapping}{width}/>'
         return tag if kind == 'inline_image' else f'<figure style="text-align:{alignment};margin:12px 0">{tag}</figure>'
     children=node.get("content", [])
-    if kind=='ordered_list' and attrs.get('_outlineIndent') is None and attrs.get('listStyle') not in (None,'decimal'):
+    if kind=='ordered_list' and attrs.get('_outlineIndent') is None and (attrs.get('listStyle') not in (None,'decimal') or any(c.get('attrs',{}).get('revisionMove') or c.get('attrs',{}).get('revisionBlock') for c in children)):
         from .list_formatting import list_marker
-        children=[{**child,'attrs':{**child.get('attrs',{}),'_listLabel':list_marker(attrs.get('order',1)+index,attrs['listStyle'])+'. '}} for index,child in enumerate(children)]
+        labels={};index=0
+        for child in children:
+            move=child.get('attrs',{}).get('revisionMove')
+            if move and move['kind']=='deletion':continue
+            labels[id(child)]=list_marker(attrs.get('order',1)+index,attrs.get('listStyle') or 'decimal')+'. '
+            if child.get('attrs',{}).get('revisionBlock',{}).get('kind')!='deletion':index+=1
+            if move:labels[(move['stamp']['id'],move.get('part',0))]=labels[id(child)]
+        def label(child):
+            move=child.get('attrs',{}).get('revisionMove')
+            return labels[(move['stamp']['id'],move.get('part',0))] if move and move['kind']=='deletion' else labels[id(child)]
+        children=[{**child,'attrs':{**child.get('attrs',{}),'_listLabel':label(child)}} for child in children]
     inner = "".join(_html_node(child, project, resources, warnings, epub) for child in children)
     if kind in ('citation','bibliography'):
         tag='span' if kind=='citation' else 'div'
@@ -588,6 +601,9 @@ def _html_node(node, project, resources, warnings, epub=False):
         metadata = f' data-contents-title="{html.escape(attrs.get("title", "Contents"), quote=True)}" data-contents-depth="{attrs.get("depth", 3)}"'
         metadata += ' data-contents-pages="' + ('true' if attrs.get('pageNumbers',True) else 'false') + '"'
         metadata += ' data-contents-kind="' + html.escape(attrs.get('kind','headings'), quote=True) + '"'
+        if attrs.get('indexGroup'):metadata+=' data-index-group="'+html.escape(attrs['indexGroup'],quote=True)+'"'
+        if attrs.get('kind')=='index':metadata+=' data-index-sort="'+('true' if attrs.get('useSortText',True) else 'false')+'"'
+        if attrs.get('indexLanguage'):metadata+=' data-index-language="'+html.escape(attrs['indexLanguage'],quote=True)+'"'
         if attrs.get('entryStyle'): metadata += ' data-contents-style="' + html.escape(attrs['entryStyle'], quote=True) + '"'
         return '<div data-document-contents="true"' + metadata + '>' + inner + '</div>'
     tags = {"paragraph": "p", "blockquote": "blockquote", "bullet_list": "ul", "ordered_list": "ol", "list_item": "li",
@@ -600,6 +616,8 @@ def _html_node(node, project, resources, warnings, epub=False):
         return inner
     extra = ""
     if attrs.get('revisionProperties'): extra += ' data-revision-paragraph="' + html.escape(json.dumps(attrs['revisionProperties'], ensure_ascii=False), quote=True) + '"'
+    if attrs.get('revisionMove'): extra += ' data-revision-block-move="'+html.escape(json.dumps(attrs['revisionMove'],ensure_ascii=False),quote=True)+'"'
+    if attrs.get('revisionBlock'): extra += ' data-revision-block="'+html.escape(json.dumps(attrs['revisionBlock'],ensure_ascii=False),quote=True)+'"'
     if attrs.get('blockId'): extra += ' data-block-id="' + html.escape(attrs['blockId'], quote=True) + '"'
     style = _block_style(node, project)
     if kind in ('paragraph', 'heading', 'code_block'):
@@ -697,9 +715,11 @@ def render_html(project: dict, options: dict | None = None) -> str:
     return _render_html(_prepare_publication(project, options, warnings), options, warnings)
 
 
-def _notes_html(resources, project, warnings, epub=False):
+def _notes_html(resources, project, warnings, epub=False, identifiers=None):
     if not resources.notes: return ''
-    notes=resources.notes;resources.notes=[]
+    notes=[note for note in resources.notes if identifiers is None or note['attrs']['blockId'] in identifiers]
+    resources.notes=[note for note in resources.notes if identifiers is not None and note['attrs']['blockId'] not in identifiers]
+    if not notes:return ''
     values=[]
     for node in notes:
         attrs=node['attrs'];identifier=html.escape(attrs['blockId'],quote=True)
@@ -724,15 +744,22 @@ def _render_html(project, options, warnings):
     if settings["includeToc"]:
         pieces.append('<nav aria-label="Contents"><h2>Contents</h2><ol>' + "".join(f'<li><a href="#section-{i}">{html.escape(s.get("navigationTitle") or s["title"] or "Untitled section")}</a></li>' for i, s in enumerate(sections)) + "</ol></nav>")
     page_styles = []
+    from .note_options import note_options
+    note_settings=note_options(settings.get('noteOptions'))
     for i, section in enumerate(sections):
         heading = f'<h2 data-alder-chapter-title="true">{html.escape(section["title"])}</h2>' if section["title"] else ""
         from .columns import column_css
         chunks, pending, page_style = [], [], column_css(settings.get('columns'))
+        note_start=len(resources.notes)
         for b in section['blocks']:
             if _kind(b) == 'section_break':
+                if note_settings['endnote']['placement']=='sectEnd':
+                    pending.append(_notes_html(resources,project,warnings,identifiers={n['attrs']['blockId'] for n in resources.notes[note_start:] if n['attrs']['kind']=='endnote'}))
                 chunks.append(('<div style="' + page_style + '">' if page_style else '<div>') + ''.join(pending) + '</div>')
                 pending = [_html_node(b, project, resources, warnings)]
                 attrs = b.get('attrs', {})
+                if attrs.get('noteOptions') is not None:note_settings=note_options(attrs['noteOptions'])
+                note_start=len(resources.notes)
                 geo = page_geometry(attrs.get('page', {}))
                 edges = geo['margins']
                 name = 'alder-section-' + str(len(page_styles))
@@ -965,6 +992,8 @@ def _epub(project, path, settings, warnings):
     nav = []
     landmarks, landmark_types = [], set()
     cover = None
+    from .note_options import note_options
+    note_settings=note_options(settings.get('noteOptions'))
     if settings.get("coverAssetId"):
         cover = resources.image({"assetId": settings["coverAssetId"], "alt": "Cover"})
     for i, section in enumerate(sections):
@@ -972,6 +1001,7 @@ def _epub(project, path, settings, warnings):
         section_title = html.escape(section.get('navigationTitle') or section["title"] or project.get("name", "Untitled"))
         from .columns import column_css
         chunks, pending, columns = [], [], settings.get('columns')
+        note_start=len(resources.notes)
         def flush_columns():
             style = column_css(columns)
             chunks.append(('<div style="'+style+'">' if style else '<div>')+''.join(pending)+'</div>')
@@ -979,8 +1009,12 @@ def _epub(project, path, settings, warnings):
                 _warn(warnings,'EPUB column layout depends on the reading application and its screen size; desktop PDF retains the measured page layout.')
         for block in section['blocks']:
             if _kind(block)=='section_break':
+                if note_settings['endnote']['placement']=='sectEnd':
+                    pending.append(_notes_html(resources,project,warnings,True,identifiers={n['attrs']['blockId'] for n in resources.notes[note_start:] if n['attrs']['kind']=='endnote'}))
                 flush_columns()
                 pending=[]
+                if block.get('attrs',{}).get('noteOptions') is not None:note_settings=note_options(block['attrs']['noteOptions'])
+                note_start=len(resources.notes)
                 columns=block.get('attrs',{}).get('page',{}).get('columns')
             pending.append(_html_node(block,project,resources,warnings,epub=True))
         flush_columns()
@@ -999,7 +1033,8 @@ def _epub(project, path, settings, warnings):
         body = f'<section id="chapter" epub:type="{semantics}"{html_attributes(section)}>{heading}{blocks}</section>'
         from .running_matter import html_metadata
         documents.append((name, f'<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{language}" xml:lang="{language}"><head><title>{section_title}</title><link rel="stylesheet" href="style.css"/>{html_metadata(settings,resources) + html_page_metadata(settings) if i==0 else ""}</head><body>{body}</body></html>'))
-        mathml=' properties="mathml"' if '<math ' in blocks else ''
+        properties=[kind for kind,marker in (("mathml","<math "),("svg","<svg ")) if marker in blocks]
+        mathml=' properties="'+" ".join(properties)+'"' if properties else ''
         manifest.append(f'<item id="s{i}" href="{name}" media-type="application/xhtml+xml"{mathml}/>')
         spine.append(f'<itemref idref="s{i}"/>')
         nav.append(f'<li><a href="{name}">{section_title}</a></li>')
@@ -1140,6 +1175,8 @@ def _docx(project, path, settings, warnings):
         raise ValueError('Word can clip footnotes that continue across different page dimensions. Use desktop PDF, or keep those sections at the same paper size and margins before Word export.')
     if measured_notes is None and requires_note_geometry([{'type':'doc','content':s['blocks']} for s in sections],settings):
         raise ValueError('Use desktop DOCX export to check footnotes across different page dimensions.')
+    from .document_shapes import validate_word_bounds
+    validate_word_bounds(sections,settings,project.get('styles',[]))
     from .running_headings import export_heading_styles
     heading_styles = export_heading_styles(sections,settings,style_ids)
     comment_writer = WordCommentsWriter(document, sections, warnings)
@@ -1171,6 +1208,9 @@ def _docx(project, path, settings, warnings):
         kind, attrs = _kind(node), node.get("attrs", {})
         if kind=='citation':
             citation_writer.inline(paragraph,node,inline)
+        elif kind == 'shape':
+            from .document_shapes import write_word
+            write_word(paragraph,attrs,bookmark_counter);bookmark_counter+=1
         elif kind == 'equation':
             from .equations import to_word
             paragraph._p.append(to_word(node))
@@ -1202,11 +1242,7 @@ def _docx(project, path, settings, warnings):
             from .document_fields import field_instruction
             append_field(paragraph,field_instruction(attrs['fieldKind'],heading_styles,attrs.get('mergeKey')),node)
         elif kind == 'sequence':
-            field = OxmlElement('w:fldSimple'); field.set(qn('w:instr'), ' SEQ ' + attrs['sequenceName'] + ' \\* ARABIC ')
-            start = len(paragraph._p)
-            for child in node.get('content', []): inline(paragraph, {**child,'marks':node.get('marks',[])+child.get('marks',[])})
-            for run in list(paragraph._p)[start:]: field.append(run)
-            paragraph._p.append(field)
+            append_field(paragraph,' SEQ ' + attrs['sequenceName'] + ' \\* ARABIC \\* CHARFORMAT ',node)
         elif kind == 'cross_reference':
             name = attrs.get('targetName')
             if name and not attrs.get('unresolved'):
@@ -1310,7 +1346,7 @@ def _docx(project, path, settings, warnings):
     from .outline_lists import word_outline_bindings
     outline_bindings, outline_lists = word_outline_bindings(document,sections)
 
-    def block(container, node, indent=0, prefix="", list_info=None):
+    def block(container, node, indent=0, prefix="", list_info=None, list_move=None, item_marker=None, list_change=None):
         nonlocal geometry, numbering_format, bookmark_counter
         kind, attrs = _kind(node), node.get("attrs", {})
         if kind == 'form_block':
@@ -1319,38 +1355,86 @@ def _docx(project, path, settings, warnings):
             write_word_block(container,node,block,number)
             return
         if kind == "table":
+            if attrs.get('revisionMove'):
+                from .tracked_block_moves import require_word_list_move
+                require_word_list_move(node, sections)
+                list_move = attrs['revisionMove']
             from .docx_support import table_grid
+            from docx.table import _Cell
             rows = node.get("content", [])
+            if any(cell.get('attrs', {}).get('revisionBlock') for row in rows for cell in row.get('content', [])):
+                raise ValueError('Accept or reject column changes before Word export; their native geometry is not qualified yet.')
+            for row in rows:
+                if not row.get('attrs',{}).get('revisionMove'):continue
+                from .tracked_block_moves import require_word_list_move, identity_nodes
+                require_word_list_move(row,sections)
+                if isinstance(container,_Cell) or any(child['type']=='table' for child in identity_nodes(row)):
+                    raise ValueError('Accept or reject row moves involving nested tables before Word export. Their pending native revisions can stall Word; Alder and HTML/EPUB retain the complete move.')
             columns, placed = table_grid(rows)
             from docx.section import _BaseHeaderFooter
             from docx.blkcntnr import BlockItemContainer
             table_options = {'width':Mm(geometry['width']-geometry['margins']['left']-geometry['margins']['right'])} if isinstance(container,_BaseHeaderFooter) or type(container) is BlockItemContainer else {}
             table = container.add_table(rows=max(1, len(rows)), cols=columns, **table_options)
+            # python-docx inserts a cell-ending paragraph after every nested
+            # table. Recreate it only if no authored block follows the table.
+            if isinstance(container, _Cell):
+                scaffold = table._tbl.getnext()
+                if scaffold is not None and scaffold.tag == qn('w:p') and not len(scaffold):
+                    container._element.remove(scaffold)
             table.style = "Table Grid"
+            if list_move:list_move={**list_move,'_block':list_move.get('_block',table._tbl)}
             from .table_formatting import write_docx_cell, row_vertical_inset
+            from .cell_revisions import write_cell_revision,validate_word_cell_changes
+            validate_word_cell_changes(rows)
             from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
             table.alignment = {'left': WD_TABLE_ALIGNMENT.LEFT, 'center': WD_TABLE_ALIGNMENT.CENTER, 'right': WD_TABLE_ALIGNMENT.RIGHT}.get(attrs.get('align'), WD_TABLE_ALIGNMENT.LEFT)
+            from .column_revisions import reviewed_column_widths,unchanged_column_cell
+            column_review = reviewed_column_widths(rows, [int(c.get(qn('w:w'))) for c in table._tbl.tblGrid])
+            original_widths,column_stamp = column_review or (None,None)
             widths = {}
             for r, col, height, span, cell in placed:
                 for offset, width in enumerate(cell.get("attrs", {}).get("colwidth") or []):
                     if width: widths[col + offset] = width
-            if widths:
+            # A native cell-property review must keep the same column grid in
+            # both views. Word's automatic fit can independently resize the old
+            # and new grids when margins/borders change, even with equal tcW.
+            if widths or any(cell.get('attrs',{}).get('revisionProperties') for _,_,_,_,cell in placed):
                 table.autofit = False
+            if widths:
                 for col, width in widths.items():
                     table.columns[col].width = Pt(width * 72 / 96)
                     for row in table.rows: row.cells[col].width = Pt(width * 72 / 96)
             for r, col, height, span, cell in placed:
+                row_move=rows[r].get('attrs',{}).get('revisionMove')
+                cell_move={**row_move,'_block':table.rows[r]._tr} if row_move else list_move
                 target = table.cell(r, col)
                 if span > 1 or height > 1:
                     target = target.merge(table.cell(r + height - 1, col + span - 1))
+                generated_paragraphs = [paragraph._p for paragraph in target.paragraphs]
+                cell_move_start = len(revision_writer.block_moves)
+                cell_change_start = len(revision_writer.block_changes)
                 for child in cell.get("content", []):
-                    block(target, child)
-                if len(target.paragraphs) > 1 and not target.paragraphs[0].text:
-                    target._element.remove(target.paragraphs[0]._p)
+                    block(target, child, list_move=cell_move)
+                for generated in generated_paragraphs:
+                    target._element.remove(generated)
+                # Word's mandatory cell-ending paragraph mark cannot belong
+                # to a move inside that cell. Keep an identified empty ending
+                # outside the range; moving the entire row/table owns it too.
+                local_moved_end = not cell_move and any(paragraph is target._element[-1] for paragraph, _move in revision_writer.block_moves[cell_move_start:])
+                local_changed_end = any(paragraph is target._element[-1] for paragraph, _change in revision_writer.block_changes[cell_change_start:])
+                from .list_item_objects import read_table as read_list_table
+                list_table_end=target._element[-1].tag==qn('w:sdt') and read_list_table(target._element[-1]) is not None
+                if target._element[-1].tag == qn('w:tbl') or local_moved_end or local_changed_end or list_table_end:
+                    scaffold = target.add_paragraph()._p
+                    from .tracked_block_moves import mark_word_table_terminator
+                    mark_word_table_terminator(scaffold,document)
+                    if cell_move:revision_writer.block_moves.append((scaffold,cell_move))
                 if _kind(cell) == "table_header":
                     for paragraph in target.paragraphs:
                         for run in paragraph.runs: run.bold = True
                 write_docx_cell(target, cell.get('attrs', {}), _kind(cell) == 'table_header')
+                cell_log=cell.get('attrs',{}).get('revisionProperties') or (unchanged_column_cell(cell,column_stamp) if original_widths else None)
+                if cell_log:write_cell_revision(target,cell_log,revision_writer,_kind(cell)=='table_header',sum(original_widths[col:col+span]) if original_widths else None)
                 if height > 1:
                     # Word reads margins/borders on each vertical-merge
                     # continuation, even though python-docx returns the anchor
@@ -1360,7 +1444,16 @@ def _docx(project, path, settings, warnings):
                         grid_column = 0
                         for element in continuation_row._tr.tc_lst:
                             if grid_column == col and element.vMerge == 'continue':
-                                write_docx_cell(_Cell(element, table), cell.get('attrs', {}), _kind(cell) == 'table_header')
+                                continuation = _Cell(element, table)
+                                write_docx_cell(continuation, cell.get('attrs', {}), _kind(cell) == 'table_header')
+                                if cell_log:
+                                    write_cell_revision(continuation,cell_log,revision_writer,_kind(cell)=='table_header',sum(original_widths[col:col+span]) if original_widths else None)
+                                if cell_move:
+                                    from .tracked_block_moves import mark_word_table_terminator
+                                    for paragraph in continuation.paragraphs:
+                                        mark_word_table_terminator(paragraph._p,document)
+                                        continuation_move={**cell_move,'_block':continuation_row._tr} if row_move else cell_move
+                                        revision_writer.block_moves.append((paragraph._p,continuation_move))
                                 break
                             grid_column += element.grid_span
             for r, row in enumerate(rows):
@@ -1380,18 +1473,86 @@ def _docx(project, path, settings, warnings):
                     table.rows[r].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
                 if row.get("content") and all(_kind(c) == "table_header" for c in row["content"]):
                     table.rows[r]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+                if attrs.get('revisionBlock') or row.get('attrs', {}).get('revisionBlock') or row.get('attrs',{}).get('revisionMove'):
+                    from .table_row_revisions import write_word_row_change
+                    change = attrs.get('revisionBlock') or row['attrs'].get('revisionBlock') or row['attrs']['revisionMove']; stamp = change['stamp']
+                    key = (stamp['id'], stamp.get('author', ''), stamp.get('date', ''))
+                    identifier = revision_writer.ids.setdefault(key, str(len(revision_writer.ids)))
+                    write_word_row_change(table.rows[r]._tr, change, identifier)
+            from .cell_revisions import write_cell_table_snapshot
+            write_cell_table_snapshot(table,rows,revision_writer,original_widths)
+            from .table_revisions import write_table_revisions
+            write_table_revisions(table,node,revision_writer)
+            if (attrs.get('revisionBlock') or {}).get('kind')=='insertion':
+                from .table_row_revisions import write_word_table_insertion
+                write_word_table_insertion(table._tbl,attrs['revisionBlock'])
             return
         if kind in ("bullet_list", "ordered_list"):
-            if id(node) in outline_lists:
-                for item in node.get('content',[]):
-                    for child in item.get('content',[]):block(container,child)
-                return
+            if attrs.get('revisionBlock'):
+                from .list_item_revisions import require_word_list_change
+                require_word_list_change(node, sections)
+                list_change = attrs['revisionBlock']
+            if attrs.get('revisionMove'):
+                from .tracked_block_moves import require_word_list_move
+                require_word_list_move(node, sections)
+                list_move = attrs['revisionMove']
+            is_outline = id(node) in outline_lists
+            native_list=outline_bindings.get(id(node['content'][0]['content'][0]))
+            converted_depth=native_list[2].get('nestedDepth',0) if native_list and native_list[2].get('nestedRoot') else 0
+            nested_outline = is_outline and outline_lists[id(node)]['level']==0 and outline_lists[id(node)].get('baseIndent',0)>0 or converted_depth>0
+            if nested_outline:
+                native_root=container._element.body if hasattr(container._element,'body') else container._element
+                outline_before=set(native_root)
             start = int(_number(attrs.get("order", attrs.get("start")), 1, 1, 1000000000))
             number = continuation_numbers.get(id(node))
             if number is None: number = list_numbering.create(kind == "ordered_list", start, attrs.get('listStyle'))
+            from .list_revisions import write_list_revision,write_continuation_revision
+            list_revision=list_revision_numbers.get(id(node))
+            continuation_split = None
             for item in node.get("content", []):
+                item_move=item.get('attrs',{}).get('revisionMove') or list_move
+                item_change=item.get('attrs',{}).get('revisionBlock') or list_change
+                if item.get('attrs',{}).get('revisionBlock'):
+                    from .list_item_revisions import require_word_item_change
+                    require_word_item_change(item)
+                if item.get('attrs',{}).get('revisionMove'):
+                    from .tracked_block_moves import require_word_list_move
+                    require_word_list_move(item,sections)
                 for j, child in enumerate(item.get("content", [])):
-                    block(container, child, indent+1, list_info=(number, indent) if j == 0 else None)
+                    level = native_list[1] if native_list else indent
+                    base_indent = native_list[2]['indent'] if native_list else 7 * (indent+1) * 72 / 25.4
+                    marker = (level,base_indent) if j>0 and _kind(child)=='paragraph' else None
+                    block(container, child, 0 if is_outline else indent+1, list_info=(number, indent) if j == 0 and not is_outline else None, list_move=item_move, item_marker=marker,list_change=item_change)
+                    if j==0 and list_revision:write_list_revision(container.paragraphs[-1],list_revision,level,list_numbering,revision_writer)
+                    elif marker and list_revision:write_continuation_revision(container.paragraphs[-1],list_revision,level,list_numbering,revision_writer)
+                    if j == 0 and continuation_split:
+                        from .item_breaks import write_continuation_split
+                        write_continuation_split(container.paragraphs[-1],*continuation_split,revision_writer)
+                        continuation_split = None
+                    boundary = child.get('attrs', {}).get('revisionBreak')
+                    if boundary and boundary.get('scope') == 'item':
+                        continuation_split = (container.paragraphs[-1],boundary['stamp'])
+                    joined = child.get('attrs', {}).get('_itemJoin')
+                    if joined:
+                        if not marker or list_revision or item_move or item_change:
+                            raise ValueError('Review overlapping item/list changes before exporting this item join to Word.')
+                        from .item_breaks import write_item_join
+                        from .list_formatting import relative_list_level
+                        spec = {**outline_lists[id(node)]['template'][level],'indent':base_indent} if is_outline else relative_list_level(level)
+                        native_number = outline_bindings[id(node['content'][0]['content'][0])][0] if is_outline else number
+                        write_item_join(container.paragraphs[-1],joined,native_number,level,base_indent,spec,list_numbering,revision_writer)
+                    if j>0 and _kind(child)=='table':
+                        if item_move or item_change:raise ValueError('Review list moves and item boundary changes containing tables before Word export.')
+                        from .list_item_objects import wrap_table
+                        wrap_table(container.tables[-1],level)
+            if nested_outline:
+                from .nested_outline import wrap
+                from .list_formatting import relative_list_level
+                inset=relative_list_level(converted_depth-1)['indent'] if converted_depth else outline_lists[id(node)]['baseIndent']
+                wrapper=wrap(container,outline_before,indent-1,inset,attrs.get('continuePrevious'))
+                if list_move:
+                    paragraphs=set(wrapper.iter(qn('w:p')))
+                    revision_writer.block_moves=[(paragraph,{**move,'_block':wrapper} if paragraph in paragraphs else move) for paragraph,move in revision_writer.block_moves]
             return
         if kind == "blockquote":
             for child in node.get("content", []):
@@ -1437,6 +1598,7 @@ def _docx(project, path, settings, warnings):
             paragraph._p.get_or_add_pPr().append(border)
             return
         if kind in ("paragraph", "heading", "code_block", "image"):
+            if list_move:attrs = {**attrs, 'revisionMove':list_move}
             outline_list = outline_bindings.get(id(node))
             if outline_list:list_info=outline_list[:2]
             style = style_ids.get(attrs.get("styleId"))
@@ -1459,6 +1621,8 @@ def _docx(project, path, settings, warnings):
                 inline(paragraph, node)
             else:
                 for child in node.get("content", []):
+                    if attrs.get('revisionMove') and child['type']=='cross_reference' and (not child.get('attrs',{}).get('targetName') or child['attrs'].get('unresolved')):
+                        raise ValueError('A cross-reference in this tracked paragraph move has no available target. Restore its target or review the move before Word export.')
                     inline(paragraph, child)
                 if len(node.get('content',[]))==1 and node['content'][0]['type']=='equation':
                     # Word otherwise turns a lone inline equation into a
@@ -1472,7 +1636,11 @@ def _docx(project, path, settings, warnings):
                 for run in paragraph.runs:
                     set_font_family(run.font, "Consolas")
             else:
-                for run in paragraph.runs:
+                from docx.text.run import Run
+                # Hyperlinks and review containers hold real paragraph runs too.
+                # Do not inherit through a nested text-box/other paragraph story.
+                runs=[Run(r,paragraph) for r in paragraph._p.iter(qn('w:r')) if next((a for a in r.iterancestors() if a.tag==qn('w:p')),None) is paragraph._p]
+                for run in runs:
                     if attrs.get("fontFamily") and run.font.name is None:
                         set_font_family(run.font, str(attrs["fontFamily"])[:100])
                     if attrs.get("fontSize") and run.font.size is None:
@@ -1484,10 +1652,23 @@ def _docx(project, path, settings, warnings):
             if outline_list:
                 paragraph.paragraph_format.left_indent=Pt(outline_list[2]['indent']+(attrs.get('leftIndent') or 0))
                 paragraph.paragraph_format.first_line_indent=Pt((attrs.get('firstLineIndent') or 0)-outline_list[2]['hanging'])
+            elif list_info:
+                from .list_formatting import relative_list_level
+                spec=relative_list_level(list_info[1])
+                paragraph.paragraph_format.left_indent=Pt(spec['indent']+(attrs.get('leftIndent') or 0))
+                paragraph.paragraph_format.first_line_indent=Pt((attrs.get('firstLineIndent',attrs.get('indent')) or 0)-spec['hanging'])
             if attrs.get('revisionBreak'): revision_writer.paragraph_break(paragraph, attrs['revisionBreak'])
+            if attrs.get('revisionMove'):
+                if any(child['type'] in ('bookmark','bookmark_end') for child in node.get('content',[])):
+                    raise ValueError('Accept or reject moves containing bookmarks before Word export. Native Word review cannot yet retain their targets in both decisions.')
+                revision_writer.block_moves.append((paragraph._p,attrs['revisionMove']))
+            if attrs.get('revisionBlock') or list_change:revision_writer.block_changes.append((paragraph._p,attrs.get('revisionBlock') or list_change))
             if attrs.get('revisionProperties'):
                 from .paragraph_revisions import write_paragraph_revision
                 write_paragraph_revision(paragraph, attrs['revisionProperties'], revision_writer, settings['lineHeight'], warnings)
+            if item_marker:
+                from .list_item_boundaries import write_item_paragraph
+                write_item_paragraph(paragraph,*item_marker,document.styles,attrs.get('leftIndent') or 0)
             return
         _warn(warnings, f"DOCX flattened unsupported block '{kind}'.")
         for child in node.get("content", []):
@@ -1508,7 +1689,9 @@ def _docx(project, path, settings, warnings):
     for item in sections:
         for listing, previous in list_sequences({'content':item['blocks']}):
             attrs = listing.get('attrs', {})
-            continuation_numbers[id(listing)] = continuation_numbers[id(previous)] if previous is not None else list_numbering.create(True, attrs.get('order', 1), attrs.get('listStyle'))
+            continuation_numbers[id(listing)] = continuation_numbers[id(previous)] if previous is not None else list_numbering.create(True, attrs.get('order', 1), attrs.get('listStyle'),bool(attrs.get('continuePrevious')))
+    from .list_revisions import prepare_list_revisions
+    list_revision_numbers=prepare_list_revisions(sections,list_numbering,continuation_numbers,outline_lists,outline_bindings)
     if settings["includeToc"]:
         document.add_heading("Contents", 1)
         for i, item in enumerate(sections):
@@ -1549,13 +1732,23 @@ def _docx(project, path, settings, warnings):
         outline_bindings.update(bindings);outline_lists.update(lists)
         for listing,previous in list_sequences(body):
             attrs=listing.get('attrs',{})
-            continuation_numbers[id(listing)]=continuation_numbers[id(previous)] if previous is not None else list_numbering.create(True,attrs.get('order',1),attrs.get('listStyle'))
+            continuation_numbers[id(listing)]=continuation_numbers[id(previous)] if previous is not None else list_numbering.create(True,attrs.get('order',1),attrs.get('listStyle'),bool(attrs.get('continuePrevious')))
+        list_revision_numbers.update(prepare_list_revisions([{'blocks':body['content']}],list_numbering,continuation_numbers,outline_lists,outline_bindings))
     note_writer.finish(block,prepare_note_lists)
     from .watermark import write_watermarks
     write_watermarks(document,watermarks)
     from .text_direction import resolve_word_directions, complex_script_properties
     resolve_word_directions(document)
     complex_script_properties(document)
+    from .tracked_block_moves import add_word_table_terminator
+    add_word_table_terminator(document)
+    # The final document mark, like a cell-ending mark, cannot be deleted.
+    # Keep a generated ending outside a wholly inserted/deleted last block.
+    body_end = document._element.body[-2] if len(document._element.body) > 1 else None
+    if body_end is not None and any(paragraph is body_end for paragraph, _change in revision_writer.block_changes):
+        from .tracked_block_moves import mark_word_table_terminator
+        mark_word_table_terminator(document.add_paragraph()._p, document)
+    revision_writer.finish_moves(document._element)
     document.save(path)
 
 
@@ -1851,10 +2044,8 @@ def _pdf(project, path, settings, warnings):
                     commands.append(("SPAN", (col, r), (col + span - 1, r + height - 1)))
                 background = ca.get('background') or ('#eeeeee' if _kind(cell) == 'table_header' else None)
                 if background: commands.append(('BACKGROUND', start, end, colors.HexColor(background)))
-            repeat = 0
-            for row in rows:
-                if not row.get("content") or not all(_kind(cell) == "table_header" for cell in row["content"]): break
-                repeat += 1
+            from .table_formatting import repeating_header_rows
+            repeat = repeating_header_rows(rows)
             from .pdf_tables import RowBreakTable
             table = RowBreakTable(data, colWidths=widths, hAlign=(attrs.get('align') or 'left').upper(), splitByRow=0, splitInRow=1, repeatRows=repeat, minRowHeights=[row.get('attrs', {}).get('minHeight') or 0 for row in rows])
             table.setStyle(TableStyle(commands))
@@ -2040,11 +2231,15 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
             _warn(warnings, 'Review comments are omitted from this publication format; retain the Alder or DOCX document for review.')
     omitted = len({c["id"] for c in project.get("clips", [])} - set(ids))
     if omitted:
-        _warn(warnings, f"{omitted} draft clip(s) are outside the included collation and were not exported.")
+        _warn(warnings, f"{omitted:,} draft clip(s) are outside the included collation and were not exported.")
     if len(ids) != len(set(ids)):
         _warn(warnings, "The collation includes repeated draft placements; they are repeated in the output.")
     validation = {"status": "passed", "format": format}
     from .document_comments import walk as equation_walk
+    has_shapes=any(n.get('type')=='shape' for section in sections for n in equation_walk({'content':section['blocks']}))
+    if has_shapes:
+        if format in ('pdf','odt','rtf','azw3'):raise ValueError('Use desktop PDF, DOCX, HTML or EPUB for editable shapes. This conversion cannot retain them yet.')
+        if format in ('txt','md'):_warn(warnings,'This text format omits shapes; retain Alder, DOCX or desktop PDF for the graphics.')
     has_equations=any(n.get('type')=='equation' for section in sections for n in equation_walk({'content':section['blocks']}))
     if has_equations:
         if format in ('pdf','odt','rtf','azw3'):
@@ -2145,6 +2340,9 @@ def _asset_from_bytes(data, name, assets, warnings):
 def _import_html(content, warnings, assets, image_reader=None, link_reader=None, chapter_output=None):
     from bs4 import BeautifulSoup, NavigableString, Tag, Comment, Doctype, ProcessingInstruction
     soup = BeautifulSoup(content, "html.parser")
+    for element in soup.select('[data-revision-block-move],[data-revision-block]'):
+        if not re.fullmatch(r'p|h[1-6]|ol|ul|li|table|tr|td|th',element.name) or element.has_attr('data-revision-block-move') and element.has_attr('data-revision-block') or any(element.has_attr('data-revision-'+kind) for kind in ('insertion','deletion','format','break')):
+            raise ValueError('Invalid tracked paragraph move metadata. The original file has not been changed.')
     chapter_nodes, publication_nodes = set(), set()
     if soup.find(["script", "iframe", "object", "embed", "form"]):
         _warn(warnings, "Active HTML content was removed during import.")
@@ -2155,6 +2353,7 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
     _warn(warnings, "HTML import preserves semantic blocks and inline formatting; external CSS, scripts and exact page layout are not imported.")
 
     def paragraph_attributes(element):
+        from .tracked_block_moves import validate_block_move
         from .tab_stops import validate_tab_stops
         css = {key.lower(): value.strip() for key, value in re.findall(r'([\w-]+)\s*:\s*([^;]+)', element.get('style', ''))}
         from .paragraph_appearance import html_appearance
@@ -2178,6 +2377,10 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
         if element.has_attr('data-revision-paragraph'):
             from .paragraph_revisions import validate_paragraph_log
             log = json.loads(element['data-revision-paragraph']); validate_paragraph_log(log); attrs['revisionProperties'] = log
+        if element.has_attr('data-revision-block-move'):
+            move=json.loads(element['data-revision-block-move']);validate_block_move(move);attrs['revisionMove']=move
+        if element.has_attr('data-revision-block'):
+            change=json.loads(element['data-revision-block']);validate_block_move(change,False);attrs['revisionBlock']=change
         if re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', element.get('data-block-id', '')): attrs['blockId'] = element['data-block-id']
         if element.get('data-tab-stops') is not None:
             try: attrs['tabStops'] = validate_tab_stops(json.loads(element['data-tab-stops']))
@@ -2219,6 +2422,8 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
         if not isinstance(element, Tag):
             return []
         name = element.name.lower()
+        if element.has_attr('data-revision-move') and (element.get('data-revision-move')!='true' or name!='span' or sum(element.has_attr('data-revision-'+kind) for kind in ('insertion','deletion'))!=1):
+            raise ValueError('Invalid tracked-move metadata. The original file has not been changed.')
         if name == 'span':
             from .document_revisions import validate_revision, validate_break
             from .revision_formatting import validate_format_log
@@ -2228,6 +2433,7 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
             for kind in ('insertion', 'deletion'):
                 if element.has_attr('data-revision-' + kind):
                     stamp = {'id': element['data-revision-' + kind], 'author': element.get('data-revision-author', ''), 'date': element.get('data-revision-date', '')}
+                    if element.get('data-revision-move')=='true':stamp['move']=True
                     validate_revision(stamp); marks = marks + [{'type': 'revision_' + kind, 'attrs': stamp}]
             if element.has_attr('data-revision-format'):
                 log = json.loads(element['data-revision-format']); validate_format_log(log)
@@ -2267,6 +2473,9 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
             field['content']=canonical_content(field['content'])
             validate(field)
             return [field]
+        if name=='span' and element.has_attr('data-document-shape'):
+            from .document_shapes import properties
+            return [{'type':'shape','attrs':properties(json.loads(element['data-document-shape']))}]
         if name=='span' and element.has_attr('data-text-box'):
             from .text_boxes import properties,validate
             box={'type':'text_box','attrs':properties(json.loads(element['data-text-box'])),'content':[]}
@@ -2296,11 +2505,15 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
             return [{'type':'document_field','attrs':{'fieldKind':element['data-document-field'],'unresolved':element.get('data-field-unresolved')=='true',**({'mergeKey':element.get('data-merge-key')} if element['data-document-field']=='merge' else {})},'content':[{'type':'text','text':element.get_text()}] if element.get_text() else [],**({'marks':appearance} if appearance else {})}]
         if name == 'span' and re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', element.get('data-cross-reference', '')):
             format = element.get('data-reference-format', 'text')
-            return [{'type':'cross_reference', 'attrs':{'targetId':element['data-cross-reference'], 'referenceFormat':format if format in ('text','number','labelNumber','page') else 'text', 'unresolved':element.get('data-reference-unresolved') == 'true'}, 'content':[{'type':'text', 'text':element.get_text()}] if element.get_text() else []}]
+            parts=sum((inline(child,marks) for child in element.children),[])
+            appearance=next((part.get('marks',[]) for part in parts if part['type']=='text'),[])
+            return [{'type':'cross_reference', 'attrs':{'targetId':element['data-cross-reference'], 'referenceFormat':format if format in ('text','number','labelNumber','page') else 'text', 'unresolved':element.get('data-reference-unresolved') == 'true'}, 'content':[{'type':'text', 'text':element.get_text()}] if element.get_text() else [], **({'marks':appearance} if appearance else {})}]
         if name == 'span' and element.get('data-document-sequence') in ('Figure','Table') and re.fullmatch(r'[1-9][0-9]{0,5}',element.get_text()):
-            return [{'type':'sequence','attrs':{'sequenceName':element['data-document-sequence']},'content':[{'type':'text','text':element.get_text()}]}]
+            parts=sum((inline(child,marks) for child in element.children),[])
+            appearance=next((part.get('marks',[]) for part in parts if part['type']=='text'),[])
+            return [{'type':'sequence','attrs':{'sequenceName':element['data-document-sequence']},'content':[{'type':'text','text':element.get_text()}],**({'marks':appearance} if appearance else {})}]
         if name == "span" and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", element.get("data-document-bookmark", "")):
-            return [{"type":"bookmark","attrs":{"name":element["data-document-bookmark"], 'range': element.get('data-bookmark-range') == 'true'}}]
+            return [{"type":"bookmark","attrs":{"name":element["data-document-bookmark"], 'blockId':element["data-document-bookmark"], 'range': element.get('data-bookmark-range') == 'true'}}]
         if name == 'span' and re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', element.get('data-bookmark-end', '')):
             return [{'type':'bookmark_end','attrs':{'targetId':element['data-bookmark-end'],'name':element.get('data-bookmark-name','')}}]
         if name == "br":
@@ -2425,6 +2638,7 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
                     # project's named-style catalogue.
                     attrs = {'title':element.get('data-contents-title','Contents'), 'depth':int(element.get('data-contents-depth','3')), 'entryStyle':None, 'pageNumbers':element.get('data-contents-pages') != 'false'}
                     attrs['kind'] = element.get('data-contents-kind','headings')
+                    if attrs['kind']=='index':attrs.update(indexGroup=element.get('data-index-group') or None,useSortText=element.get('data-index-sort')!='false',indexLanguage=element.get('data-index-language') or None)
                     from .document_contents import validate_contents
                     validate_contents(attrs)
                     output.append({'type':'table_of_contents','attrs':attrs,'content':blocks(element) or [{'type':'paragraph'}]})
@@ -2442,11 +2656,11 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
                 elif name == "pre":
                     output.append({"type":"code_block", "attrs": paragraph_attributes(element), "content":[{"type":"text", "text":element.get_text()}]})
                 elif name in ("ul", "ol"):
-                    items = [{"type":"list_item", "content":blocks(child) or [{"type":"paragraph"}]} for child in element.find_all("li", recursive=False)]
+                    items = [{"type":"list_item", "attrs":{k:v for k,v in paragraph_attributes(child).items() if k in ('blockId','revisionMove','revisionBlock')}, "content":blocks(child) or [{"type":"paragraph"}]} for child in element.find_all("li", recursive=False)]
                     from .list_formatting import NUMBER_FORMATS, BULLETS
                     marker = re.search(r'(?:^|;)\s*list-style-type\s*:\s*([\w-]+)', element.get('style', ''))
                     marker = marker.group(1) if marker else {'a':'lower-alpha', 'A':'upper-alpha', 'i':'lower-roman', 'I':'upper-roman', '1':'decimal'}.get(element.get('type'))
-                    attrs = {'order':int(_number(element.get('start' if name=='ol' else 'data-list-start'),1,1,1000000000))}
+                    attrs = {**{k:v for k,v in paragraph_attributes(element).items() if k in ('blockId','revisionMove','revisionBlock','revisionProperties')},'order':int(_number(element.get('start' if name=='ol' else 'data-list-start'),1,1,1000000000))}
                     if element.get('data-list-template'):
                         from .outline_lists import validate_list_template
                         template=json.loads(element['data-list-template']);validate_list_template(template);attrs['listTemplate']=template
@@ -2463,9 +2677,19 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
                             continue
                         cells = []
                         for cell in row.find_all(["td", "th"], recursive=False):
-                            cells.append({"type":"table_header" if cell.name == "th" else "table_cell", "attrs":{**html_table_attributes('table_cell', cell), "colspan":int(_number(cell.get("colspan"),1,1,100)), "rowspan":int(_number(cell.get("rowspan"),1,1,100))}, "content":blocks(cell) or [{"type":"paragraph"}]})
-                        rows.append({"type":"table_row", "attrs":html_table_attributes('table_row', row), "content":cells})
+                            cell_attrs={**html_table_attributes('table_cell', cell), "colspan":int(_number(cell.get("colspan"),1,1,100)), "rowspan":int(_number(cell.get("rowspan"),1,1,100))}
+                            if cell.has_attr('data-revision-paragraph'):cell_attrs['revisionProperties']=paragraph_attributes(cell)['revisionProperties']
+                            if cell.has_attr('data-revision-block'):cell_attrs['revisionBlock']=paragraph_attributes(cell)['revisionBlock']
+                            cells.append({"type":"table_header" if cell.name == "th" else "table_cell", "attrs":cell_attrs, "content":blocks(cell) or [{"type":"paragraph"}]})
+                        row_attrs=html_table_attributes('table_row', row)
+                        if row.has_attr('data-revision-paragraph'):row_attrs['revisionProperties']=paragraph_attributes(row)['revisionProperties']
+                        if row.has_attr('data-revision-block'):row_attrs['revisionBlock']=paragraph_attributes(row)['revisionBlock']
+                        if row.has_attr('data-revision-block-move'):row_attrs['revisionMove']=paragraph_attributes(row)['revisionMove']
+                        rows.append({"type":"table_row", "attrs":row_attrs, "content":cells})
                     table_attrs=html_table_attributes('table', element)
+                    if element.has_attr('data-revision-paragraph'):table_attrs['revisionProperties']=paragraph_attributes(element)['revisionProperties']
+                    if element.has_attr('data-revision-block-move'):table_attrs['revisionMove']=paragraph_attributes(element)['revisionMove']
+                    if element.has_attr('data-revision-block'):table_attrs['revisionBlock']=paragraph_attributes(element)['revisionBlock']
                     if re.fullmatch(r'[A-Za-z0-9_.-]{1,128}',element.get('data-object-id','')):table_attrs['blockId']=element['data-object-id']
                     output.append({"type":"table", "attrs":table_attrs, "content":rows})
                 elif name == "hr":
@@ -2510,6 +2734,13 @@ def _import_docx(path, warnings, assets):
         for name in ('word/footnotes.xml','word/endnotes.xml'):
             if name in names: _xml(archive.read(name))
     doc = Document(path)
+    from .docx_import_styles import cached_import_styles
+    with cached_import_styles(doc):
+        return _read_docx(doc, path, warnings, assets, comment_reader)
+
+
+def _read_docx(doc, path, warnings, assets, comment_reader):
+    from docx.oxml.ns import qn
     if doc.settings.element.find(qn('w:mailMerge')) is not None:
         _warn(warnings, 'Word merge fields are retained, but external data connections and queries are not used. Choose a local CSV in Mail merge.')
     from .document_notes import WordNotesReader
@@ -2526,11 +2757,26 @@ def _import_docx(path, warnings, assets):
     revision_reader = WordRevisionReader(doc._element)
     from .docx_support import NumberingReader, paragraph_attributes
     list_numbering = NumberingReader(doc)
+    from .list_revisions import ListRevisionReader
+    list_revisions=ListRevisionReader(doc,revision_reader)
+    inserted_numbering_counts={}
     imported_bookmarks = {}
     imported_reference_names = {}
     _warn(warnings, "DOCX import preserves body order, text, basic marks, headings, paragraph flow, ordinary list numbering, tables, comments, supported fields, formatted running paragraphs and embedded raster images; exact layout, complex multilevel labels and unsupported fields are not retained.")
     def paragraph(p):
         content = []
+        def read_note(element):
+            # A conversion at both move ends could look equal after losing the
+            # same note structure. Reject every lossy note import in a move.
+            if p._p not in revision_reader.block_moves:return note_reader.reference(element, paragraph, container)
+            previous_warnings=list(warnings);warnings.clear()
+            try:
+                note=note_reader.reference(element, paragraph, container, strict=True)
+            finally:
+                note_warnings=list(warnings);warnings[:]=list(dict.fromkeys(previous_warnings+note_warnings))
+            if note_warnings:
+                raise ValueError('A note in this tracked paragraph move could not be retained. The original file has not been changed.')
+            return note
         from .document_references import normalise_docx_fields
         normalise_docx_fields(p._p, warnings)
         def visit(element, inherited=None):
@@ -2542,7 +2788,7 @@ def _import_docx(path, warnings, assets):
                 if inherited:raise ValueError('Resolve tracked or linked equations in the source before importing.')
                 content.append(from_word(element));return
             if tag=='sdt':
-                citation=citation_reader.inline(element)
+                citation=citation_reader.inline(element,strict=p._p in revision_reader.block_moves)
                 if citation is not None:
                     content.append(citation);return
                 from .form_fields import read_word as read_form_field
@@ -2551,10 +2797,10 @@ def _import_docx(path, warnings, assets):
                     if any(m['type'].startswith('revision_') for m in inherited):raise ValueError('Tracked form fields are not supported. Resolve changes in the source before importing.')
                     content.append(field);return
             if tag in ('footnoteReference','endnoteReference'):
-                content.append(note_reader.reference(element, paragraph, container))
+                content.append(read_note(element))
                 return
             if tag in ('footnoteRef','endnoteRef'): return
-            if tag in ('ins', 'del'):
+            if tag in ('ins', 'del', 'moveFrom', 'moveTo'):
                 inherited = inherited + [revision_reader.mark(element)]
             if tag in ('commentRangeStart', 'commentRangeEnd', 'commentReference'):
                 anchor = comment_reader.anchor(element)
@@ -2578,17 +2824,27 @@ def _import_docx(path, warnings, assets):
                     from .document_fields import read_merge_key
                     content.append({'type':'document_field','attrs':{'fieldKind':field_kind,**({'mergeKey':read_merge_key(instruction)} if field_kind=='merge' else {})},'content':[{'type':'text','text':value}] if value else [],**({'marks':marks} if marks else {})})
                     return
-                sequence = re.fullmatch(r'SEQ\s+(Figure|Table)(?:\s+\\\*\s+ARABIC)?\s*',instruction,re.I)
+                from .document_captions import sequence_instruction
+                sequence = sequence_instruction(instruction)
                 if sequence:
                     value = ''.join(t.text or '' for t in element.iter(qn('w:t'))).strip()
                     if re.fullmatch(r'[1-9][0-9]{0,5}',value):
-                        content.append({'type':'sequence','attrs':{'sequenceName':sequence[1].title()},'content':[{'type':'text','text':value}]})
+                        start=len(content)
+                        for child in element:visit(child,inherited)
+                        marks=next((child.get('marks',[]) for child in content[start:] if child['type']=='text'),[])
+                        del content[start:]
+                        content.append({'type':'sequence','attrs':{'sequenceName':sequence[1].title()},'content':[{'type':'text','text':value}],**({'marks':marks} if marks else {})})
                         return
-                match = re.fullmatch(r'(?:REF|PAGEREF|NOTEREF)\s+"?([A-Za-z_][A-Za-z0-9_]{0,39})"?(?P<switches>(?:\s+\\[hw])*)(?:\s+\\\*\s+(?:MERGEFORMAT|CHARFORMAT))?\s*', instruction, re.I)
+                from .document_references import reference_instruction
+                match = reference_instruction(instruction)
                 if match:
                     value = ''.join(t.text or '' for t in element.iter(qn('w:t')))
                     target = imported_reference_names.get(match[1], match[1])
-                    content.append({'type':'cross_reference', 'attrs':{'targetId':target, **({'referenceFormat':'page'} if instruction.upper().startswith('PAGEREF') else {'referenceFormat':'number'} if instruction.upper().startswith('NOTEREF') or '\\w' in match['switches'].lower() else {})}, 'content':[{'type':'text','text':value}] if value else []})
+                    start=len(content)
+                    for child in element:visit(child,inherited)
+                    marks=next((child.get('marks',[]) for child in content[start:] if child['type']=='text'),[])
+                    del content[start:]
+                    content.append({'type':'cross_reference', 'attrs':{'targetId':target, **({'referenceFormat':'page'} if instruction.upper().startswith('PAGEREF') else {'referenceFormat':'number'} if instruction.upper().startswith('NOTEREF') or '\\w' in match['switches'].lower() else {})}, 'content':[{'type':'text','text':value}] if value else [], **({'marks':marks} if marks else {})})
                     return
                 _warn(warnings, 'An unsupported Word field was imported as its displayed text.')
             if tag == "bookmarkStart":
@@ -2641,7 +2897,7 @@ def _import_docx(path, warnings, assets):
                 for child in run_children:
                     child_tag = child.tag.rsplit("}",1)[-1]
                     if child_tag in ('footnoteReference','endnoteReference'):
-                        content.append(note_reader.reference(child, paragraph, container))
+                        content.append(read_note(child))
                     elif child_tag in ("t", "delText") and child.text:
                         content.append({"type":"text","text":child.text, **({"marks":marks} if marks else {})})
                     elif child_tag in ("br", "cr"):
@@ -2650,6 +2906,9 @@ def _import_docx(path, warnings, assets):
                     elif child_tag == "tab":
                         content.append({"type":"text","text":"\t", **({'marks':marks} if marks else {})})
                     elif child_tag in ("drawing","pict"):
+                        from .document_shapes import read_word as read_shape
+                        shape=read_shape(child)
+                        if shape is not None:content.append(shape);continue
                         from .text_boxes import read_word as read_text_box
                         boxes=read_text_box(child,paragraph,p._parent,warnings)
                         if boxes is not None:
@@ -2707,6 +2966,18 @@ def _import_docx(path, warnings, assets):
         heading = heading_level if 1 <= heading_level <= 6 else 0
         node = {"type":"heading" if heading else "paragraph", "content":content}
         attrs = paragraph_attributes(p, warnings)
+        if p._p in revision_reader.block_moves:
+            if len(list(p._p.iter(qn('w:sdt')))) != sum(c['type'] in ('form_field','citation') for c in content):
+                raise ValueError('A control in this tracked paragraph move could not be retained. The original file has not been changed.')
+            if len(list(p._p.iter(qn('w:fldSimple')))) != sum(c['type'] in ('document_field','cross_reference','index_entry','sequence') for c in content):
+                raise ValueError('A field in this tracked paragraph move could not be retained. The original file has not been changed.')
+            if sum(len(list(p._p.iter(qn('w:'+kind+'Reference')))) for kind in ('footnote','endnote')) != sum(c['type']=='document_note' for c in content):
+                raise ValueError('A note in this tracked paragraph move could not be retained. The original file has not been changed.')
+            if len(list(p._p.iter(qn('w:drawing')))) != sum(c['type'] in ('inline_image','shape','text_box') for c in content):
+                raise ValueError('An object in this tracked paragraph move could not be retained. The original file has not been changed.')
+            move=revision_reader.block_moves[p._p];attrs.update(revisionMove=move,blockId=move['originalId'] if move['kind']=='insertion' else 'block_'+uuid.uuid4().hex)
+        if p._p in revision_reader.block_changes:
+            change=revision_reader.block_changes[p._p];attrs.update(revisionBlock=change,blockId=change['originalId'])
         from .paragraph_revisions import read_paragraph_revision
         reviewed_properties = read_paragraph_revision(p, revision_reader, warnings)
         if reviewed_properties: attrs['revisionProperties'] = reviewed_properties
@@ -2740,13 +3011,15 @@ def _import_docx(path, warnings, assets):
                 _warn(warnings, 'Column section breaks are converted to next-page sections.')
             from .running_matter import read_running_matter
             output.append({'type':'section_break', 'attrs':{'kind':kind, 'page':docx_page_settings(doc, warnings, following), 'runningMatter':read_running_matter(following,paragraph,warnings,container=container), 'noteOptions':note_reader.section_options[section_index] if note_reader.section_options[section_index]!=note_reader.section_options[section_index-1] else None, **read_docx_numbering(following, warnings)}})
-    def container(item, main_story=False):
+    independent_outline_roots=set()
+    def container(item, main_story=False, outline_inset=0, previous_lists=None, root_scope=None):
         nonlocal section_index
         main_story=main_story or item is doc
         from docx.table import Table
         from docx.text.paragraph import Paragraph
         output, stack = [], []
-        previous_lists = {}
+        from .list_item_boundaries import read_item_paragraph, fail_item_boundary
+        if previous_lists is None:previous_lists = {}
         root = item._element.body if item is doc else item._element
         def children(root):
             from .word_contents import indexed_children
@@ -2755,8 +3028,37 @@ def _import_docx(path, warnings, assets):
                     yield element
                     continue
                 if element.tag == qn('w:p'): yield Paragraph(element, item)
-                elif element.tag == qn('w:tbl'): yield Table(element, item)
+                elif element.tag == qn('w:tbl'):
+                    from .list_item_objects import lift_table
+                    level=lift_table(element)
+                    yield Table(element,item) if level is None else (level,Table(element,item))
                 elif element.tag == qn('w:sdt'):
+                    from .nested_outline import boundary as outline_boundary
+                    outline=outline_boundary(element)
+                    if outline is not None:
+                        parent_level,inset,continued,nested=outline
+                        active=next((entry for entry in reversed(stack) if entry[0]==parent_level),None)
+                        if active is None:raise ValueError('An independent Word outline is detached from its enclosing list item.')
+                        from docx.blkcntnr import BlockItemContainer
+                        target=active[2]['content'][-1]['content']
+                        preceding=list(list_revisions.outline_predecessors.get(id(target),[]))
+                        nodes=container(BlockItemContainer(nested,item),outline_inset=inset,previous_lists=previous_lists,root_scope=id(target))
+                        if not nodes or nodes[0]['type'] not in ('ordered_list','bullet_list'):
+                            raise ValueError('An independent Word outline has lost its numbering boundary.')
+                        independent_outline_roots.add(id(nodes[0]))
+                        def template_key(template):return [{k:v for k,v in spec.items() if index or k!='start'} for index,spec in enumerate(template)]
+                        from .nested_outline import number_continuation
+                        number = list_revisions.groups[id(nodes[0])][3]
+                        if nodes[0]['attrs'].get('listTemplate') and number_continuation(list_numbering,number) is None and continued and not any(template_key(t)==template_key(nodes[0]['attrs']['listTemplate']) for t in preceding):
+                            nodes[0]['attrs']['continuePrevious']=True
+                            list_revisions.continuation_hints.add(id(nodes[0]))
+                        for nested_node in nodes:yield parent_level,nested_node
+                        continue
+                    from .list_item_objects import read_table as read_list_table
+                    list_table=read_list_table(element)
+                    if list_table is not None:
+                        yield list_table[0],Table(list_table[1],item)
+                        continue
                     chapter=book_reader.chapter(element) if main_story else None
                     if chapter is not None:
                         from docx.blkcntnr import BlockItemContainer
@@ -2785,11 +3087,32 @@ def _import_docx(path, warnings, assets):
                         nested = element.find(qn('w:sdtContent'))
                         if nested is not None: yield from children(nested)
         for child in children(root):
+            list_object_level=None
+            if isinstance(child,tuple):list_object_level,child=child
             if isinstance(child, dict):
-                stack = []; output.append(child); continue
+                if list_object_level is None:stack = []; output.append(child)
+                else:
+                    active=next((i for i,entry in enumerate(stack) if entry[0]==list_object_level),None)
+                    if active is None:fail_item_boundary()
+                    stack=stack[:active+1];stack[-1][2]['content'][-1]['content'].append(child)
+                continue
             if isinstance(child, Paragraph):
+                from .tracked_block_moves import word_table_terminator
+                if word_table_terminator(child._p):continue
+                native_move=revision_reader.block_moves.get(child._p)
+                original_counts=list_revisions.numbering.counts
+                if native_move and native_move['kind']=='insertion':list_revisions.numbering.counts=inserted_numbering_counts.setdefault(native_move['stamp']['id'],original_counts.copy())
+                try:list_revision=list_revisions.paragraph(child)
+                finally:
+                    if native_move and native_move['kind']=='insertion':list_revisions.numbering.counts=original_counts
+                list_revisions.moved_numbering(list_revision,native_move)
                 node = paragraph(child)
-                info = list_numbering.info(child)
+                # A displayed move source contributes only to the original
+                # numbering chain; its destination contributes only to final.
+                info = list_revision[0] if native_move and native_move['kind']=='deletion' and list_revision else None if native_move and native_move['kind']=='deletion' else list_numbering.info(child)
+                if list_revision and not info:raise ValueError('This Word list revision removes a list boundary that cannot yet be retained. The original file has not been changed.')
+                item_boundary = read_item_paragraph(child)
+                if item_boundary and info:fail_item_boundary()
                 if node['type'] == 'heading' and info:
                     from .heading_numbering import read_heading_numbering
                     numbered_heading = read_heading_numbering(list_numbering, child, info)
@@ -2798,6 +3121,17 @@ def _import_docx(path, warnings, assets):
                         info = None
                 section_end = child._p.pPr is not None and child._p.pPr.sectPr is not None and main_story
                 if not info:
+                    if item_boundary:
+                        level,base_indent=item_boundary
+                        active=next((i for i,entry in enumerate(stack) if entry[0]==level),None)
+                        if active is None or section_end:fail_item_boundary()
+                        stack=stack[:active+1]
+                        props=node.setdefault('attrs',{})
+                        if props.get('leftIndent') is not None:props['leftIndent']=round(props['leftIndent']-base_indent,6)
+                        list_revisions.joined_item(node,child._p,stack[-1][1],level)
+                        stack[-1][2]['content'][-1]['content'].append(node)
+                        list_revisions.continuation(stack[-1][2],child._p)
+                        continue
                     stack = []
                     if not section_end or node.get('content'):
                         output.append(node)
@@ -2807,9 +3141,16 @@ def _import_docx(path, warnings, assets):
                 number, level, kind, start, marker = info
                 from .outline_lists import read_word_template
                 outline_template = read_word_template(list_numbering,number)
-                if outline_template:
-                    props=node.setdefault('attrs',{});spec=outline_template[level]
-                    if props.get('leftIndent') is not None:props['leftIndent']-=spec['indent']
+                from .nested_outline import number_inset
+                native_inset=number_inset(list_numbering,number)
+                from .nested_list_conversion import ordinary_depth
+                ordinary_base=ordinary_depth(list_numbering,number)
+                from .list_formatting import word_relative_list,relative_list_level
+                if (outline_template or ordinary_base or outline_inset) and (relative_list_level(ordinary_base-1)['indent'] if ordinary_base else native_inset)!=outline_inset:
+                    raise ValueError('An independent Word outline is missing its enclosing boundary. The original file has not been changed.')
+                if outline_template or word_relative_list(list_numbering,number):
+                    props=node.setdefault('attrs',{});spec=outline_template[level] if outline_template else relative_list_level(level+ordinary_base)
+                    if props.get('leftIndent') is not None:props['leftIndent']-=spec['indent']+native_inset
                     if props.get('firstLineIndent') is not None:props['firstLineIndent']+=spec['hanging']
                 while stack and (stack[-1][0] > level or (stack[-1][0] == level and stack[-1][1] != number)):
                     stack.pop()
@@ -2818,24 +3159,54 @@ def _import_docx(path, warnings, assets):
                     listing = {"type": kind, "content": []}
                     listing['attrs'] = {'listStyle': marker, **({'order': start} if kind == 'ordered_list' or outline_template else {})}
                     if outline_template and level==0:listing['attrs']['listTemplate']=outline_template
-                    scope = (id(target), marker)
-                    if (kind == 'ordered_list' or outline_template) and previous_lists.get(scope) == number:
+                    scope = (root_scope if target is output and root_scope is not None else id(target), marker)
+                    old_info=list_revision[0] if list_revision else info
+                    original_scope=(scope[0],old_info[4],'original') if old_info else None
+                    previous=previous_lists.get(original_scope if native_move and native_move['kind']=='deletion' else scope)
+                    from .list_formatting import word_list_continuation
+                    from .nested_outline import number_continuation
+                    if (kind == 'ordered_list' or outline_template) and (previous == number or word_list_continuation(list_numbering,number) or outline_template and level==0 and number_continuation(list_numbering,number)):
                         listing['attrs']['continuePrevious'] = True
-                    if kind == 'ordered_list' or outline_template: previous_lists[scope] = number
+                    if kind == 'ordered_list' or outline_template:
+                        if not native_move or native_move['kind']!='deletion':previous_lists[scope] = number
+                        if original_scope and (not native_move or native_move['kind']!='insertion'):previous_lists[original_scope]=old_info[0]
                     target.append(listing)
                     stack.append((level, number, listing))
                 stack[-1][2]["content"].append({"type": "list_item", "content": [node]})
+                list_revisions.item(stack[-1][2],list_revision,level,id(stack[-2][2]['content'][-1]['content']) if len(stack)>1 else root_scope if root_scope is not None else id(output),number)
                 if section_end:
                     append_section(child, output)
                     stack = []
             elif isinstance(child, Table):
-                stack = []
+                if list_object_level is None:stack=[]
+                else:
+                    active=next((i for i,entry in enumerate(stack) if entry[0]==list_object_level),None)
+                    if active is None:fail_item_boundary()
+                    stack=stack[:active+1]
                 from .docx_support import import_table
-                output.append(import_table(child, container, warnings))
+                table_notices=[]
+                imported_table=import_table(child, container, table_notices, revision_reader.row_changes,revision_reader.cell_changes,revision_reader.table_formats)
+                from .tracked_block_moves import identity_nodes
+                if table_notices and any(n.get('attrs',{}).get('revisionMove') or n.get('attrs',{}).get('revisionBlock') or n.get('attrs',{}).get('revisionProperties') for n in identity_nodes(imported_table)):
+                    raise ValueError('This tracked Word table needs a layout conversion. Review its move before importing; the original file has not been changed.')
+                for message in table_notices:_warn(warnings,message)
+                if list_object_level is None:output.append(imported_table)
+                else:stack[-1][2]['content'][-1]['content'].append(imported_table)
         return output
     from .page_geometry import docx_page_settings
     imported = {"type":"doc", "content":container(doc) or [{"type":"paragraph"}]}
+    list_revisions.finish()
     comment_reader.finish(imported)
+    from .document_comments import mirror_word_move_comments
+    mirror_word_move_comments(imported)
+    from .tracked_block_moves import restore_word_list_moves
+    restore_word_list_moves(imported,independent_outline_roots)
+    from .list_boundary_numbering import reunite_moved_numbering
+    reunite_moved_numbering(list_revisions.groups)
+    from .list_item_revisions import restore_word_item_changes
+    restore_word_item_changes(imported)
+    from .list_boundary_numbering import reunite_boundary_numbering
+    reunite_boundary_numbering(list_revisions.groups)
     if book_chapters:
         # Additional Word prose outside the managed groups remains in its
         # actual position as an ordinary chapter, including title/contents pages.
@@ -3030,6 +3401,8 @@ def import_document(path: Path) -> dict:
     restore_contents_links(document)
     from .document_notes import restore_note_references
     restore_note_references(document)
+    from .document_bookmarks import restore_moved_bookmark_names
+    restore_moved_bookmark_names(document)
     from .document_comments import walk as citation_walk
     citation_styles={node.get('attrs',{}).get('renderedStyle','apa') for node in citation_walk(document) if node.get('type') in ('citation','bibliography')}
     if citation_styles:

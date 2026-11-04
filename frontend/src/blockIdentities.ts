@@ -1,8 +1,13 @@
 import { Fragment, type Node as PMNode } from "prosemirror-model";
 import { Plugin } from "prosemirror-state";
+import { movedInlineAliases } from "./movedInlineAliases";
 
 /** Identity belongs to a block, never its current position or page. */
 export function identifiedDocument(doc: PMNode): PMNode {
+  const movedBookmarks = movedInlineAliases(doc.toJSON(), "bookmark");
+  const movedComments = movedInlineAliases(doc.toJSON(), "comment_anchor");
+  const commentThreads = new Map<string, string>();
+  const bookmarkNames = new Map<string, string>();
   const seen = new Set<string>();
   const names = new Set<string>();
   const destinations = new Map<string, string>();
@@ -12,7 +17,7 @@ export function identifiedDocument(doc: PMNode): PMNode {
     commentCopies = new Map<string, string>();
   const walk = (node: PMNode): PMNode => {
     let result = node;
-    if (node.type.name === "comment_anchor") {
+    if (node.type.name === "comment_anchor" && !movedComments.has(node.attrs.blockId)) {
       let id = node.attrs.threadId;
       if (node.attrs.edge === "start") {
         if (commentIds.has(id))
@@ -27,6 +32,7 @@ export function identifiedDocument(doc: PMNode): PMNode {
           node.content,
           node.marks,
         );
+      commentThreads.set(node.attrs.blockId, id);
     }
     if (Object.hasOwn(node.attrs, "blockId")) {
       const id = node.attrs.blockId;
@@ -42,18 +48,19 @@ export function identifiedDocument(doc: PMNode): PMNode {
       let name = String(node.attrs.name),
         suffix = 1;
       const base = name;
-      while (names.has(name.toLowerCase())) {
+      while (!movedBookmarks.has(node.attrs.blockId) && names.has(name.toLowerCase())) {
         const tail = `_${++suffix}`;
         name = base.slice(0, 40 - tail.length) + tail;
       }
-      names.add(name.toLowerCase());
+      if (!movedBookmarks.has(node.attrs.blockId)) names.add(name.toLowerCase());
+      bookmarkNames.set(node.attrs.blockId, name);
       if (name !== result.attrs.name)
         result = result.type.create(
           { ...result.attrs, name },
           result.content,
           result.marks,
         );
-      destinations.set(name, result.attrs.blockId);
+      if (!movedBookmarks.has(node.attrs.blockId)) destinations.set(name, result.attrs.blockId);
       if (node.attrs.blockId)
         ranges.set(node.attrs.blockId, { id: result.attrs.blockId, name });
     }
@@ -94,7 +101,21 @@ export function identifiedDocument(doc: PMNode): PMNode {
     });
     return changed ? result.copy(Fragment.fromArray(children)) : result;
   };
-  const identified = walk(doc);
+  let identified = walk(doc);
+  if (movedBookmarks.size || movedComments.size) {
+    const namesForGhosts = new Map([...movedBookmarks].map(([ghost, live]) => [ghost, bookmarkNames.get(live)]));
+    const restore = (node: PMNode): PMNode => {
+      const threadId = node.type.name === 'comment_anchor' ? commentThreads.get(movedComments.get(node.attrs.blockId) || '') : undefined;
+      if (threadId && threadId !== node.attrs.threadId)
+        return node.type.create({ ...node.attrs, threadId }, node.content, node.marks);
+      const name = namesForGhosts.get(node.type.name === "bookmark" ? node.attrs.blockId : node.type.name === "bookmark_end" ? node.attrs.targetId : "");
+      const children: PMNode[] = [];let changed = false;
+      node.forEach(child => { const next = restore(child);children.push(next);changed ||= next !== child; });
+      if (name && name !== node.attrs.name) return node.type.create({ ...node.attrs, name }, node.content, node.marks);
+      return changed ? node.copy(Fragment.fromArray(children)) : node;
+    };
+    identified = restore(identified);
+  }
   const bindings = new Map(
     [...links]
       .filter((target) => !seen.has(target) && destinations.has(target))
@@ -167,6 +188,7 @@ export function blockIdentities() {
               node.attrs.targetId !==
                 state.doc.nodeAt(position)?.attrs.targetId ||
               node.attrs.name !== state.doc.nodeAt(position)?.attrs.name)) ||
+          (node.type.name === 'comment_anchor' && node.attrs.threadId !== state.doc.nodeAt(position)?.attrs.threadId) ||
           (node.type.name === "document_note" &&
             node.attrs.body !== state.doc.nodeAt(position)?.attrs.body)
         )

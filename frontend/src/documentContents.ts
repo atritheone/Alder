@@ -2,9 +2,14 @@ import type { NodeSpec, Node as PMNode } from "prosemirror-model";
 import { Plugin, type EditorState, NodeSelection } from "prosemirror-state";
 import { closeHistory, isHistoryTransaction } from "prosemirror-history";
 import type { DocNode } from "./types";
+import {
+  identifiedGeneratedContents,
+  generatedLabelAttrs,
+} from "./generatedIdentities";
 import { documentText } from "./textProjection";
 import type { ReferenceIndex } from "./documentReferences";
-import {refreshedIndex} from './documentIndex';
+import { refreshedIndex, validIndexGroup } from "./documentIndex";
+import { validIndexLanguage } from "./indexCollation";
 
 export type ContentsOptions = {
   kind?: "headings" | "figures" | "tables" | "index";
@@ -12,6 +17,9 @@ export type ContentsOptions = {
   depth: number;
   entryStyle: string | null;
   pageNumbers?: boolean;
+  indexGroup?: string | null;
+  useSortText?: boolean;
+  indexLanguage?: string | null;
 };
 export const contentsSpec: NodeSpec = {
   group: "block",
@@ -26,6 +34,9 @@ export const contentsSpec: NodeSpec = {
     entryStyle: { default: null },
     pageNumbers: { default: true },
     kind: { default: "headings" },
+    indexGroup: { default: null },
+    useSortText: { default: true },
+    indexLanguage: { default: null },
   },
   parseDOM: [
     {
@@ -36,6 +47,9 @@ export const contentsSpec: NodeSpec = {
         entryStyle: dom.getAttribute("data-contents-style") || null,
         pageNumbers: dom.getAttribute("data-contents-pages") !== "false",
         kind: dom.getAttribute("data-contents-kind") || "headings",
+        indexGroup: dom.getAttribute("data-index-group") || null,
+        useSortText: dom.getAttribute("data-index-sort") !== "false",
+        indexLanguage: dom.getAttribute("data-index-language") || null,
       }),
     },
   ],
@@ -48,6 +62,9 @@ export const contentsSpec: NodeSpec = {
       "data-contents-style": n.attrs.entryStyle,
       "data-contents-pages": String(n.attrs.pageNumbers),
       "data-contents-kind": n.attrs.kind,
+      "data-index-group": n.attrs.indexGroup,
+      "data-index-sort": String(n.attrs.useSortText),
+      "data-index-language": n.attrs.indexLanguage,
       class: "document-contents",
       contenteditable: "false",
       "aria-label": "Table of contents",
@@ -57,6 +74,9 @@ export const contentsSpec: NodeSpec = {
 };
 export function validContentsOptions(value: ContentsOptions) {
   return (
+    validIndexGroup(value.indexGroup) &&
+    validIndexLanguage(value.indexLanguage) &&
+    (value.useSortText == null || typeof value.useSortText === "boolean") &&
     (value.kind == null ||
       ["headings", "figures", "tables", "index"].includes(value.kind)) &&
     (value.pageNumbers == null || typeof value.pageNumbers === "boolean") &&
@@ -74,9 +94,20 @@ const field = (
   targetId: string,
   text: string,
   referenceFormat = "text",
+  prior?: DocNode,
 ): DocNode => ({
   type: "cross_reference",
-  attrs: { targetId, referenceFormat },
+  attrs: {
+    targetId,
+    referenceFormat,
+    blockId:
+      prior?.content?.find(
+        (child) =>
+          child.type === "cross_reference" &&
+          child.attrs?.targetId === targetId &&
+          child.attrs?.referenceFormat === referenceFormat,
+      )?.attrs?.blockId ?? null,
+  },
   content: [{ type: "text", text }],
 });
 /** Refresh only on request; stable target identities retain entry formatting. */
@@ -96,7 +127,7 @@ export function refreshedContents(
   const options = node.attrs as ContentsOptions;
   if (!validContentsOptions(options))
     throw new Error("Invalid table of contents settings.");
-  if(options.kind==='index')return refreshedIndex(node,index.indexEntries);
+  if (options.kind === "index") return refreshedIndex(node, index.indexEntries);
   const previous = new Map(
     (node.content || []).flatMap((entry) => {
       const target = entry.content?.find((n) => n.type === "cross_reference")
@@ -108,7 +139,7 @@ export function refreshedContents(
     ? [
         {
           type: "paragraph",
-          attrs: { keepWithNext: true },
+          attrs: { ...generatedLabelAttrs(node, true), keepWithNext: true },
           content: [
             { type: "text", text: options.title, marks: [{ type: "strong" }] },
           ],
@@ -142,9 +173,12 @@ export function refreshedContents(
       },
       content: [
         ...(number
-          ? [field(target.id, number, "number"), { type: "text", text: " " }]
+          ? [
+              field(target.id, number, "number", prior),
+              { type: "text", text: " " },
+            ]
           : []),
-        field(target.id, text),
+        field(target.id, text, "text", prior),
         ...(options.pageNumbers !== false
           ? [
               { type: "text", text: "\t" },
@@ -158,6 +192,7 @@ export function refreshedContents(
                   ) || { type: "text", text: "—" },
                 ),
                 "page",
+                prior,
               ),
             ]
           : []),
@@ -167,6 +202,7 @@ export function refreshedContents(
   if (!content.length || content.length === (options.title ? 1 : 0))
     content.push({
       type: "paragraph",
+      attrs: generatedLabelAttrs(node, false),
       content: [
         {
           type: "text",
@@ -179,7 +215,7 @@ export function refreshedContents(
         },
       ],
     });
-  const next = { ...node, content };
+  const next = identifiedGeneratedContents({ ...node, content });
   return JSON.stringify(next) === JSON.stringify(node) ? node : next;
 }
 export function selectedContents(state: EditorState): PMNode | null {
@@ -207,8 +243,36 @@ export function insertContents(state: EditorState, node: DocNode) {
     .scrollIntoView();
 }
 /** Generated prose can be moved/deleted as a whole, never partly rewritten. */
-export const protectContents = () =>
-  new Plugin({
+export const protectContents = () => {
+  let pointerTarget: PMNode | null = null;
+  return new Plugin({
+    props: {
+      handleDOMEvents: {
+        mousedown(view, event) {
+          pointerTarget = null;
+          const element = event.target instanceof Element ? event.target.closest("[data-document-contents]") : null;
+          if (event.button === 0 && element && view.dom.contains(element)) {
+            const position = view.state.doc.resolve(view.posAtDOM(element, 0));
+            for (let depth = position.depth; depth > 0; depth--)
+              if (position.node(depth).type.name === "table_of_contents") {
+                pointerTarget = position.node(depth);
+                break;
+              }
+          }
+          return false;
+        },
+        keydown() { pointerTarget = null; return false; },
+      },
+      createSelectionBetween(view, anchor, head) {
+        const selection = view.state.selection;
+        // Chromium can collapse a range around consecutive noneditable blocks
+        // back to the first editable paragraph after the mouseup selection.
+        // Keep the explicitly clicked generated block until a new editor input.
+        if (anchor.pos === head.pos && selection instanceof NodeSelection && selection.node === pointerTarget)
+          return selection;
+        return null;
+      },
+    },
     filterTransaction(tr, state) {
       if (
         !tr.docChanged ||
@@ -220,7 +284,12 @@ export const protectContents = () =>
         return true;
       let allowed = true;
       state.doc.descendants((node, pos) => {
-        if (!["table_of_contents", "bibliography", "citation"].includes(node.type.name)) return;
+        if (
+          !["table_of_contents", "bibliography", "citation"].includes(
+            node.type.name,
+          )
+        )
+          return;
         const from = tr.mapping.mapResult(pos, 1),
           to = tr.mapping.mapResult(pos + node.nodeSize, -1);
         if ((from.deletedAcross && to.deletedAcross) || to.pos <= from.pos)
@@ -237,3 +306,4 @@ export const protectContents = () =>
       return allowed;
     },
   });
+};

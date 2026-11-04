@@ -113,6 +113,7 @@ export function referenceIndex(
       starts = new Map<string, { at: number; name: string; range: boolean }>(),
       ends = new Map<string, number[]>();
     const collect = (node: DocNode) => {
+      if((node.attrs?.revisionMove||node.attrs?.revisionBlock)?.kind==='deletion')return;
       if (node.type === "table_of_contents") return;
       if (node.marks?.some((mark) => mark.type === "revision_deletion")) return;
       const attrs = node.attrs || {},
@@ -142,6 +143,8 @@ export function referenceIndex(
           id: attrs.blockId,
           terms: attrs.terms,
           see: attrs.see,
+          indexGroup: attrs.indexGroup,
+          sortTerms: attrs.sortTerms,
           chapter: source.chapter,
         });
         return;

@@ -353,6 +353,7 @@ export type SpeechChunk = {
   }[];
 };
 export type Job = {
+  hasMoreText?: boolean;
   eventSequence?: number;
   settings?: { pauseSeconds?: number };
   id: string;

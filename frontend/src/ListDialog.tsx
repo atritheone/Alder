@@ -27,6 +27,7 @@ export default function ListDialog({
     outlineLevel?: number;
     outlineOrder?: number;
     outlineContinuation?: boolean;
+    nestedOrdinary?: boolean;
   };
   onApply: (
     listStyle: string,
@@ -34,6 +35,7 @@ export default function ListDialog({
     fromItem: boolean,
     continuation: boolean,
     template?: ListTemplate | null,
+    currentOnly?: boolean,
   ) => void;
   onClose: () => void;
 }) {
@@ -43,6 +45,7 @@ export default function ListDialog({
     String(initial.template ? initial.outlineOrder || 1 : initial.order),
   );
   const [fromItem, setFromItem] = useState(false);
+  const [currentOnly,setCurrentOnly]=useState(false);
   const [continuation, setContinuation] = useState(
     initial.template ? !!initial.outlineContinuation : initial.continuePrevious,
   );
@@ -94,6 +97,7 @@ export default function ListDialog({
             fromItem,
             continuation,
             outline ? template : initial.template ? null : undefined,
+            currentOnly,
           );
         }}
       >
@@ -118,13 +122,13 @@ export default function ListDialog({
                 setOutline(enabled);
                 setOrder(
                   String(
-                    enabled
+                    enabled && !currentOnly
                       ? initial.outlineOrder || initial.order
                       : initial.order,
                   ),
                 );
                 setContinuation(
-                  enabled
+                  enabled && !currentOnly
                     ? !!initial.outlineContinuation
                     : initial.continuePrevious,
                 );
@@ -136,6 +140,18 @@ export default function ListDialog({
           </label>
           {outline && (
             <>
+              {initial.nestedOrdinary && <label>
+                Apply to
+                <select aria-label="Outline scope" value={currentOnly?'current':'outer'} onChange={event=>{
+                  const current=event.target.value==='current';setCurrentOnly(current);
+                  setLevel(current?0:initial.outlineLevel||0);
+                  setOrder(String((current?initial.order:initial.outlineOrder)||1));
+                  setContinuation(current?initial.continuePrevious:!!initial.outlineContinuation);
+                }}>
+                  <option value="outer">Entire list</option>
+                  <option value="current">This nested list</option>
+                </select>
+              </label>}
               <label>
                 Level
                 <select

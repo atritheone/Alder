@@ -5,6 +5,17 @@ import re
 PADDING = ('Top', 'Bottom', 'Left', 'Right')
 
 
+def repeating_header_rows(rows):
+    """A repeating band must close its vertical merges before body content."""
+    count=boundary=0
+    for index,row in enumerate(rows):
+        cells=row.get('content',[])
+        if not cells or not all(cell['type'] in ('table_header','tableHeader') for cell in cells):break
+        boundary=max(boundary,*(index+int(cell.get('attrs',{}).get('rowspan',1)) for cell in cells))
+        if boundary==index+1:count=index+1
+    return 0 if count==len(rows) else count
+
+
 def row_vertical_inset(cells, *, authored=True):
     """Word adds cell margins and collapsed borders outside an at-least height.
 

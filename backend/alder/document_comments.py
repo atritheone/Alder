@@ -61,11 +61,27 @@ class WordCommentsWriter:
         self.document, self.warnings = document, warnings
         self.ext = etree.Element(f'{{{W15}}}commentsEx', nsmap={'w15': W15})
         self.ids, self.emitted = {}, set()
+        self.hidden = set()
+        self.source_copies = {}
         anchors = {}
+        def collect(node, hidden=False, separate_source=False):
+            move=node.get('attrs', {}).get('revisionMove') or {}
+            source=move.get('kind')=='deletion'
+            separate_source=separate_source or (source and node.get('type') in ('table_row','list_item'))
+            hidden = hidden or (source and not separate_source)
+            if node.get('type') == 'comment_anchor':
+                attrs = node['attrs']
+                if hidden: self.hidden.add(attrs.get('blockId'))
+                else:
+                    # Native row/item rejection can discard the destination's
+                    # comments. Give each structural side its
+                    # own native thread; reimport reunites exact paired ranges.
+                    key=attrs['threadId']+':move-source' if separate_source else attrs['threadId']
+                    if separate_source:self.source_copies[attrs.get('blockId')]=key
+                    anchors.setdefault(key, []).append(attrs['edge'])
+            for child in node.get('content', []): collect(child, hidden, separate_source)
         for section in sections:
-            for node in walk({'content': section['blocks']}):
-                if node.get('type') == 'comment_anchor':
-                    attrs = node['attrs']; anchors.setdefault(attrs['threadId'], []).append(attrs['edge'])
+            collect({'content': section['blocks']})
         self.incomplete = {key for key, edges in anchors.items() if edges != ['start', 'end']}
         if self.incomplete:
             warnings.append('Incomplete comment anchors were exported at their remaining position; all comment text was retained.')
@@ -97,6 +113,8 @@ class WordCommentsWriter:
         return self.ids[thread_id]
 
     def inline(self, paragraph, attrs):
+        if attrs.get('blockId') in self.hidden: return
+        if attrs.get('blockId') in self.source_copies:attrs={**attrs,'threadId':self.source_copies[attrs['blockId']]}
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
         key = attrs['threadId']; identifiers = self.register(attrs)
@@ -133,6 +151,85 @@ class WordCommentsWriter:
                 setting.set(qn('w:val'), '15')
         part = XmlPart(PackURI('/word/commentsExtended.xml'), 'application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml', self.ext, self.document.part.package)
         self.document.part.relate_to(part, EXT_REL)
+
+
+def word_comment_marker(node):
+    """Only annotation-only runs may sit outside a native move wrapper."""
+    if node.tag in (f'{{{W}}}commentRangeStart', f'{{{W}}}commentRangeEnd'):
+        return not len(node) and node.get(f'{{{W}}}id') is not None
+    return (node.tag == f'{{{W}}}r' and len(node.findall(f'{{{W}}}commentReference')) == 1
+            and all(c.tag in (f'{{{W}}}rPr', f'{{{W}}}commentReference') for c in node))
+
+
+def mirror_word_move_comments(document):
+    """Word anchors a moved comment to one side and carries it on rejection.
+
+    Alder stores a display-only copy on the source so local original previews
+    and either review decision retain that same range and thread.
+    """
+    groups = {}
+    for node in walk(document):
+        move = node.get('attrs', {}).get('revisionMove')
+        if move: groups.setdefault((move['stamp']['id'], move.get('part', 0)), {})[move['kind']] = node
+
+    def positions(node):
+        offset = 0; result = []
+        for child in node.get('content', []):
+            if child['type'] == 'comment_anchor': result.append((offset, child))
+            else: offset += len(child['text']) if child['type'] == 'text' else 1
+        return result
+
+    def inject(target, entries):
+        output = []; offset = 0; index = 0
+        def emit():
+            nonlocal index
+            while index < len(entries) and entries[index][0] == offset:
+                anchor = deepcopy(entries[index][1]); anchor['attrs']['blockId'] = 'block_' + uuid4().hex
+                output.append(anchor); index += 1
+        for child in target.get('content', []):
+            emit()
+            if child['type'] == 'text':
+                end = offset + len(child['text']); cursor = 0
+                while index < len(entries) and entries[index][0] < end:
+                    stop = entries[index][0] - offset
+                    if stop < 0: raise ValueError('A moved Word comment has an invalid position.')
+                    if stop: output.append({**deepcopy(child), 'text': child['text'][cursor:cursor + stop]})
+                    cursor += stop; offset += stop; emit()
+                if cursor < len(child['text']): output.append({**deepcopy(child), 'text': child['text'][cursor:]})
+                offset = end
+            else:
+                output.append(child); offset += 1
+        emit()
+        if index != len(entries): raise ValueError('A moved Word comment has an invalid position.')
+        target['content'] = output
+
+    pairs=[]
+    for sides in groups.values():
+        if set(sides) != {'insertion', 'deletion'}: continue
+        source, destination = sides['deletion'], sides['insertion']
+        left=[n for n in walk(source) if n['type'] in ('paragraph','heading')]
+        right=[n for n in walk(destination) if n['type'] in ('paragraph','heading')]
+        if len(left)!=len(right):raise ValueError('A moved comment needs matching paragraph boundaries at both ends.')
+        pairs.extend(zip(left,right))
+    aliases={}
+    for source,destination in pairs:
+        a, b = positions(source), positions(destination)
+        if a and b:
+            def clean(entries):
+                return [(offset,anchor['attrs']['edge'],anchor['attrs']['thread']['resolved'],
+                         [{k:v for k,v in entry.items() if k!='id'} for entry in anchor['attrs']['thread']['entries']]) for offset,anchor in entries]
+            if clean(a) != clean(b): raise ValueError('Both sides of a moved Word comment must retain the same range and thread.')
+            for (_,before),(_,after) in zip(a,b):
+                source_id=before['attrs']['threadId'];target=after['attrs']
+                if source_id in aliases and aliases[source_id]['threadId']!=target['threadId']:
+                    raise ValueError('A moved Word comment has inconsistent paired threads.')
+                aliases[source_id]=target
+        elif a: inject(destination, a)
+        elif b: inject(source, b)
+    for node in walk(document):
+        if node['type']=='comment_anchor' and node['attrs']['threadId'] in aliases:
+            target=aliases[node['attrs']['threadId']]
+            node['attrs'].update(threadId=target['threadId'],thread=deepcopy(target['thread']))
 
 
 class WordCommentsReader:

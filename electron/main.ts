@@ -470,24 +470,26 @@ function registerIPC() {
   });
   const publicationRequest = async (method:string,p:string,body:any) => {
     const fieldsOnly = /^\/api\/projects\/[^/?#]+\/layout-fields$/.test(p);
-    const word = /^\/api\/projects\/[^/?#]+\/export$/.test(p) && body?.format === 'docx';
+    const word = /^\/api\/projects\/[^/?#]+\/export(?:-jobs)?$/.test(p) && body?.format === 'docx';
     if (
       method === "POST" &&
-      (fieldsOnly ||
+      (fieldsOnly || word ||
         (/^\/api\/projects\/[^/?#]+\/export$/.test(p) &&
           (body?.format === "pdf" || word)))
     ) {
       const snapshot = await request(
         "POST",
-        p.replace(/\/(?:export|layout-fields)$/, "/publication-layout"),
+        p.replace(/\/(?:export(?:-jobs)?|layout-fields)$/, "/publication-layout"),
         {
-          options: word ? {...body.options,reviewView:body.options?.reviewView==='original'?'original':'final'} : body.options,
+          options: word ? {...body.options,reviewView:body.options?.reviewView==='original'?'original':'final',measureMoveSources:!body.options?.reviewView||body.options.reviewView==='markup'} : body.options,
           ...(word ? {ephemeral:true} : {}),
           ...(fieldsOnly ? { project: body.project, ephemeral: true } : {}),
         },
       );
+      if (!fieldsOnly && body?.expectedRevision != null && body.expectedRevision !== snapshot.sourceRevision)
+        throw Error('The document changed during export preparation. Export the current version again.');
       if(word){
-        const needsWordLayout=(node:any):boolean=>(node.type==='table_row'&&!node.attrs?.allowSplit)||node.type==='text_box'||node.type==='equation'||node.type==='document_note'||!!node.content?.some(needsWordLayout);
+        const needsWordLayout=(node:any):boolean=>(node.type==='table_row'&&!node.attrs?.allowSplit)||node.type==='text_box'||node.type==='equation'||node.type==='shape'||node.type==='document_note'||!!node.content?.some(needsWordLayout);
         if(!needsWordLayout(snapshot.document))return request(method,p,{...body,expectedRevision:snapshot.sourceRevision,options:{...body.options,measuredRowSplits:[]}});
       }
       const rendered = await renderPublicationPdf(
@@ -496,7 +498,25 @@ function registerIPC() {
         !fieldsOnly && !word,
       );
       if (fieldsOnly) return rendered.metadata.referenceValues;
-      if(word)return request(method,p,{...body,expectedRevision:snapshot.sourceRevision,options:{...body.options,measuredRowSplits:rendered.metadata.overflowingRows||[],measuredTextBoxes:rendered.metadata.textBoxes||{},measuredNoteGeometry:!!rendered.metadata.mixedNoteGeometry}});
+      if(word){
+        const rows=new Set<string>(rendered.metadata.overflowingRows||[]);
+        const boxes={...rendered.metadata.textBoxes};
+        let mixedNoteGeometry=!!rendered.metadata.mixedNoteGeometry;
+        if(Object.keys(snapshot.moveSourceIds||{}).length){
+          // Source copies can have different available widths and page frames.
+          // Measure the original view; never reuse the destination's geometry.
+          const original=await request('POST',p.replace(/\/export(?:-jobs)?$/, '/publication-layout'),{options:{...body.options,reviewView:'original'},ephemeral:true});
+          if(original.sourceRevision!==snapshot.sourceRevision)throw Error('The document changed during layout. Export again from the current document.');
+          const measured=await renderPublicationPdf(original,path.join(__dirname,'preload.cjs'),false);
+          const originalRows=new Set<string>(measured.metadata.overflowingRows||[]);
+          for(const [source,target] of Object.entries(snapshot.moveSourceIds) as [string,string][]){
+            if(measured.metadata.textBoxes?.[target])boxes[source]=measured.metadata.textBoxes[target];
+            if(originalRows.has(target))rows.add(source);
+          }
+          mixedNoteGeometry ||= !!measured.metadata.mixedNoteGeometry;
+        }
+        return request(method,p,{...body,expectedRevision:snapshot.sourceRevision,options:{...body.options,measuredRowSplits:[...rows],measuredTextBoxes:boxes,measuredNoteGeometry:mixedNoteGeometry}});
+      }
       const form = new FormData();
       form.append(
         "file",

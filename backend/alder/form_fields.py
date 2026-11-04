@@ -55,6 +55,31 @@ def validate(node):
 W14='http://schemas.microsoft.com/office/word/2010/wordml'
 
 
+def validate_moved_word_control(element):
+    """A move must not turn two unsupported controls into matching plain text."""
+    from docx.oxml.ns import qn
+    def fail():
+        raise ValueError('This Word paragraph move contains an unsupported form control. Resolve the move in Word before importing; the original file has not been changed.')
+    pr=element.find(qn('w:sdtPr'));body=element.find(qn('w:sdtContent'))
+    if pr is None or body is None:fail()
+    known={qn('w:'+name) for name in ('alias','tag','id','lock','rPr','placeholder','showingPlcHdr','text','richText','date')}
+    known.update({f'{{{W14}}}checkbox','{http://schemas.microsoft.com/office/word/2012/wordml}appearance','{http://schemas.microsoft.com/office/word/2012/wordml}color'})
+    if any(child.tag not in known for child in pr):fail()
+    if any(child.tag not in {qn('w:'+name) for name in ('r','hyperlink','bookmarkStart','bookmarkEnd','proofErr')} for child in body):fail()
+    if any(n.tag in {qn('w:'+name) for name in ('sdt','drawing','pict','object','fldSimple','instrText','fldChar','footnoteReference','endnoteReference')} for n in body.iter()):fail()
+    check=pr.find(f'{{{W14}}}checkbox')
+    if check is not None:
+        if any(n.tag not in {f'{{{W14}}}{name}' for name in ('checked','checkedState','uncheckedState')} for n in check):fail()
+        for name,value in (('checkedState','2612'),('uncheckedState','2610')):
+            item=check.find(f'{{{W14}}}{name}')
+            if item is not None and item.get(f'{{{W14}}}val','').upper()!=value:fail()
+    datum=pr.find(qn('w:date'))
+    if datum is not None:
+        fmt=datum.find(qn('w:dateFormat'));calendar=datum.find(qn('w:calendar'))
+        if fmt is not None and fmt.get(qn('w:val'))!='yyyy-MM-dd':fail()
+        if calendar is not None and calendar.get(qn('w:val'))!='gregorian':fail()
+
+
 def canonical_content(content):
     """HTML's legacy mark names use the same canonical form as the editor."""
     result=[]

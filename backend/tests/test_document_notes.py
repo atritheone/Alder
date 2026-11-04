@@ -17,6 +17,30 @@ def fixture():
     ]}}]}
     return validate_project(project)
 
+
+@pytest.mark.parametrize('format',['docx','html','epub'])
+def test_section_endnotes_retain_placement_and_appear_before_next_section(tmp_path,format):
+    import copy,zipfile
+    from alder.note_options import note_options
+    from lxml import etree
+    p=fixture();options=note_options();options['endnote']['placement']='sectEnd';p['settings']['noteOptions']=options
+    anchor=copy.deepcopy(p['book']['chapters'][0]['document']['content'][-1]);anchor['content'][1]['attrs']['body']={'type':'doc','content':[{'type':'paragraph','content':[{'type':'text','text':'EARLY_NOTE'}]}]}
+    next_options=note_options()
+    p['book']['chapters'][0]['document']['content']=[anchor,{'type':'section_break','attrs':{'kind':'nextPage','page':{'pageSize':'A5','marginMm':20},'noteOptions':next_options}},{'type':'paragraph','content':[{'type':'text','text':'LATER_BODY'}]}]
+    result=build_export(p,format,tmp_path);restored=import_document(Path(result['path']))
+    assert restored['settings']['noteOptions']['endnote']['placement']=='sectEnd'
+    boundary=next(n for n in restored['document']['content'] if n['type']=='section_break')
+    assert boundary['attrs']['noteOptions']['endnote']['placement']=='docEnd'
+    assert len(notes([restored['document']]))==1
+    assert 'EARLY_NOTE' not in document_text(restored['document'])
+    if format!='docx':
+        if format=='html':source=Path(result['path']).read_text(encoding='utf-8')
+        else:
+            with zipfile.ZipFile(result['path']) as archive:source=archive.read('EPUB/section-1.xhtml').decode()
+        # Embedded metadata repeats authored notes; inspect visible text only.
+        root=etree.HTML(source.encode('utf-8'));visible=' '.join(root.xpath('//body//text()'))
+        assert visible.index('EARLY_NOTE')<visible.index('LATER_BODY')
+
 def test_word_requires_measured_note_geometry_and_refuses_clipped_continuations(tmp_path):
     p=fixture();p['book']['chapters'][0]['document']['content'].insert(1,{'type':'section_break','attrs':{'kind':'nextPage','page':{'pageSize':'A4'}}})
     with pytest.raises(ValueError,match='desktop DOCX export'):build_export(p,'docx',tmp_path)
@@ -26,6 +50,25 @@ def test_word_requires_measured_note_geometry_and_refuses_clipped_continuations(
     # no individual footnote continues between their differing page frames.
     result=build_export(p,'docx',tmp_path,{'measuredNoteGeometry':False})
     assert len(notes([import_document(Path(result['path']))['document']]))==3
+
+
+def test_word_does_not_silently_flatten_mixed_endnote_placement(tmp_path):
+    import copy
+    from alder.note_options import note_options
+    from docx import Document
+    from docx.oxml.ns import qn
+    p=fixture();custom=note_options();custom['endnote']['placement']='sectEnd'
+    first=copy.deepcopy(p['book']['chapters'][0]['document']['content'][-1])
+    second=copy.deepcopy(first);second['content'][1]['attrs']['blockId']='other-endnote'
+    boundary={'type':'section_break','attrs':{'kind':'nextPage','page':{'pageSize':'A5','marginMm':20},'noteOptions':custom}}
+    p['book']['chapters'][0]['document']['content']=[first,boundary,second]
+    with pytest.raises(ValueError,match='one endnote placement'):build_export(p,'docx',tmp_path)
+    # Sections without references do not constrain the document-wide native
+    # placement; Word ignores per-section position even when its XML keeps it.
+    p['book']['chapters'][0]['document']['content']=[{'type':'paragraph'},boundary,second]
+    result=build_export(p,'docx',tmp_path)
+    word=Document(result['path'])
+    assert word.settings.element.find(qn('w:endnotePr')).find(qn('w:pos')).get(qn('w:val'))=='sectEnd'
 
 @pytest.mark.parametrize('format',['docx','html','epub'])
 def test_section_note_settings_and_native_continuous_counts_roundtrip(tmp_path,format):

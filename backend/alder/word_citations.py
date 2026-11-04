@@ -73,12 +73,17 @@ class WordCitationsReader:
         value=self.entries.get(name[len('AlderCitation:'):])
         if value is None:raise ValueError('This Word citation is missing its collected source metadata. The original file is preserved.')
         return deepcopy(value)
-    def inline(self,element):
+    def inline(self,element,strict=False):
         from docx.oxml.ns import qn
         value=self.metadata(element)
         if value is None:return None
         if value['type']!='citation':raise ValueError('A bibliography cannot be embedded inside a paragraph.')
-        text=''.join(node.text or '' for node in element.iter(qn('w:t')))
+        body=element.find(qn('w:sdtContent'))
+        if strict:
+            known=('r','rPr','t','delText','b','bCs','i','iCs','u','strike','dstrike','vertAlign','rFonts','sz','szCs','color','highlight','lang','rtl','noProof','spacing','kern','w','position','shd','proofErr')
+            if body is None or any(node.tag not in {qn('w:'+name) for name in known} for node in body.iterdescendants()):
+                raise ValueError('A citation in this tracked paragraph move contains unsupported content. The original file has not been changed.')
+        text=''.join(node.text or '' for node in element.iter() if node.tag in (qn('w:t'),qn('w:delText')))
         value['content']=[{'type':'text','text':text}] if text else []
         from .models import validate_document
         validate_document({'type':'doc','content':[{'type':'paragraph','content':[value]}]})

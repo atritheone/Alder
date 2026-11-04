@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { openContextMenu } from "./ContextMenu";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -242,7 +243,7 @@ export default function PronunciationManager(p: {
         setDraft(result.rules[0]);
       }
       setNotice(
-        `${result.rules.length} ${result.rules.length === 1 ? "Rule" : "Rules"} Imported`,
+        `${formatInteger(result.rules.length)} ${result.rules.length === 1 ? "Rule" : "Rules"} Imported`,
       );
       if (result.errors.length)
         setError(
@@ -538,8 +539,8 @@ export default function PronunciationManager(p: {
               <div className="voice-card-actions">
                 <small className="dictionary-rule-count">
                   {
-                    rules.filter((r) => (r.dictionary || "My Rules") === name)
-                      .length
+                    formatInteger(rules.filter((r) => (r.dictionary || "My Rules") === name)
+                      .length)
                   }{" "}
                   Rules
                 </small>
@@ -917,7 +918,7 @@ export default function PronunciationManager(p: {
                     <output aria-label="Spoken Text">
                       {preview.spoken || "Nothing Will Be Spoken"}
                     </output>
-                    <small>{preview.mappings.length} Substitutions</small>
+                    <small>{formatInteger(preview.mappings.length)} Substitutions</small>
                   </>
                 )}
                 <audio

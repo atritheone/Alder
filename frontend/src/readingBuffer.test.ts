@@ -55,6 +55,20 @@ describe("reading buffer", () => {
     expect(readingBufferReady(job("sapi-voice"), 0)).toBe(true);
     expect(readingBufferReady(null, 0)).toBe(false);
   });
+  it("keeps the reserve at a planning boundary and waits for the next section", () => {
+    const reading = job();
+    reading.chunks.pop();
+    reading.chunks[0].seconds = 3;
+    reading.hasMoreText = true;
+    expect(readingBufferReady(reading, 0)).toBe(false);
+    expect(readingBufferReady(reading, 0, 1, true)).toBe(true);
+    expect(readingBufferReady(reading, 1, 1, true)).toBe(false);
+    reading.chunks[0].seconds = 25;
+    expect(readingBufferReady(reading, 0)).toBe(true);
+    reading.hasMoreText = false;
+    reading.chunks[0].seconds = 3;
+    expect(readingBufferReady(reading, 0)).toBe(true);
+  });
   it("uses the audio clock directly at every playback speed", () => {
     expect(highlightClock(1, 1, true)).toBe(1);
     expect(highlightClock(1, 2, true)).toBe(1);

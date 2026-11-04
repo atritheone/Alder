@@ -14,7 +14,7 @@ def write_notes(plan, mp3_report, flac_report, output):
     sections = sum(r["sections"] for r in mp3_report["files"])
     short_title = plan.get("short_title", plan["title"].split(":", 1)[0])
     subtitle = plan.get("subtitle", plan["title"].partition(":")[2].strip())
-    author = plan.get("author", "Natalie")
+    author = plan["author"]
     opening = plan.get("opening", plan["tracks"][0]["paragraphs"][0])
     byline = " · ".join(s for s in (subtitle, author) if s)
     rows = []

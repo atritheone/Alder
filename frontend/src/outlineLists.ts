@@ -1,5 +1,5 @@
 import { formatPageNumber } from "./pageNumbering";
-import type { Node as PMNode } from "prosemirror-model";
+import { DOMSerializer, type Node as PMNode } from "prosemirror-model";
 import { Plugin, type Command, type EditorState } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { closeHistory } from "prosemirror-history";
@@ -86,7 +86,7 @@ const isList = (node: PMNode) =>
   node.type.name === "ordered_list" || node.type.name === "bullet_list";
 const isSeparateScope = (node: PMNode) =>
   ["table_cell", "table_header"].includes(node.type.name);
-export function selectedOutlineList(state: EditorState) {
+export function selectedOutlineList(state: EditorState, currentOnly = false) {
   const { $from, $to } = state.selection;
   let result: { node: PMNode; pos: number; level: number } | undefined,
     level = 0;
@@ -94,7 +94,8 @@ export function selectedOutlineList(state: EditorState) {
     const node = $from.node(depth);
     if (isSeparateScope(node)) break;
     if (isList(node) && $to.pos <= $from.after(depth)) {
-      result = { node, pos: $from.before(depth), level: level++ };
+      result={ node, pos: $from.before(depth), level: level++ };
+      if(node.attrs.listTemplate||currentOnly)break;
     }
   }
   return result;
@@ -146,12 +147,22 @@ export function outlineListLayout(doc: PMNode): Layout {
   const cached = layouts.get(doc);
   if (cached) return cached;
   const result: Layout = { lists: [], markers: [], tooDeep: false };
+  const ghosts: { pos: number; node: PMNode; key: string }[] = [];
+  const destinations = new Map<string, { pos: number; lists: Listing[]; markers: Marker[] }>();
   const scope = (parent: PMNode, start: number) => {
     const previous = new Map<string, (number | null)[]>();
     parent.forEach((node, offset) => {
+      const deleted = node.attrs.revisionBlock?.kind === 'deletion';
       const pos = start + offset,
         template = node.attrs.listTemplate;
+      const move = node.attrs.revisionMove;
+      const moveKey = move && `${move.stamp.id}:${move.part ?? 0}`;
+      if (move?.kind === "deletion") {
+        if (isList(node) && validListTemplate(template)) ghosts.push({ pos, node, key: moveKey });
+        return;
+      }
       if (isList(node) && validListTemplate(template)) {
+        const firstList = result.lists.length, firstMarker = result.markers.length;
         const key = JSON.stringify(template),
           counts =
             node.attrs.continuePrevious && previous.has(key)
@@ -172,7 +183,11 @@ export function outlineListLayout(doc: PMNode): Layout {
               template[level].indent - (level ? template[level - 1].indent : 0),
           });
           listing.forEach((item, itemOffset) => {
-            const itemPos = position + 1 + itemOffset,
+            const itemPos = position + 1 + itemOffset;
+            const move=item.attrs.revisionMove,key=move&&`${move.stamp.id}:${move.part??0}`;
+            if(move?.kind==='deletion'){ghosts.push({pos:itemPos,node:item,key});return;}
+            const deletedCounts=item.attrs.revisionBlock?.kind==='deletion'?[...counts]:null;
+            const firstList=result.lists.length,firstMarker=result.markers.length,
               label = nextListLabel(template, counts, level);
             result.markers.push({
               pos: itemPos + 2,
@@ -197,14 +212,26 @@ export function outlineListLayout(doc: PMNode): Layout {
             item.forEach((child, offset) =>
               nested(child, itemPos + 1 + offset),
             );
+            if(key)destinations.set(key,{pos:itemPos,lists:result.lists.slice(firstList),markers:result.markers.slice(firstMarker)});
+            if(deletedCounts)counts.splice(0,counts.length,...deletedCounts);
           });
         };
         visit(node, pos, 0);
-        previous.set(key, [...counts]);
+        if (!deleted) previous.set(key, [...counts]);
+        if (moveKey) destinations.set(moveKey, { pos, lists: result.lists.slice(firstList), markers: result.markers.slice(firstMarker) });
       } else if (!node.isTextblock) scope(node, pos + 1);
     });
   };
   scope(doc, 0);
+  for (const ghost of ghosts) {
+    const live = destinations.get(ghost.key);
+    if (!live) continue;
+    const shift = ghost.pos - live.pos;
+    result.lists.push(...live.lists.map(list => ({ ...list, pos: list.pos + shift, node: doc.nodeAt(list.pos + shift)! })));
+    result.markers.push(...live.markers.map(marker => ({ ...marker, pos: marker.pos + shift })));
+  }
+  result.lists.sort((a, b) => a.pos - b.pos);
+  result.markers.sort((a, b) => a.pos - b.pos);
   layouts.set(doc, result);
   return result;
 }
@@ -212,9 +239,10 @@ export function setListTemplate(
   template: ListTemplate | null,
   order: number,
   continuation: boolean,
+  currentOnly = false,
 ): Command {
   return (state, dispatch) => {
-    const root = selectedOutlineList(state);
+    const root = selectedOutlineList(state,currentOnly);
     if (
       !root ||
       (template != null && !validListTemplate(template)) ||
@@ -229,21 +257,35 @@ export function setListTemplate(
       order,
       continuePrevious: continuation,
     });
-    if (root.node.attrs.listTemplate) {
-      const source = JSON.stringify(root.node.attrs.listTemplate),
+    const convertKinds=(node:PMNode,pos:number,level=0)=>{
+      if(!template||isSeparateScope(node))return;
+      if(isList(node)){
+        if(level>=template.length)return;
+        const name=(bulletMarkers as readonly string[]).includes(template[level].format)?'bullet_list':'ordered_list';
+        const current=tr.doc.nodeAt(pos)!;
+        if(current.type.name!==name)tr.setNodeMarkup(pos,state.schema.nodes[name],{...current.attrs,listStyle:null});
+        level++;
+      }
+      if(!node.isTextblock)node.forEach((child,offset)=>convertKinds(child,pos+1+offset,level));
+    };
+    convertKinds(root.node,root.pos);
+    {
+      const sequence=(node:PMNode)=>node.attrs.listTemplate?JSON.stringify(node.attrs.listTemplate):`${node.type.name}:${node.attrs.listStyle||'decimal'}`;
+      const source = sequence(root.node),
         at = state.doc.resolve(root.pos);
       let following = root.pos + root.node.nodeSize;
       for (let i = at.index() + 1; i < at.parent.childCount; i++) {
         const next = at.parent.child(i);
         if (
           isList(next) &&
-          JSON.stringify(next.attrs.listTemplate) === source
+          sequence(next) === source
         ) {
           if (!next.attrs.continuePrevious) break;
           tr.setNodeMarkup(following, undefined, {
             ...next.attrs,
             listTemplate: template,
           });
+          convertKinds(next,following);
         }
         following += next.nodeSize;
       }
@@ -259,8 +301,9 @@ export function applyListOptions(
   fromItem: boolean,
   continuation: boolean,
   template: ListTemplate | null | undefined,
+  currentOnly = false,
 ): Command {
-  if (template) return setListTemplate(template, order, continuation);
+  if (template) return setListTemplate(template, order, continuation,currentOnly);
   if (template === undefined)
     return setListFormatting(marker, order, fromItem, continuation);
   return (state, dispatch) => {
@@ -302,29 +345,84 @@ export function applyListOptions(
 }
 /** Ordinary list labels follow Word's repeated-letter and extended Roman
  * conventions too; CSS lower-alpha switches to spreadsheet-style AB. */
+const ordinaryLayouts=new WeakMap<PMNode,{pos:number;node:PMNode;label:string}[]>();
 export function ordinaryListLabels(doc: PMNode) {
+  const cached=ordinaryLayouts.get(doc);if(cached)return cached;
   const labels: { pos: number; node: PMNode; label: string }[] = [];
+  const ghosts:{pos:number;node:PMNode;key:string}[]=[],targets=new Map<string,{pos:number;node:PMNode}>();
   doc.descendants((node, pos) => {
     if (node.attrs.listTemplate) return false;
+    if(node.type.name==='list_item'&&node.attrs.revisionMove){
+      const move=node.attrs.revisionMove,key=`${move.stamp.id}:${move.part??0}`;
+      if(move.kind==='deletion'){ghosts.push({pos,node,key});return false;}
+      targets.set(key,{pos,node});
+    }
+    if(node.type.name!=='ordered_list')return;
+    let reviewedItems=false;node.forEach(item=>{if(item.attrs.revisionMove||item.attrs.revisionBlock)reviewedItems=true;});
     if (
-      node.type.name !== "ordered_list" ||
-      !node.attrs.listStyle ||
-      node.attrs.listStyle === "decimal"
+      (!reviewedItems && (!node.attrs.listStyle || node.attrs.listStyle === "decimal"))
     )
       return;
-    node.forEach((item, offset, index) =>
+    let index=0;
+    node.forEach((item, offset) => {
+      if(item.attrs.revisionMove?.kind==='deletion')return;
       labels.push({
         pos: pos + 1 + offset,
         node: item,
         label:
-          listNumber((node.attrs.order || 1) + index, node.attrs.listStyle) +
+          listNumber((node.attrs.order || 1) + index, node.attrs.listStyle||'decimal') +
           ". ",
-      }),
-    );
+      });
+      if(item.attrs.revisionBlock?.kind!=='deletion')index++;
+    });
   });
+  const live=labels.slice().sort((a,b)=>a.pos-b.pos);
+  for(const ghost of ghosts){
+    const target=targets.get(ghost.key);if(!target)continue;
+    const shift=ghost.pos-target.pos;
+    let low=0,high=live.length;
+    while(low<high){const middle=(low+high)>>>1;if(live[middle].pos<target.pos)low=middle+1;else high=middle;}
+    for(let index=low;index<live.length&&live[index].pos<target.pos+target.node.nodeSize;index++){
+      const label=live[index];labels.push({...label,pos:label.pos+shift,node:doc.nodeAt(label.pos+shift)!});
+    }
+  }
+  labels.sort((a,b)=>a.pos-b.pos);
+  ordinaryLayouts.set(doc,labels);
   return labels;
 }
-export function outlineLists() {
+
+/** Static review previews need the same generated labels as the live editor. */
+export function outlinePreviewFragment(doc: PMNode) {
+  const serializer = DOMSerializer.fromSchema(doc.type.schema);
+  const layout = outlineListLayout(doc);
+  const lists = new Map(layout.lists.map(item => [item.node, item]));
+  const markers = new Map(layout.markers.map(item => [doc.nodeAt(item.pos - 1)!, item]));
+  const ordinary = new Map(ordinaryListLabels(doc).map(item => [item.node, item.label]));
+  const nodes = { ...serializer.nodes };
+  for (const name of ["ordered_list", "bullet_list", "list_item", "paragraph"]) {
+    nodes[name] = node => {
+      const rendered = DOMSerializer.renderSpec(document, serializer.nodes[name](node));
+      const dom = rendered.dom as HTMLElement;
+      const list = lists.get(node), marker = markers.get(node), label = ordinary.get(node);
+      if (list) {
+        dom.classList.add("outline-list");
+        dom.style.cssText += `;list-style-type:none;padding-left:0;margin-left:${list.left * 4 / 3}px;margin-top:0;margin-bottom:0`;
+      }
+      if (label) dom.style.listStyleType = JSON.stringify(label);
+      if (marker && rendered.contentDOM) {
+        const number = document.createElement("span");
+        number.className = "outline-list-number";
+        number.dataset.outlineNumber = "true";
+        number.textContent = marker.label + "\u00a0";
+        number.style.cssText = `display:inline-block;white-space:pre;margin-left:${-marker.hanging * 4 / 3}px`;
+        rendered.contentDOM.prepend(number);
+      }
+      return rendered;
+    };
+  }
+  return new DOMSerializer(nodes, serializer.marks).serializeFragment(doc.content);
+}
+export function outlineLists(labels?: ReadonlyMap<number, string | null>) {
   let previous: PMNode | undefined, decorations: DecorationSet;
   return new Plugin({
     filterTransaction(tr) {
@@ -346,24 +444,30 @@ export function outlineLists() {
               style: `list-style-type:none;padding-left:0;margin-left:${(left * 4) / 3}px;margin-top:0;margin-bottom:0`,
             }),
           ),
-          ...layout.markers.map(({ pos, label, hanging }) =>
-            Decoration.widget(
-              pos,
-              () => {
-                const marker = document.createElement("span");
-                marker.className = "outline-list-number";
-                marker.dataset.outlineNumber = "true";
-                marker.textContent = label + "\u00a0";
-                marker.style.cssText = `display:inline-block;white-space:pre;margin-left:${(-hanging * 4) / 3}px;pointer-events:none`;
-                return marker;
-              },
-              {
-                side: -1,
-                key: `outline-${label}-${hanging}`,
-                ignoreSelection: true,
-              },
+          ...layout.markers
+            .filter(({ pos }) => labels?.get(pos) !== null)
+            .map((marker) => ({
+              ...marker,
+              label: labels?.get(marker.pos) ?? marker.label,
+            }))
+            .map(({ pos, label, hanging }) =>
+              Decoration.widget(
+                pos,
+                () => {
+                  const marker = document.createElement("span");
+                  marker.className = "outline-list-number";
+                  marker.dataset.outlineNumber = "true";
+                  marker.textContent = label + "\u00a0";
+                  marker.style.cssText = `display:inline-block;white-space:pre;margin-left:${(-hanging * 4) / 3}px;pointer-events:none`;
+                  return marker;
+                },
+                {
+                  side: -1,
+                  key: `outline-${label}-${hanging}`,
+                  ignoreSelection: true,
+                },
+              ),
             ),
-          ),
         ]);
         previous = state.doc;
         return decorations;

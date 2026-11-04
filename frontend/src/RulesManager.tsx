@@ -1,3 +1,4 @@
+import { formatInteger } from "./numberDisplay";
 import { useRef, useState } from "react";
 import { Plus, Trash2, Download, Upload, Edit3 } from "lucide-react";
 import type { Project } from "./types";
@@ -147,7 +148,7 @@ export default function RulesManager({
             })
           }
         >
-          Restore ignored rules ({project.settings.ignoredRuleIds.length})
+          Restore ignored rules ({formatInteger(project.settings.ignoredRuleIds.length)})
         </button>
       )}
       <input

@@ -9,6 +9,7 @@ import { copiedBookmarkTargets } from "./documentBookmarks";
 import { isRevisionMark, type RevisionStamp } from "./trackedChanges";
 import type { FormatLog } from "./trackedFormatting";
 import { validateReviewMarkup } from "./reviewMarkup";
+import { validateReviewMoves } from "./trackedMoves";
 import { projectText } from "./textProjection";
 import { validCitationItems } from './citationTypes';
 import { validBibliography } from './documentCitations';
@@ -16,6 +17,7 @@ import type { ParagraphFormatLog } from "./trackedParagraphFormatting";
 import {textBoxProperties,validTextBoxContent} from "./textBoxes";
 import {validDocumentNote} from './documentNotes';
 import {equationProperties,importedMath} from "./equations";
+import {shapeProperties} from "./documentShapes";
 import {formFieldProperties} from './formFields';
 
 export function clipboardText(schema: Schema, slice: Slice) {
@@ -58,6 +60,7 @@ export function clipboardSlice(
   container.innerHTML = html;
   const root = container.content;
   validateReviewMarkup(root);
+  for(const el of root.querySelectorAll("[data-document-shape]"))shapeProperties(JSON.parse(el.getAttribute("data-document-shape")!));
   for(const el of root.querySelectorAll('[data-equation]')) equationProperties(JSON.parse(el.getAttribute('data-equation')!));
   for(const el of root.querySelectorAll('math'))if(!el.closest('[data-equation]'))importedMath(el);
   for(const element of root.querySelectorAll('[data-form-field]')) {
@@ -105,6 +108,8 @@ export function clipboardSlice(
     const source = node.getAttribute("src") || "";
     const assetId = availableImages?.get(source);
     if (!assetId) {
+      if (node.closest("[data-revision-block-move]"))
+        throw new Error("A picture in this tracked move could not be collected. Review the move before copying, or paste plain text.");
       node.replaceWith(document.createTextNode(node.alt || "[Image]"));
       missingImage = true;
     } else node.setAttribute("data-asset-id", assetId);
@@ -147,7 +152,7 @@ export function clipboardSlice(
   slice.content.descendants((node) => {
     if (
       mode === "destination" &&
-      (node.attrs.revisionProperties ||
+      (node.attrs.revisionMove || node.attrs.revisionBlock || node.attrs.revisionProperties ||
         node.type.name === "revision_break" ||
         node.marks.some((mark) => mark.type.name.startsWith("revision_")))
     )
@@ -170,6 +175,14 @@ export function clipboardSlice(
   });
   const clean = (node: PMNode): PMNode | null => {
     const attrs = styleAttrs({ ...node.attrs });
+    if(attrs.revisionBlock){
+      const change=node.attrs.revisionBlock;
+      attrs.revisionBlock={...change,stamp:copiedStamp(change.stamp),originalId:change.originalId?paragraphIds.get(change.originalId)||null:null};
+    }
+    if(attrs.revisionMove){
+      const move=node.attrs.revisionMove;
+      attrs.revisionMove={...move,stamp:copiedStamp(move.stamp),originalId:move.originalId?paragraphIds.get(move.originalId)||null:null};
+    }
     if(node.type.name==='document_note')attrs.body=clean(schema.nodeFromJSON(node.attrs.body))!.toJSON();
     if (attrs.revisionProperties) {
       const log = attrs.revisionProperties as ParagraphFormatLog;
@@ -185,13 +198,14 @@ export function clipboardSlice(
       attrs.threadId = comments.get(String(attrs.threadId));
     if (node.type.name === "revision_break") {
       attrs.stamp = copiedStamp(node.attrs.stamp);
-      if (attrs.kind === "insertion") {
+      if (attrs.kind === "insertion" || attrs.scope === 'item') {
         if (!paragraphIds.has(String(attrs.nextId)))
           throw new Error(
             "Copy both sides of this pending paragraph break, or review it before copying.",
           );
         attrs.nextId = paragraphIds.get(String(attrs.nextId));
-      } else
+      }
+      if (attrs.kind === 'deletion')
         attrs.rightAttrs = {
           ...node.attrs.rightAttrs,
           blockId: `block_${crypto.randomUUID()}`,
@@ -280,8 +294,8 @@ export function clipboardSlice(
     ),
     // A caption is a semantic paragraph. An open slice would merge its
     // first line into a destination body paragraph and discard that identity.
-    slice.content.firstChild?.attrs.captionLabel ? 0 : slice.openStart,
-    slice.openEnd,
+    slice.content.firstChild?.attrs.captionLabel || slice.content.firstChild?.attrs.revisionMove || slice.content.firstChild?.attrs.revisionBlock ? 0 : slice.openStart,
+    slice.content.lastChild?.attrs.revisionMove || slice.content.lastChild?.attrs.revisionBlock ? 0 : slice.openEnd,
   );
   const warnings = [
     missingImage
@@ -292,5 +306,6 @@ export function clipboardSlice(
       : "",
   ].filter(Boolean);
   if (warnings.length) onWarning?.(warnings.join(" "));
+  validateReviewMoves(result.content);
   return result;
 }

@@ -22,6 +22,8 @@ def validate_revision(attrs):
     if not isinstance(attrs.get('author', ''), str) or len(attrs.get('author', '')) > 200:
         raise ValueError('A tracked change author must be at most 200 characters.')
     date = attrs.get('date', '')
+    if attrs.get('move') is not None and type(attrs['move']) is not bool:
+        raise ValueError('Invalid tracked move status.')
     if not isinstance(date, str) or len(date) > 40:
         raise ValueError('Invalid tracked change date.')
     if date:
@@ -31,10 +33,14 @@ def validate_revision(attrs):
             raise ValueError('Invalid tracked change date.') from exc
 
 
-def review_document(document, view='final'):
+def review_document(document, view='final', move_context=None):
     """An independent publication/view copy; never accept the source's edits."""
     if view not in ('final', 'original', 'markup'):
         raise ValueError('Unsupported review view.')
+    from .tracked_block_moves import block_move_view
+    document=block_move_view(document,view,move_context)
+    from .item_breaks import item_break_view
+    document = item_break_view(document, view)
     def walk(node):
         marks = node.get('marks', [])
         excluded = 'revision_deletion' if view == 'final' else 'revision_insertion'
@@ -90,23 +96,41 @@ def review_document(document, view='final'):
         if 'content' in node: result['content'] = combined
         return [result]
     joins = {}
-    return walk(paragraphs(document)[0])
+    from .list_formatting import resolve_list_orders
+    return resolve_list_orders(walk(paragraphs(document)[0]))
 
 
 def validate_break(attrs):
     if not isinstance(attrs, dict) or attrs.get('kind') not in ('insertion', 'deletion'):
         raise ValueError('Invalid tracked paragraph boundary.')
     validate_revision(attrs.get('stamp'))
-    if attrs['kind'] == 'insertion':
+    if attrs.get('scope') is not None and attrs['scope'] != 'item':
+        raise ValueError('Invalid tracked item boundary.')
+    if attrs['kind'] == 'insertion' or attrs.get('scope') == 'item':
         if not isinstance(attrs.get('nextId'), str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', attrs['nextId']):
             raise ValueError('A tracked paragraph boundary needs its following paragraph.')
-    elif attrs.get('rightType') not in ('paragraph', 'heading') or not isinstance(attrs.get('rightAttrs'), dict):
+    if attrs['kind'] == 'deletion' and (attrs.get('rightType') not in (('list_item',) if attrs.get('scope') == 'item' else ('paragraph', 'heading')) or not isinstance(attrs.get('rightAttrs'), dict)):
         raise ValueError('A deleted paragraph boundary needs its original paragraph properties.')
 
 
 def revision_summary(document):
     groups = {}
     def walk(node):
+        records=list((node.get('attrs',{}).get('revisionProperties') or {}).get('records',[]))
+        for mark in node.get('marks',[]):
+            if mark.get('type')=='revision_format':records.extend(mark['attrs']['records'])
+        for record in records:
+            if record['status']!='pending':continue
+            attrs=record['stamp'];group=groups.setdefault(attrs['id'],{**attrs,'inserted':'','deleted':''})
+            group['formatting']=True
+        if node['type']=='revision_break':
+            change=node['attrs'];attrs=change['stamp'];group=groups.setdefault(attrs['id'],{**attrs,'inserted':'','deleted':''})
+            group['inserted' if change['kind']=='insertion' else 'deleted']+='\n'
+        move=node.get('attrs',{}).get('revisionMove') or node.get('attrs',{}).get('revisionBlock')
+        if move:
+            from .models import document_text
+            attrs=move['stamp'];group=groups.setdefault(attrs['id'],{**attrs,'inserted':'','deleted':''})
+            group['inserted' if move['kind']=='insertion' else 'deleted']+=''.join(document_text(c) for c in node.get('content',[]))+'\n'
         for mark in node.get('marks', []):
             if mark.get('type') in REVISION_MARKS:
                 attrs = mark['attrs']; validate_revision(attrs)
@@ -121,6 +145,8 @@ def revision_summary(document):
 class WordRevisionWriter:
     def __init__(self):
         self.ids = {}
+        self.block_moves=[]
+        self.block_changes=[]
 
     def paragraph_break(self, paragraph, revision):
         from docx.oxml import OxmlElement
@@ -181,6 +207,7 @@ class WordRevisionWriter:
             key = (attrs['id'], attrs.get('author', ''), attrs.get('date', ''))
             identifier = self.ids.setdefault(key, str(len(self.ids)))
             tag = 'ins' if mark['type'] == 'revision_insertion' else 'del'
+            if attrs.get('move'):tag = 'moveTo' if mark['type'] == 'revision_insertion' else 'moveFrom'
             wrapper = OxmlElement('w:' + tag)
             wrapper.set(f'{{{W}}}id', identifier)
             wrapper.set(f'{{{W}}}author', attrs.get('author', ''))
@@ -188,7 +215,7 @@ class WordRevisionWriter:
             if parent is not None: parent.append(wrapper)
             else: outer = wrapper
             parent = wrapper
-        deleted = any(mark['type'] == 'revision_deletion' for mark in marks)
+        deleted = any(mark['type'] == 'revision_deletion' and not mark['attrs'].get('move') for mark in marks)
         for run in runs:
             if deleted:
                 for text in run.iter(f'{{{W}}}t'): text.tag = f'{{{W}}}delText'
@@ -197,11 +224,31 @@ class WordRevisionWriter:
         paragraph._p.append(outer)
         return True
 
+    def finish_moves(self,root):
+        from .tracked_moves import write_word_moves
+        write_word_moves(root)
+        from .tracked_block_moves import write_word_block_moves
+        write_word_block_moves(root,self.block_moves)
+        from .block_revisions import write_word_block_changes
+        write_word_block_changes(root,self.block_changes)
+
 
 class WordRevisionReader:
     def __init__(self, root):
         self.ids = {}
-        unsupported = {'moveFrom', 'moveTo', 'moveFromRangeStart', 'moveToRangeStart', 'tblPrChange', 'tblGridChange', 'trPrChange', 'tcPrChange', 'sectPrChange', 'cellIns', 'cellDel', 'cellMerge', 'numberingChange'}
+        from .cell_revisions import read_word_cell_changes
+        self.cell_changes=read_word_cell_changes(root,self)
+        from .table_revisions import read_word_table_revisions
+        self.table_formats=read_word_table_revisions(root,self)
+        from .table_row_revisions import read_word_row_changes
+        self.row_changes=read_word_row_changes(root)
+        from .block_revisions import read_word_block_changes
+        self.block_changes=read_word_block_changes(root)
+        from .tracked_block_moves import read_word_block_moves
+        self.block_moves=read_word_block_moves(root)
+        from .tracked_moves import read_word_moves
+        self.moves=read_word_moves(root)
+        unsupported = {'tblPrChange', 'tblGridChange', 'trPrChange', 'tcPrChange', 'sectPrChange', 'cellIns', 'cellDel', 'cellMerge', 'numberingChange'}
         for node in root.iter():
             tag = node.tag.rsplit('}', 1)[-1]
             parent = node.getparent()
@@ -237,6 +284,8 @@ class WordRevisionReader:
 
     def mark(self, element):
         kind = element.tag.rsplit('}', 1)[-1]
+        if element in self.moves:
+            return {'type':'revision_deletion' if kind in ('moveFrom','del') else 'revision_insertion','attrs':self.moves[element]}
         if kind not in ('ins', 'del'): return None
         # Word can reuse a numeric identifier with different authors or dates.
         attrs = self.stamp(element)
@@ -255,6 +304,8 @@ class WordRevisionReader:
 
 def word_review_paragraphs(document):
     """Detached paragraph-break representation for native Word serialization."""
+    from .item_breaks import item_break_view
+    item_break_view(document, 'original')  # Refuse detached item boundaries before serialization.
     def walk(node):
         if node.get('type') in ('paragraph', 'heading'):
             if node.get('attrs', {}).get('revisionProperties'):
@@ -266,8 +317,12 @@ def word_review_paragraphs(document):
                 if child['type'] != 'revision_break':
                     inline.append(deepcopy(child)); continue
                 change = child['attrs']; validate_revision(change['stamp'])
-                if change['kind'] == 'insertion':
-                    attrs['revisionBreak'] = {'kind': 'insertion', 'stamp': deepcopy(change['stamp'])}
+                if change.get('scope') == 'item' and change['kind'] == 'deletion':
+                    if kind != 'paragraph' or change['nextId'] != attrs.get('blockId') or attrs.get('_itemJoin'):
+                        raise ValueError('A deleted item boundary has moved apart.')
+                    attrs['_itemJoin'] = deepcopy(change)
+                elif change['kind'] == 'insertion':
+                    attrs['revisionBreak'] = {'kind': 'insertion', 'stamp': deepcopy(change['stamp']), **({'scope': 'item'} if change.get('scope') == 'item' else {})}
                 else:
                     # Word's final view takes the paragraph properties of the
                     # surviving (right-hand) paragraph mark. Alder preserves
@@ -287,15 +342,27 @@ def word_review_paragraphs(document):
 
 def restore_review_paragraphs(document):
     """Retain final paragraph structure plus recoverable boundary markers."""
+    from .item_breaks import restore_word_item_splits
+    restore_word_item_splits(document)
     def walk(node):
         children = node.get('content', [])
         for child in children: walk(child)
         if node.get('type') in ('paragraph', 'heading'): return
-        result = []; pending = None
+        result = []; pending = None; boundary_owner = None
         for child in children:
             change = child.get('attrs', {}).pop('revisionBreak', None)
             if pending and child['type'] not in ('paragraph', 'heading'):
-                raise ValueError('This tracked paragraph boundary crosses unsupported structure. The original file has not been changed.')
+                table_change = child.get('attrs', {}).get('revisionBlock')
+                if (pending['kind'] != 'insertion' or child['type'] != 'table' or
+                    not table_change or table_change['kind'] != 'insertion' or
+                    any(pending['stamp'].get(key, '') != table_change['stamp'].get(key, '') for key in ('author', 'date'))):
+                    raise ValueError('This tracked paragraph boundary crosses unsupported structure. The original file has not been changed.')
+                # Word assigns separate IDs to the paragraph mark and table rows.
+                # They form one dependent insertion: rejection removes the table
+                # before rejoining the prose on either side.
+                table_change['stamp'] = deepcopy(pending['stamp'])
+                result.append(child)
+                continue
             if pending and pending['kind'] == 'deletion':
                 if result[-1]['type'] != child['type'] or paragraph_appearance(result[-1].get('attrs', {})) != paragraph_appearance(child.get('attrs', {})):
                     raise ValueError('This Word paragraph deletion joins different formatting that Alder cannot yet retain in both review views. The original file has not been changed.')
@@ -304,9 +371,10 @@ def restore_review_paragraphs(document):
             else:
                 if pending:
                     identity = child.setdefault('attrs', {}).setdefault('blockId', 'block_' + uuid4().hex)
-                    result[-1].setdefault('content', []).append({'type': 'revision_break', 'attrs': {**pending, 'nextId': identity}})
+                    boundary_owner.setdefault('content', []).append({'type': 'revision_break', 'attrs': {**pending, 'nextId': identity}})
                 result.append(child)
             pending = change
+            boundary_owner = result[-1] if pending else None
         if pending:
             raise ValueError('A tracked paragraph boundary has no following paragraph. The original file has not been changed.')
         if 'content' in node: node['content'] = result

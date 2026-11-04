@@ -44,6 +44,7 @@ try {
   });
   await expect(editor).toBeVisible();
   const settle = async () => {
+    await expect.poll(() => page.evaluate(() => window.__layoutProbe.ready()), { timeout: 30000 }).toBe(true);
     await page.evaluate(
       () =>
         new Promise((resolve) =>
@@ -100,9 +101,6 @@ try {
       })),
     });
   });
-  await expect
-    .poll(() => page.locator(".discretionary-hyphen").count())
-    .toBeGreaterThan(100);
   await settle();
   const sameAsFresh = async (label) => {
     const incremental = await settle();

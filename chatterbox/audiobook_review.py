@@ -186,8 +186,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tracks", nargs="+", type=int, help="Only completed track numbers to review; default all")
     args = parser.parse_args()
-    root = Path(os.environ.get("CHATTERBOX_AUDIOBOOK_ROOT",
-                               str(Path(os.environ["LOCALAPPDATA"]) / "chatterbox/audiobooks/her-many-faces")))
+    from audiobook_project import project_root
+    root = project_root()
     plan = json.loads((root / "plan.json").read_text(encoding="utf-8"))
     requested = set(args.tracks) if args.tracks is not None else {track["track"] for track in plan["tracks"]}
     unknown = requested - {track["track"] for track in plan["tracks"]}

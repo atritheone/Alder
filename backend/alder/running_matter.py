@@ -40,7 +40,7 @@ def validate_running_matter(value, section=False):
     def check(node):
         if node['type'] not in NODES or any(mark['type'] not in MARKS for mark in node.get('marks', [])):
             raise ValueError('Headers and footers support formatted paragraphs, tables, images, links and document fields.')
-        if node.get('attrs', {}).get('revisionProperties') or node.get('attrs', {}).get('captionLabel'):
+        if node.get('attrs', {}).get('revisionBlock') or node.get('attrs', {}).get('revisionMove') or node.get('attrs', {}).get('revisionProperties') or node.get('attrs', {}).get('captionLabel'):
             raise ValueError('Review changes and captions belong to the document body.')
         if node.get('type') in ('image', 'inline_image') and node.get('attrs', {}).get('wrap', 'none') != 'none':
             raise ValueError('Pictures in headers and footers use inline or standalone placement.')

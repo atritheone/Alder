@@ -9,6 +9,7 @@ export function persistentCaret() {
       const caret = document.createElement("span");
       caret.className = "write-caret";
       caret.setAttribute("aria-hidden", "true");
+      caret.hidden = true;
       host.append(caret);
       // offsetWidth rounds to an integer. Even a tiny scale error accumulates
       // into a whole line on later pages. Measure the actual positioning basis.
@@ -48,7 +49,16 @@ export function persistentCaret() {
         caret.style.top = `${(point.top - box.top) / scaleY}px`;
         caret.style.height = `${(point.bottom - point.top) / scaleY}px`;
       };
-      const refresh = () => update(view);
+      // Pagination may repaint several times before one browser frame. Reading
+      // coordinates from every plugin update forces a full layout each time.
+      // Measure the final DOM once, before paint, using the latest selection.
+      let frame = 0;
+      const refresh = () => {
+        if (!frame) frame = requestAnimationFrame(() => {
+          frame = 0;
+          update(view);
+        });
+      };
       const observer = new ResizeObserver(refresh);
       observer.observe(host);
       view.dom.addEventListener("load", refresh, true);
@@ -60,10 +70,11 @@ export function persistentCaret() {
       view.dom.addEventListener("pointerup", refresh);
       document.fonts.addEventListener("loadingdone", refresh);
       document.addEventListener("selectionchange", refresh);
-      update(view);
+      refresh();
       return {
-        update,
+        update: refresh,
         destroy() {
+          cancelAnimationFrame(frame);
           observer.disconnect();
           view.dom.removeEventListener("load", refresh, true);
           view.dom.removeEventListener("keyup", refresh);

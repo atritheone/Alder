@@ -1,6 +1,7 @@
 import type { Node as PMNode, NodeSpec, Fragment } from "prosemirror-model";
 import { TextSelection, type Command } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
+import { movedInlineAliases } from "./movedInlineAliases";
 
 export const validBookmarkName = (name: unknown): name is string =>
   typeof name === "string" && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name);
@@ -85,12 +86,13 @@ export const bookmarkEndSpec: NodeSpec = {
 /** A copied fragment's own links follow its new destinations. Links pointing
  * outside the copied fragment continue to refer to their original targets. */
 export function copiedBookmarkTargets(fragment: Fragment) {
+  const ghosts = movedInlineAliases({ type: "doc", content: fragment.toJSON() }, "bookmark");
   const nodes = new Map<PMNode, string>(),
     links = new Map<string, string>();
   const complete = new Set<string>();
   fragment.descendants((node) => {
     if (
-      !["bookmark", "heading", "image", "inline_image", "table", "index_entry", "document_note"].includes(
+      !["bookmark", "heading", "image", "inline_image", "shape", "table", "index_entry", "document_note", "comment_anchor"].includes(
         node.type.name,
       ) &&
       !node.attrs.captionLabel
@@ -100,7 +102,7 @@ export function copiedBookmarkTargets(fragment: Fragment) {
     nodes.set(node, id);
     for (const target of [
       node.attrs.blockId,
-      node.type.name === "bookmark" ? node.attrs.name : null,
+      node.type.name === "bookmark" && !ghosts.has(node.attrs.blockId) ? node.attrs.name : null,
     ])
       if (target && !links.has(target)) links.set(target, id);
   });
@@ -122,6 +124,7 @@ export function documentBookmarks(doc: PMNode) {
   }[] = [];
   const ends = new Map<string, { pos: number; name: string }[]>();
   doc.descendants((node, pos, parent) => {
+    if ((node.attrs.revisionMove || node.attrs.revisionBlock)?.kind === "deletion") return false;
     if (node.type.name === "bookmark")
       found.push({
         id: node.attrs.blockId,

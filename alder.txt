@@ -1,7 +1,0 @@
-
-
-## todo
-
-make write show detailed backend by default.
-
-merge chatterbox narration rendering into alder.

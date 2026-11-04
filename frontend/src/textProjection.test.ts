@@ -8,6 +8,8 @@ import {
   documentText,
   generatedTextSpans,
   intersectsTextSpans,
+  projectionPosition,
+  projectionOffset,
 } from "./textProjection";
 import type { DocNode } from "./types";
 import type { Node as PMNode } from "prosemirror-model";
@@ -146,6 +148,12 @@ describe("canonical document text and source boundaries", () => {
         const actual = projectText(value),
           expected = reference(value);
         expect(actual.text).toBe(expected.text);
+        for (let offset = 0; offset < expected.map.length; offset++)
+          expect(projectionPosition(actual, offset)).toBe(expected.map[offset]);
+        for (let position = 0; position <= value.content.size; position++) {
+          const found = expected.map.findIndex(offset => offset >= position);
+          expect(projectionOffset(actual, position)).toBe(found < 0 ? expected.map.length : found);
+        }
         expect([...actual.map]).toEqual(expected.map);
         expect(actual.map.length).toBe(actual.text.length + 1);
       }

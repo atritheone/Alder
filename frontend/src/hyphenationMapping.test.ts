@@ -96,3 +96,22 @@ it("drops removed language opportunities and handles multiple transactions befor
     positions(await settle(fresh, freshPlugin)),
   );
 });
+
+
+it("retains every repeated word occurrence after dictionary replies, formatting and deletions", async () => {
+  const plugin=makePlugin();
+  let state=EditorState.create({doc:schema.node("doc",null,[paragraph("repeated repeated repeated"),paragraph("repeated measured repeated")]),plugins:[plugin]});
+  let decorated=await settle(state,plugin);
+  expect(decorated.find()).toHaveLength(12);
+  for(const edit of [
+    (s:EditorState)=>s.tr.addMark(2,7,schema.marks.em.create()),
+    (s:EditorState)=>s.tr.insertText("repeated ",3),
+    (s:EditorState)=>s.tr.delete(1,10),
+    (s:EditorState)=>s.tr.setNodeMarkup(0,undefined,{...s.doc.firstChild!.attrs,textLanguage:"de"}),
+  ]) {
+    state=state.apply(edit(state));decorated=await settle(state,plugin);
+    const freshPlugin=makePlugin(),fresh=EditorState.create({doc:state.doc,plugins:[freshPlugin]});
+    expect(positions(decorated)).toEqual(positions(await settle(fresh,freshPlugin)));
+    for(const d of decorated.find())expect(hasDiscretionaryBreak(state.doc,d.from)).toBe(true);
+  }
+});

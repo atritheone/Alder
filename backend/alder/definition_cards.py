@@ -32,7 +32,7 @@ def _entry(value):
             raise ValueError(f"The {field} field must be text.")
         text = text.strip()
         if len(text) > limit:
-            raise ValueError(f"The {field} field is too long (maximum {limit} characters).")
+            raise ValueError(f"The {field} field is too long (maximum {limit:,} characters).")
         if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", text):
             raise ValueError("Definition cards cannot contain control characters.")
         if field != "definition" and ("\n" in text or "\r" in text):
@@ -47,9 +47,9 @@ def _dimension(value, name):
     try:
         number = int(value)
     except (TypeError, ValueError):
-        raise ValueError(f"{name} must be an integer between 256 and 4096.") from None
+        raise ValueError(f"{name} must be an integer between 256 and 4,096.") from None
     if number < 256 or number > 4096:
-        raise ValueError(f"{name} must be between 256 and 4096 pixels.")
+        raise ValueError(f"{name} must be between 256 and 4,096 pixels.")
     return number
 
 

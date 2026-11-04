@@ -54,6 +54,20 @@ try {
     [uint32]$taskWordPid = 0
     [void][AlderWordProcess]::GetWindowThreadProcessId([IntPtr]$taskDocument.ActiveWindow.Hwnd, [ref]$taskWordPid)
     @{processId=$taskWordPid} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-process.json') -Encoding utf8
+    if ($taskExports.compareWith) {
+        if (-not $RoundTrip) { throw 'A comparison fixture requires RoundTrip for independent review copies.' }
+        $taskOriginal = $taskDocument
+        $taskRevised = $null
+        try {
+            $taskRevised = $taskWord.Documents.Open($taskExports.compareWith, $false, $true, $false)
+            # The qualified local fixtures only: Word creates a separate result.
+            # Both inputs remain read-only and no clipboard operations are used.
+            $taskDocument = $taskWord.CompareDocuments($taskOriginal, $taskRevised, 2, 1, $true, $true, $true, $true, $true, $true, $true, $true, $true, $true, 'Alder comparison', $true)
+        } finally {
+            if ($null -ne $taskRevised) { $taskRevised.Close(0); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskRevised) }
+            if ($taskDocument -ne $taskOriginal) { $taskOriginal.Close(0); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskOriginal) }
+        }
+    }
     if ($taskExports.watermarkProbe) {
         $taskShape = $taskDocument.Sections.Item(1).Headers.Item(1).Shapes.AddTextEffect(0, 'DRAFT', 'Cambria', 48, $false, $false, 0, 0)
         $taskShape.Name = 'PowerPlusWaterMarkObjectAlder'
@@ -163,6 +177,80 @@ try {
         [string]$taskRtfPath = Join-Path $taskRoot 'word-resaved.rtf'
         $taskRtfFormat = 6
         $taskDocument.SaveAs2([ref]$taskRtfPath, [ref]$taskRtfFormat)
+    }
+    if ($taskExports.movesExpected -or $taskExports.reviewDecisions) {
+        $taskMoveTypes = @($taskDocument.Revisions | ForEach-Object { [int]$_.Type })
+        $taskMoveTypes | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-revision-types.json') -Encoding utf8
+        if ($taskExports.movesExpected -and (@($taskMoveTypes | Where-Object { $_ -eq 14 }).Count -ne $taskExports.movesExpected -or @($taskMoveTypes | Where-Object { $_ -eq 15 }).Count -ne $taskExports.movesExpected)) { throw "Word did not retain the paired native moves: $taskMoveTypes" }
+        $taskMoveResults = @{}
+        foreach ($taskDecision in @('accept','reject')) {
+            $taskReviewCopy = $null
+            try {
+                $taskReviewSource = if ($taskExports.compareWith) { Join-Path $taskRoot 'word-resaved.docx' } else { $taskExports.docx.path }
+                if ($taskExports.compareWith) {
+                    # Opening the current result's own filename returns the
+                    # existing COM document. Review independent fixture copies.
+                    $taskIndependentSource = Join-Path $taskRoot "word-review-input-$taskDecision.docx"
+                    Copy-Item -LiteralPath $taskReviewSource -Destination $taskIndependentSource
+                    $taskReviewSource = $taskIndependentSource
+                }
+                $taskReviewCopy = $taskWord.Documents.Open($taskReviewSource, $false, $true)
+                # Explicit trusted-fixture workflow: Word intentionally refuses
+                # to remove locked content controls, even for a move decision.
+                $taskMoveLocks = @{}
+                if ($taskExports.unlockMovedControlsForReview) {
+                    foreach ($taskControl in $taskReviewCopy.ContentControls) {
+                        $taskMoveLocks[$taskControl.Tag] = @($taskControl.LockContents, $taskControl.LockContentControl)
+                        $taskControl.LockContents = $false
+                        $taskControl.LockContentControl = $false
+                    }
+                }
+                if ($taskDecision -eq 'accept') { $taskReviewCopy.Revisions.AcceptAll() } else { $taskReviewCopy.Revisions.RejectAll() }
+                if ($taskReviewCopy.Revisions.Count -ne 0) { throw 'Word left unresolved move revisions.' }
+                $taskReviewNumbers = $taskExports.reviewListNumbers
+                if ($taskExports.reviewListNumbersByDecision) { $taskReviewNumbers = $taskExports.reviewListNumbersByDecision.PSObject.Properties[$taskDecision].Value }
+                if ($taskReviewNumbers) {
+                    $taskObservedNumbers = @{}
+                    $taskObservedIndents = @{}
+                    foreach ($taskParagraph in $taskReviewCopy.Paragraphs) {
+                        $taskLabel = $taskParagraph.Range.Text.TrimEnd([char]7).Trim()
+                        $taskExpectedNumber = $taskReviewNumbers.PSObject.Properties[$taskLabel]
+                        if ($null -ne $taskExpectedNumber) {
+                            if ($taskObservedNumbers.ContainsKey($taskLabel)) { throw "Word duplicated a reviewed list item: $taskLabel" }
+                            $taskObservedNumbers[$taskLabel] = $taskParagraph.Range.ListFormat.ListString
+                            if ($taskObservedNumbers[$taskLabel] -ne $taskExpectedNumber.Value) { throw "Wrong $taskDecision numbering for $taskLabel : $($taskObservedNumbers[$taskLabel])" }
+                        }
+                        if ($taskExports.reviewParagraphIndents) {
+                            $taskExpectedIndent = $taskExports.reviewParagraphIndents.PSObject.Properties[$taskLabel]
+                            if ($null -ne $taskExpectedIndent) {
+                                $taskObservedIndents[$taskLabel] = $taskParagraph.Format.LeftIndent
+                                if ([Math]::Abs($taskObservedIndents[$taskLabel] - $taskExpectedIndent.Value) -gt 0.06) { throw "Wrong $taskDecision paragraph indent for $taskLabel : $($taskObservedIndents[$taskLabel])" }
+                            }
+                        }
+                    }
+                    if ($taskObservedNumbers.Count -ne @($taskReviewNumbers.PSObject.Properties).Count) {
+                        $taskMissingLabels = @($taskReviewNumbers.PSObject.Properties.Name | Where-Object { -not $taskObservedNumbers.ContainsKey($_) }) -join ', '
+                        throw "Word lost a reviewed list item: $taskMissingLabels"
+                    }
+                    if ($taskExports.reviewParagraphIndents -and $taskObservedIndents.Count -ne @($taskExports.reviewParagraphIndents.PSObject.Properties).Count) { throw 'Word lost a reviewed continuation paragraph.' }
+                }
+                if ($taskExports.unlockMovedControlsForReview) {
+                    foreach ($taskControl in $taskReviewCopy.ContentControls) {
+                        $taskLocks = $taskMoveLocks[$taskControl.Tag]
+                        if ($null -eq $taskLocks) { throw 'Word changed a moved field tag.' }
+                        $taskControl.LockContents = $taskLocks[0]
+                        $taskControl.LockContentControl = $taskLocks[1]
+                    }
+                }
+                [string]$taskDecisionPath = Join-Path $taskRoot "word-$taskDecision.docx"
+                $taskDecisionFormat = 16
+                $taskReviewCopy.SaveAs2([ref]$taskDecisionPath, [ref]$taskDecisionFormat)
+                $taskMoveResults[$taskDecision] = $taskReviewCopy.Content.Text
+            } finally {
+                if ($null -ne $taskReviewCopy) { $taskReviewCopy.Close(0); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskReviewCopy) }
+            }
+        }
+        $taskMoveResults | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-moves.json') -Encoding utf8
     }
     @{ status='passed'; wordVersion=$taskWord.Version; pages=$taskDocument.ComputeStatistics(2); listNumbers=$taskNumbers; tables=$taskDocument.Tables.Count; renderedPdf=[bool]$RenderPdf; resavedDocx=[bool]$RoundTrip; resavedOdt=[bool]$OpenDocumentRoundTrip; resavedRtf=[bool]$RtfRoundTrip } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'word-report.json') -Encoding utf8
 } catch {

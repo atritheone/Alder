@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 const data = fs.mkdtempSync(path.join(os.tmpdir(), "alder-arrangement-"));
+let page;
 const app = await electron.launch({
   executablePath: desktopExecutable(),
   args: [".", "--headless-test", `--user-data-dir=${data}/profile`],
@@ -11,7 +12,7 @@ const app = await electron.launch({
   timeout: 60000,
 });
 try {
-  const page = await app.firstWindow();
+  page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(1280, 900),
@@ -25,10 +26,19 @@ try {
   page.on("pageerror", (e) => errors.push(e.message));
   await app.evaluate(() => {
     const original = globalThis.fetch;
+    const jobs=new Map();
     globalThis.fetch = async (...args) => {
-      if (String(args[0]).endsWith("/api/analyze")) {
-        const text = JSON.parse(args[1].body).text;
-        return Response.json({
+      const url=String(args[0]);
+      if(url.includes('/api/proofreading/jobs/')){
+        const id=url.split('/').at(-1);
+        if(args[1]?.method==='DELETE'){jobs.delete(id);return Response.json({});}
+        if(jobs.has(id))return Response.json(jobs.get(id));
+      }
+      if (url.endsWith("/api/proofreading/check")) {
+        const {text,targetId} = JSON.parse(args[1].body);
+        const result={
+          id:crypto.randomUUID(),targetId,sourceText:text,status:'completed',stage:'complete',message:'',sequence:1,warnings:[],truncated:false,
+          coverage:{totalBlocks:1,checkedBlocks:1,advancedBlocks:0,skippedBlocks:0},
           words: 2,
           sentences: 1,
           annotations: text
@@ -51,7 +61,8 @@ try {
                 },
               ]
             : [],
-        });
+        };
+        jobs.set(result.id,result);return Response.json(result);
       }
       return original(...args);
     };
@@ -113,6 +124,8 @@ try {
   await letterCase.selectOption("free");
   await editor.pressSequentially(" Mixed");
   await expect(editor).toHaveText("First SELECTED end. NEW TEXT Mixed");
+  await page.keyboard.insertText(' café Ελληνικά 日本語');
+  await expect(editor).toHaveText('First SELECTED end. NEW TEXT Mixed café Ελληνικά 日本語');
   const sandboxToggle = page.getByRole("button", {
     name: "Toggle sandbox",
     exact: true,
@@ -142,6 +155,12 @@ try {
     .selectOption("upper");
   await expect(sandbox).toContainText("FIRST LINE.");
   await expect(sandbox).toContainText("SECOND LINE.");
+  await sandbox.press('ControlOrMeta+End');
+  await sandbox.pressSequentially(' added');
+  await expect(sandbox).toContainText('SECOND LINE. ADDED');
+  await sandboxTools.getByRole('combobox',{name:'Case',exact:true}).selectOption('free');
+  await page.keyboard.insertText(' café Ελληνικά 日本語');
+  await expect(sandbox).toContainText('ADDED café Ελληνικά 日本語');
   await expect(sandbox.locator(".annotation-grammar")).toHaveCount(1);
   await sandboxSpell.click();
   await expect(sandbox.locator(".annotation")).toHaveCount(0);
@@ -163,6 +182,11 @@ try {
   console.log(
     "Toolbar desktop checks passed: independent persisted spellcheck, annotation visibility, selected Write case, whole Sandbox case, and undo.",
   );
+  fs.writeFileSync('work/toolbar-options-report.json',JSON.stringify({status:'passed',errors}));
+} catch(error) {
+  fs.writeFileSync('work/toolbar-options-report.json',JSON.stringify({status:'failed',error:String(error.stack||error)}));
+  await page?.screenshot({path:'work/toolbar-options-failure.png'}).catch(()=>{});
+  throw error;
 } finally {
   await app.close();
 }

@@ -44,6 +44,10 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     proofreading = ProofreadingService(
         Path(os.environ.get("ALDER_RESOURCES_DIR", root / "resources")), store.data_dir,
         speech_busy=getattr(speech, "has_active_generation", None))
+    from .document_opening import DocumentOpening
+    opening = DocumentOpening(store)
+    from .document_exports import DocumentExports
+    exports = DocumentExports(store)
     shutdown_lock = asyncio.Lock()
     speech_stopped = False
 
@@ -52,6 +56,8 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         async with shutdown_lock:
             already_stopped = speech_stopped
             if not speech_stopped:
+                await run_in_threadpool(opening.shutdown)
+                await run_in_threadpool(exports.shutdown)
                 await run_in_threadpool(proofreading.shutdown)
                 if speech:
                     try:
@@ -71,6 +77,8 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     app.state.store = store
     app.state.speech = speech
     app.state.proofreading = proofreading
+    app.state.opening = opening
+    app.state.exports = exports
     app.add_middleware(CORSMiddleware, allow_origins=sorted(ALLOWED_ORIGINS), allow_credentials=False,
                        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-Request-ID"])
 
@@ -268,6 +276,22 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     def project(project_id: str):
         return store.get(project_id)
 
+    @app.post('/api/document-open-jobs/import')
+    async def start_document_open(file: UploadFile = File(...)):
+        return await run_in_threadpool(opening.start, file.filename, await uploaded(file))
+
+    @app.get('/api/document-open-jobs/{identity}')
+    def document_open_status(identity: str):
+        return opening.get(identity)
+
+    @app.delete('/api/document-open-jobs/{identity}')
+    def cancel_document_open(identity: str):
+        return opening.cancel(identity)
+
+    @app.post('/api/document-open-jobs/{identity}/open')
+    async def finish_document_open(identity: str):
+        return await run_in_threadpool(opening.commit, identity)
+
     @app.put("/api/projects/{project_id}")
     async def update(project_id: str, request: Request):
         data = await body(request)
@@ -285,6 +309,13 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         from .mail_merge import read_csv
         data=await body(request)
         return await run_in_threadpool(read_csv,data.get('text'),data.get('delimiter',','))
+
+    @app.post('/api/document-comparison')
+    async def document_comparison(request: Request):
+        from .document_comparison import compare_projects
+        data=await body(request)
+        if type(data.get('create',False)) is not bool:raise ValidationError('Choose preview or create comparison.')
+        return await run_in_threadpool(compare_projects,store,data,data.get('create',False))
 
     @app.post('/api/projects/{project_id}/mail-merge')
     async def mail_merge_create(project_id: str, request: Request):
@@ -501,13 +532,13 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         export_id = uid('export_')
         directory = store.data_dir / 'exports' / export_id
         directory.mkdir(parents=True)
-        manifest = {key: layout[key] for key in ('name', 'projectId', 'sourceRevision', 'sourceIdentity', 'warnings')}
+        manifest = {key: layout[key] for key in ('name', 'projectId', 'sourceRevision', 'sourceIdentity', 'warnings', 'chapterBlocks')}
         store._atomic_bytes(directory / 'layout.json', json.dumps(manifest, ensure_ascii=False).encode('utf-8'))
         return {**layout, 'id': export_id}
 
     @app.post("/api/exports/{export_id}/rendered-pdf")
     async def rendered_pdf(export_id: str, file: UploadFile = File(...), metadata: str = Form(...)):
-        from .publication_layout import validate_rendered_pdf, output_name
+        from .publication_layout import validate_rendered_pdf, validate_chapter_pages, output_name
         if not re.fullmatch(r'export_[a-f0-9]{32}', export_id):
             raise ValidationError('Invalid publication identity.')
         directory = store.data_dir / 'exports' / export_id
@@ -523,6 +554,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         data = await file.read(100 * 1024 * 1024 + 1)
         try:
             validation = await run_in_threadpool(validate_rendered_pdf, data, details.get('pages'), details.get('tagged') is True)
+            chapter_pages = validate_chapter_pages(details.get('chapterPages'), manifest.get('chapterBlocks', []), details['pages'])
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         renderer_warnings = details.get('warnings', [])
@@ -536,10 +568,24 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
                 return json.loads((directory / 'result.json').read_text('utf-8'))
             raise HTTPException(409, 'This publication snapshot already has a verified PDF.')
         result = {**manifest, 'id': export_id, 'path': str(path.resolve()), 'filename': filename, 'mime': 'application/pdf',
-                  'downloadUrl': f'/api/exports/{export_id}', 'validation': validation}
+                  'downloadUrl': f'/api/exports/{export_id}', 'validation': validation, 'chapterPages': chapter_pages}
         store._atomic_bytes(path, data)
         store._atomic_bytes(directory / 'result.json', json.dumps(result, ensure_ascii=False).encode('utf-8'))
         return result
+
+    @app.post('/api/projects/{project_id}/export-jobs')
+    async def start_export(project_id: str, request: Request):
+        data = await body(request)
+        return await run_in_threadpool(exports.start, project_id, data.get('format', 'txt'), data.get('options'), data.get('expectedRevision'))
+
+    @app.get('/api/document-export-jobs/{identity}')
+    def export_status(identity: str): return exports.get(identity)
+
+    @app.delete('/api/document-export-jobs/{identity}')
+    def cancel_export(identity: str): return exports.cancel(identity)
+
+    @app.post('/api/document-export-jobs/{identity}/complete')
+    def complete_export(identity: str): return exports.complete(identity)
 
     @app.post("/api/projects/{project_id}/export")
     async def export(project_id: str, request: Request):

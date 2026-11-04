@@ -4,6 +4,9 @@ import copy
 import re
 from .models import document_text
 
+def reference_instruction(instruction):
+    return re.fullmatch(r'(?:REF|PAGEREF|NOTEREF)\s+"?([A-Za-z_][A-Za-z0-9_]{0,39})"?(?P<switches>(?:\s+\\[hw])*)(?:\s+\\\*\s+(?:MERGEFORMAT|CHARFORMAT))?\s*',instruction,re.I)
+
 
 def reference_values(documents):
     targets = {}
@@ -14,6 +17,7 @@ def reference_values(documents):
     for document in documents:
         tape, starts, ends = [], {}, {}
         def collect(node):
+            if (node.get('attrs',{}).get('revisionMove') or node.get('attrs',{}).get('revisionBlock') or {}).get('kind')=='deletion':return
             if node['type'] == 'table_of_contents': return
             if any(mark.get('type') == 'revision_deletion' for mark in node.get('marks', [])): return
             kind, attrs, at = node['type'], node.get('attrs') or {}, len(tape)

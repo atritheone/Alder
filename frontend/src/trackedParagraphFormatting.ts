@@ -19,11 +19,14 @@ export type ParagraphFormatLog = {
 };
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
+const cellType=(type:string)=>['table_cell','table_header'].includes(type);
+const tableType=(type:string)=>cellType(type)||['table','table_row'].includes(type);
+const listType=(type:string)=>['ordered_list','bullet_list'].includes(type);
 const appearance = (node: PMNode): ParagraphAppearance => ({
   type: node.type.name,
   attrs: Object.fromEntries(
     Object.entries(node.attrs).filter(
-      ([key]) => !["blockId", "revisionProperties"].includes(key),
+      ([key]) => !["blockId", "revisionProperties", "revisionMove", "revisionBlock"].includes(key),
     ),
   ),
 });
@@ -33,11 +36,13 @@ export function validParagraphFormatLog(
   const log = value as ParagraphFormatLog;
   const valid = (p: ParagraphAppearance) =>
     p &&
-    ["paragraph", "heading"].includes(p.type) &&
+    (["paragraph", "heading"].includes(p.type)||tableType(p.type)||listType(p.type)) &&
     p.attrs &&
     typeof p.attrs === "object" &&
     !Array.isArray(p.attrs) &&
     !("revisionProperties" in p.attrs) &&
+    !("revisionMove" in p.attrs) &&
+    !("revisionBlock" in p.attrs) &&
     !("blockId" in p.attrs);
   return (
     !!log &&
@@ -51,7 +56,10 @@ export function validParagraphFormatLog(
         validRevisionStamp(r.stamp) &&
         ["pending", "accepted", "rejected"].includes(r.status) &&
         valid(r.before) &&
-        valid(r.after),
+        valid(r.after) &&
+        (listType(log.base.type) ? listType(r.before.type)&&listType(r.after.type) : tableType(log.base.type) ? r.before.type===log.base.type && r.after.type===log.base.type &&
+          ['colspan','rowspan'].every(key=>same(r.before.attrs[key],r.after.attrs[key])&&same(log.base.attrs[key],r.before.attrs[key])) :
+          ['paragraph','heading'].includes(r.before.type)&&['paragraph','heading'].includes(r.after.type)),
     )
   );
 }
@@ -114,10 +122,11 @@ export function trackParagraphFormatting(
     if (before.eq(after)) return true;
     if (before.isLeaf || after.isLeaf) return false;
     if (
-      ["paragraph", "heading"].includes(before.type.name) &&
-      ["paragraph", "heading"].includes(after.type.name) &&
+      ((["paragraph", "heading"].includes(before.type.name) && ["paragraph", "heading"].includes(after.type.name)) ||
+        listType(before.type.name)&&listType(after.type.name) || tableType(before.type.name) && before.type===after.type) &&
       before.content.eq(after.content)
     ) {
+      if(cellType(before.type.name)&&['colspan','rowspan'].some(key=>!same(before.attrs[key],after.attrs[key])))return false;
       changed.push({ before, after, pos });
       return true;
     }
@@ -140,7 +149,10 @@ export function trackParagraphFormatting(
     });
     return valid;
   };
-  if (!compare(state.doc, tr.doc, 0) || !changed.length) return null;
+  if (!compare(state.doc, tr.doc, 0)) return null;
+  // Commands may repeat an unchanged property on a dependent list. Keep its
+  // step/selection mapping without inventing a revision or treating it as text.
+  if (!changed.length) return tr.setMeta("trackedEdit", stamp.id);
   for (const { before, after, pos } of changed) {
     const old = appearance(before),
       next = appearance(after),

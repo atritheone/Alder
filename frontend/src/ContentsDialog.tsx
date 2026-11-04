@@ -3,14 +3,18 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { NamedStyle } from "./types";
 import { type ContentsOptions, validContentsOptions } from "./documentContents";
+import IndexGroupSelect from "./IndexGroupSelect";
+import { validIndexLanguage } from "./indexCollation";
 export default function ContentsDialog({
   initial,
   styles,
+  language,
   onApply,
   onClose,
 }: {
   initial?: ContentsOptions;
   styles: NamedStyle[];
+  language?: string;
   onApply: (options: ContentsOptions) => void | Promise<void>;
   onClose: () => void;
 }) {
@@ -19,7 +23,8 @@ export default function ContentsDialog({
     [error, setError] = useState(""),
     closed = useRef(false),
     [value, setValue] = useState<ContentsOptions>(
-      initial || { title: "Contents", depth: 3, entryStyle: null },
+      initial || { title: "Contents", depth: 3, entryStyle: null,
+        indexLanguage: language && validIndexLanguage(language) ? language : "en" },
     );
   useEffect(() => {
     dialog.current?.showModal();
@@ -79,7 +84,7 @@ export default function ContentsDialog({
                 setValue({
                   ...value,
                   kind,
-                  ...(kind==='index'?{pageNumbers:true}:{}),
+                  ...(kind === "index" ? { pageNumbers: true } : {}),
                   title: Object.values(titles).includes(value.title)
                     ? titles[kind!]
                     : value.title,
@@ -92,17 +97,52 @@ export default function ContentsDialog({
               <option value="index">Index entries</option>
             </select>
           </label>
-          {value.kind!=='index'&&<label>
-            <input
-              type="checkbox"
-              disabled={busy}
-              checked={value.pageNumbers !== false}
-              onChange={(e) =>
-                setValue({ ...value, pageNumbers: e.target.checked })
-              }
-            />
-            Page numbers
-          </label>}
+          {value.kind === "index" && (
+            <>
+              <IndexGroupSelect
+                value={value.indexGroup}
+                disabled={busy}
+                onChange={(indexGroup) => setValue({ ...value, indexGroup })}
+              />
+              <label>
+                Sorting language
+                <input
+                  aria-label="Index sorting language"
+                  disabled={busy}
+                  required
+                  maxLength={40}
+                  pattern="[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*"
+                  placeholder="en-GB, sv-SE…"
+                  value={value.indexLanguage ?? "en"}
+                  onChange={(event) => setValue({ ...value, indexLanguage: event.target.value })}
+                />
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  disabled={busy}
+                  checked={value.useSortText !== false}
+                  onChange={(event) =>
+                    setValue({ ...value, useSortText: event.target.checked })
+                  }
+                />
+                Use sort text
+              </label>
+            </>
+          )}
+          {value.kind !== "index" && (
+            <label>
+              <input
+                type="checkbox"
+                disabled={busy}
+                checked={value.pageNumbers !== false}
+                onChange={(e) =>
+                  setValue({ ...value, pageNumbers: e.target.checked })
+                }
+              />
+              Page numbers
+            </label>
+          )}
           <label>
             Title
             <input
@@ -154,9 +194,9 @@ export default function ContentsDialog({
             </select>
           </label>
           <small>
-            Includes headings, captions or index entries from included chapters. Edit → Update
-            fields refreshes entries. Ctrl-click (Command-click on Mac) an entry
-            to go to its source.
+            Includes headings, captions or index entries from included chapters.
+            Edit → Update fields refreshes entries. Ctrl-click (Command-click on
+            Mac) an entry to go to its source.
           </small>
         </div>
         <footer>

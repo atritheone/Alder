@@ -4,6 +4,16 @@ import { Mapping, ReplaceStep } from "prosemirror-transform";
 import { Slice, type Node as PMNode } from "prosemirror-model";
 import type { DocNode } from "./types";
 import { trackRangeTransaction } from "./trackedRanges";
+import {protectPendingMoves,trackArrangementMove} from "./trackedMoves";
+import {blockMoveChanges,resolveBlockMoves,blockMoveView} from './trackedBlockMoves';
+import { editsInsertedRow, trackTableRowChange } from './trackedTableRows';
+import { editsInsertedColumn, trackTableColumnChange } from './trackedTableColumns';
+import { editsInsertedItem, trackListItemChange } from './trackedListItems';
+import { trackItemSplit, trackItemJoin, itemBreakView } from './trackedItemBreaks';
+import { editsInsertedList, trackListChange } from './trackedLists';
+import { cancelInsertedTableBoundary, editInsertedTable, trackTableChange } from './trackedTables';
+import { validateBlockMoves } from './trackedBlockMoves';
+import {normaliseListOrders} from './listFormatting';
 import {
   trackParagraphFormatting,
   paragraphFormattingChanges,
@@ -55,6 +65,52 @@ export function trackReviewTransaction(
     isHistoryTransaction(tr)
   )
     return tr;
+  const insertedTable=editInsertedTable(state,tr);
+  if(insertedTable){
+    if(insertedTable==='remove')cancelInsertedTableBoundary(state,tr);
+    validateBlockMoves(tr.doc);
+    if(insertedTable!=='contents')closeHistory(tr).setMeta('structuralReview',true);
+    return tr.setMeta('trackedEdit',stamp.id);
+  }
+  const insertedRow=editsInsertedRow(state,tr);
+  if(insertedRow){
+    validateBlockMoves(tr.doc);
+    if(insertedRow!=='contents')closeHistory(tr).setMeta('structuralReview',true);
+    return tr.setMeta('trackedEdit',stamp.id);
+  }
+  const insertedColumn=editsInsertedColumn(state,tr);
+  if(insertedColumn){
+    validateBlockMoves(tr.doc);
+    if(insertedColumn!=='contents')closeHistory(tr).setMeta('structuralReview',true);
+    return tr.setMeta('trackedEdit',stamp.id);
+  }
+  const insertedItem=editsInsertedItem(state,tr);
+  if(insertedItem){
+    validateBlockMoves(tr.doc);
+    if(insertedItem!=='contents')closeHistory(tr).setMeta('structuralReview',true);
+    return tr.setMeta('trackedEdit',stamp.id);
+  }
+  if (editsInsertedList(state,tr)) {
+    validateBlockMoves(tr.doc);
+    return closeHistory(tr).setMeta('trackedEdit',stamp.id).setMeta('structuralReview',true);
+  }
+  protectPendingMoves(state,tr);
+  const wholeList=trackListChange(state,tr,stamp);
+  if(wholeList){validateBlockMoves(wholeList.doc);return wholeList;}
+  const item=trackListItemChange(state,tr,stamp);
+  if(item){validateBlockMoves(item.doc);return item;}
+  const itemSplit=trackItemSplit(state,tr,stamp);
+  if(itemSplit)return itemSplit;
+  const itemJoin=trackItemJoin(state,tr,stamp);
+  if(itemJoin)return itemJoin;
+  const table=trackTableChange(state,tr,stamp);
+  if(table){validateBlockMoves(table.doc);return table;}
+  const row=trackTableRowChange(state,tr,stamp);
+  if(row){validateBlockMoves(row.doc);return row;}
+  const column=trackTableColumnChange(state,tr,stamp);
+  if(column){validateBlockMoves(column.doc);return column;}
+  const move=trackArrangementMove(state,tr,stamp);
+  if(move)return move.setMeta('arrangementMove',tr.getMeta('arrangementMove'));
   if (tr.steps.length > 1) return trackCompositeTransaction(state, tr, stamp);
   return (
     trackWholeProseReplacement(state, tr, stamp) ||
@@ -155,6 +211,7 @@ function trackCompositeTransaction(
       );
     originals.push(result.steps.length);
     for (const recorded of tracked.steps) result.step(recorded);
+    if (tracked.getMeta('structuralReview')) result.setMeta('structuralReview',true);
   }
   result.setSelection(
     source.selection.map(result.doc, mapping(source.steps.length)),
@@ -204,6 +261,10 @@ export function reviewChanges(doc: PMNode) {
       },
     ]),
   );
+  for(const {node,pos,move} of blockMoveChanges(doc)){
+    const group=groups.get(move.stamp.id)||{...move.stamp,ranges:[]};
+    group.ranges.push({from:pos,to:pos+node.nodeSize,kind:move.kind,text:node.textContent,paragraph:true});groups.set(move.stamp.id,group);
+  }
   for (const { node, pos, log } of paragraphFormattingChanges(doc)) {
     for (const record of log.records) {
       if (record.status !== "pending") continue;
@@ -215,7 +276,7 @@ export function reviewChanges(doc: PMNode) {
         from: pos + 1,
         to: pos + node.nodeSize - 1,
         kind: "formatting",
-        text: `Paragraph: ${node.textContent}`,
+        text: `${({table:'Table',table_row:'Row',table_cell:'Cell',table_header:'Cell',ordered_list:'List',bullet_list:'List'} as Record<string,string>)[node.type.name]||'Paragraph'}: ${node.textContent}`,
         paragraph: true,
       });
       groups.set(record.stamp.id, group);
@@ -245,7 +306,7 @@ export function reviewChanges(doc: PMNode) {
       from: pos,
       to: pos + 1,
       kind: node.attrs.kind,
-      text: "Paragraph break",
+      text: node.attrs.scope === 'item' ? 'List item break' : 'Paragraph break',
       paragraph: true,
     });
     groups.set(stamp.id, group);
@@ -262,6 +323,9 @@ export function resolveReviewChanges(
   decision: "accept" | "reject",
 ) {
   const tr = resolveChanges(state, ids, decision);
+  // Remove inserted structures before joining the paragraph they split.
+  const moves=resolveBlockMoves(EditorState.create({doc:tr.doc,selection:tr.selection}),ids,decision);
+  for(const step of moves.steps)tr.step(step);
   const intermediate = EditorState.create({
     doc: tr.doc,
     selection: tr.selection,
@@ -305,10 +369,10 @@ export function editReviewedDocument(state: EditorState, source: Transaction) {
 }
 
 export function reviewedDocument(doc: PMNode, view: ReviewView) {
-  return reviewParagraphDocument(
-    paragraphFormatView(formatReviewDocument(doc, view), view),
+  return normaliseListOrders(reviewParagraphDocument(
+    itemBreakView(paragraphFormatView(formatReviewDocument(blockMoveView(doc,view), view), view), view),
     view,
-  );
+  ));
 }
 
 const revisionPresence = new WeakMap<PMNode, boolean>();
@@ -316,7 +380,7 @@ export function hasReviewChanges(node: PMNode): boolean {
   const cached = revisionPresence.get(node);
   if (cached !== undefined) return cached;
   let found =
-    !!node.attrs.revisionProperties ||
+    !!node.attrs.revisionMove || !!node.attrs.revisionBlock || !!node.attrs.revisionProperties ||
     node.type.name === "revision_break" ||
     node.marks.some((m) => m.type.name.startsWith("revision_"));
   if (!found)
@@ -335,6 +399,8 @@ export function revisionCount(doc: DocNode): number {
   if (cached !== undefined) return cached;
   const ids = new Set<string>();
   const walk = (node: DocNode) => {
+    if(node.attrs?.revisionMove)ids.add((node.attrs.revisionMove as import('./trackedBlockMoves').BlockMove).stamp.id);
+    if(node.attrs?.revisionBlock)ids.add((node.attrs.revisionBlock as import('./trackedBlockMoves').BlockMove).stamp.id);
     for (const record of (
       node.attrs?.revisionProperties as ParagraphFormatLog | null
     )?.records || [])

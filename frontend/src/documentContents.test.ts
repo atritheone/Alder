@@ -202,3 +202,50 @@ it("maps a caret after a changed generated block through field refresh", () => {
     referenceRefreshTransaction(state, schema.nodeFromJSON(updated)),
   ).toBeTruthy();
 });
+
+it("assigns generated identities before autosave and retains them through refresh and reorder", () => {
+  const first = contents();
+  const ids = (doc: DocNode) => {
+    const values: string[] = [];
+    const visit = (node: DocNode) => {
+      if (node.type !== "text") {
+        expect(typeof node.attrs?.blockId).toBe("string");
+        values.push(node.attrs!.blockId);
+      }
+      node.content?.forEach(visit);
+    };
+    visit(doc);
+    expect(new Set(values).size).toBe(values.length);
+    return values;
+  };
+  const originalIds = ids(first);
+  expect(refreshedContents(first, referenceIndex([{ document: source }]))).toBe(
+    first,
+  );
+  const changed = refreshedContents(
+    first,
+    referenceIndex([
+      {
+        document: {
+          ...source,
+          content: [source.content![1], source.content![0]],
+        },
+      },
+    ]),
+  );
+  expect(ids(changed).sort()).toEqual([...originalIds].sort());
+  expect(changed.content![1].attrs?.blockId).toBe(
+    first.content![2].attrs?.blockId,
+  );
+  expect(changed.content![2].attrs?.blockId).toBe(
+    first.content![1].attrs?.blockId,
+  );
+  // Normalization at a later editor/save boundary must not assign another identity.
+  const normalized = identifiedDocument(
+    schema.node("doc", null, [schema.nodeFromJSON(changed)]),
+  );
+  expect(ids(normalized.firstChild!.toJSON())).toEqual(ids(changed));
+  const empty = refreshedContents(first, referenceIndex([]));
+  ids(empty);
+  expect(refreshedContents(empty, referenceIndex([]))).toBe(empty);
+});

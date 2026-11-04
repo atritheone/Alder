@@ -1,5 +1,10 @@
 # Local Chatterbox
 
+The reusable `audiobook_*.py` production tools require `CHATTERBOX_AUDIOBOOK_ROOT`
+to select a project directory containing `plan.json`. Plans must supply their
+own author metadata. Book-specific extractors, production notes and delivery
+retagging scripts are local-only files, not part of the shared source.
+
 Double-click `Start-Chatterbox.cmd`, wait for the model to load, then open
 http://127.0.0.1:7860 in your browser. Keep the launcher window open while using
 Chatterbox. Press Ctrl+C in that window to stop it.
@@ -57,7 +62,10 @@ To repeat the GPU and audio check from PowerShell in this folder:
 Upstream: https://github.com/resemble-ai/chatterbox
 
 Installed source revision: `5de7a54aa4e5e2baadb0182dde554908b48b85c2`.
-Exact installed dependencies are recorded in `local-installed-packages.txt`.
+The local installed-package inventory is not source-controlled. Alder's maintained
+speech dependency specifications are `../requirements-speech.txt` and the
+platform-specific `../resources/locks/speech-*.txt` files; this historical local
+environment is not the supported Alder installation procedure (see `../SETUP.md`).
 Validation passed: dependency compatibility, CUDA recognition, a 4.76-second
 24 kHz speech sample, and generation through the browser interface's API.
 The long-passage regression was checked using the same 133-word passage and MP3

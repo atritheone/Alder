@@ -13,6 +13,7 @@ export function commentSummary(document: DocNode) {
   if (cached) return cached;
   const threads = new Map<string, { edges: string[]; open: boolean }>();
   const walk = (node: DocNode) => {
+    if (node.attrs?.revisionMove?.kind === 'deletion') return;
     if (node.type === "comment_anchor") {
       const id = node.attrs?.threadId;
       const item = threads.get(id) || {
@@ -120,7 +121,7 @@ export const commentAnchorSpec: NodeSpec = {
     },
   ],
 };
-type Anchor = { node: PMNode; pos: number };
+type Anchor = { node: PMNode; pos: number; hidden?: boolean };
 // Unchanged paragraphs reuse their index; a keystroke does not rescan the book.
 const anchorCache = new WeakMap<PMNode, Anchor[]>();
 function anchors(node: PMNode): Anchor[] {
@@ -132,7 +133,8 @@ function anchors(node: PMNode): Anchor[] {
       found!.push({ node: child, pos: offset });
     else if (!child.isLeaf)
       for (const anchor of anchors(child))
-        found!.push({ node: anchor.node, pos: offset + 1 + anchor.pos });
+        found!.push({ node: anchor.node, pos: offset + 1 + anchor.pos,
+          hidden: anchor.hidden || child.attrs.revisionMove?.kind === 'deletion' });
   });
   anchorCache.set(node, found);
   return found;
@@ -157,15 +159,16 @@ export function documentComments(doc: PMNode): DocumentComment[] {
       anchor,
     ]);
   const result = [...grouped].map(([id, items]) => {
-    const starts = items.filter((a) => a.node.attrs.edge === "start"),
-      ends = items.filter((a) => a.node.attrs.edge === "end");
+    const visible = items.filter(a => !a.hidden);
+    const starts = visible.filter((a) => a.node.attrs.edge === "start"),
+      ends = visible.filter((a) => a.node.attrs.edge === "end");
     const incomplete =
       starts.length !== 1 || ends.length !== 1 || starts[0].pos >= ends[0].pos;
-    const from = (starts[0] || ends[0]).pos + 1,
+    const from = (starts[0] || ends[0] || items[0]).pos + 1,
       to = incomplete ? from : ends[0].pos;
     return {
       id,
-      thread: (starts[0] || ends[0]).node.attrs.thread as CommentThread,
+      thread: (starts[0] || ends[0] || items[0]).node.attrs.thread as CommentThread,
       anchors: items,
       from,
       to,
@@ -199,6 +202,39 @@ export function addDocumentComment(
       !$to.parent.canReplaceWith($to.index(), $to.index(), type)
     )
       return false;
+    // Mirror annotations into both sides of a pending move. The text is
+    // immutable until reviewed, so relative positions map without ambiguity.
+    const pending = (position: number) => {
+      const at = state.doc.resolve(position);
+      for (let depth = at.depth; depth > 0; depth--)
+        if (at.node(depth).attrs.revisionMove || at.node(depth).attrs.revisionBlock)
+          return { node: at.node(depth), pos: at.before(depth) };
+      return null;
+    };
+    const left = pending(from), right = pending(to);
+    const ranges = [{ from, to }];
+    if (left || right) {
+      const a = left?.node.attrs.revisionMove, b = right?.node.attrs.revisionMove;
+      const rowA = left && ['table','table_row'].includes(left.node.type.name) && left.node.attrs.revisionBlock;
+      const rowB = right && ['table','table_row'].includes(right.node.type.name) && right.node.attrs.revisionBlock;
+      const rowRange = rowA && rowB && rowA.stamp.id === rowB.stamp.id && rowA.kind === rowB.kind;
+      if (!rowRange && (!a || !b || a.stamp.id !== b.stamp.id || a.kind !== b.kind)) return false;
+      if (!rowRange) {
+        const counterpart = (source: NonNullable<typeof left>, position: number) => {
+          let result: number | undefined;
+          const move = source.node.attrs.revisionMove;
+          state.doc.descendants((node, pos) => {
+            const other = node.attrs.revisionMove;
+            if (other?.stamp.id === move.stamp.id && other.kind !== move.kind && (other.part ?? 0) === (move.part ?? 0))
+              result = pos + position - source.pos;
+          });
+          return result;
+        };
+        const start = counterpart(left!, from), end = counterpart(right!, to);
+        if (start === undefined || end === undefined || start > end) return false;
+        ranges.push({ from: start, to: end });
+      }
+    }
     if (dispatch) {
       const tr = closeHistory(state.tr).setMeta("reviewAnnotation", true),
         threadId = existingId || `comment_${crypto.randomUUID()}`;
@@ -210,27 +246,13 @@ export function addDocumentComment(
           .slice()
           .reverse())
           tr.delete(anchor.pos, anchor.pos + 1);
-      const start = tr.mapping.map(from),
-        end = tr.mapping.map(to);
-      tr.insert(
-        end,
-        type.create({
-          threadId,
-          thread,
-          edge: "end",
-          blockId: `block_${crypto.randomUUID()}`,
-        }),
-      );
-      tr.insert(
-        start,
-        type.create({
-          threadId,
-          thread,
-          edge: "start",
-          blockId: `block_${crypto.randomUUID()}`,
-        }),
-      );
-      tr.setSelection(TextSelection.create(tr.doc, start + 1, end + 1));
+      const edges = ranges.flatMap(range => [
+        { pos: range.to, edge: 'end' }, { pos: range.from, edge: 'start' },
+      ]).sort((a, b) => b.pos - a.pos);
+      for (const { pos, edge } of edges)
+        tr.insert(tr.mapping.map(pos, -1), type.create({ threadId, thread, edge, blockId: `block_${crypto.randomUUID()}` }));
+      const added = documentComments(tr.doc).find(c => c.id === threadId)!;
+      tr.setSelection(TextSelection.create(tr.doc, added.from, added.to));
       dispatch(tr.scrollIntoView());
     }
     return true;

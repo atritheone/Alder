@@ -54,13 +54,23 @@ def speech_projection(text, entries, voice_id):
     return normalize_spoken(spoken, mappings), mappings
 
 
-def projected_sections(text, entries, voice_id, max_chars=220, max_words=40, lead_chars=None):
+def projection_parts(text, entries, voice_id, max_chars=220, max_words=40, lead_chars=None):
+    from bisect import bisect_left
     from .speech import split_narration, pronunciation_projection
     pending = split_narration(text, max_chars, max_words)
     _, global_mappings = pronunciation_projection(text, entries, voice_id)
+    # Repeated dictionary matches must not require a full mapping scan for
+    # every section in a long manuscript. Prefix ends also cover overlaps.
+    starts, ends = [], []
+    for mapping in sorted(global_mappings, key=lambda m: m['sourceStart']):
+        starts.append(mapping['sourceStart'])
+        ends.append(max(ends[-1] if ends else 0, mapping['sourceEnd']))
+    def inside_rule(position):
+        index = bisect_left(starts, position) - 1
+        return index >= 0 and position < ends[index]
     merged = []
     for part in pending:
-        if merged and any(m["sourceStart"] < part["sourceStart"] < m["sourceEnd"] for m in global_mappings):
+        if merged and inside_rule(part['sourceStart']):
             previous = merged[-1]
             previous.update(text=text[previous["sourceStart"]:part["sourceEnd"]], sourceEnd=part["sourceEnd"], paragraphEnd=part["paragraphEnd"])
         else:
@@ -71,9 +81,7 @@ def projected_sections(text, entries, voice_id, max_chars=220, max_words=40, lea
     if lead_chars and pending and len(pending[0]['text']) > lead_chars:
         first = pending[0]
         boundaries = [m.start() for m in re.finditer(r'\S+', first['text'])
-                      if 0 < m.start() <= lead_chars and not any(
-                          rule['sourceStart'] < first['sourceStart'] + m.start() < rule['sourceEnd']
-                          for rule in global_mappings)]
+                      if 0 < m.start() <= lead_chars and not inside_rule(first['sourceStart'] + m.start())]
         clauses = [at for at in boundaries if at >= lead_chars // 4 and first['text'][:at].rstrip().endswith((',', ';', ':'))]
         if boundaries:
             boundary = (clauses or boundaries)[-1]
@@ -82,14 +90,19 @@ def projected_sections(text, entries, voice_id, max_chars=220, max_words=40, lea
                 {**first, 'text': left, 'sourceEnd': first['sourceStart'] + len(left), 'paragraphEnd': False},
                 {**first, 'text': first['text'][boundary:], 'sourceStart': first['sourceStart'] + boundary},
             ]
-    result = []
+    return pending
+
+
+def iter_projected_sections(text, entries, voice_id, max_chars=220, max_words=40, lead_chars=None, prepared=None):
+    from collections import deque
+    pending = deque(prepared if prepared is not None else projection_parts(text, entries, voice_id, max_chars, max_words, lead_chars))
     while pending:
-        part = pending.pop(0)
+        part = pending.popleft()
         spoken, mapping = speech_projection(part["text"], entries, voice_id)
         if not spoken.strip():
             continue
         if len(spoken) <= max_chars and len(spoken.split()) <= max_words:
-            result.append({**part, "spokenText": spoken, "pronunciationMap": mapping})
+            yield {**part, "spokenText": spoken, "pronunciationMap": mapping}
             continue
         words = list(re.finditer(r"\S+", part["text"]))
         # Never split a pronunciation rule and silently change its meaning.
@@ -104,8 +117,11 @@ def projected_sections(text, entries, voice_id, max_chars=220, max_words=40, lea
             end = b - (len(raw) - len(raw.rstrip()))
             children.append({"text": part["text"][start:end], "sourceStart": part["sourceStart"] + start,
                              "sourceEnd": part["sourceStart"] + end, "paragraphEnd": part["paragraphEnd"] and b == len(part["text"])})
-        pending[0:0] = children
-    return result
+        pending.extendleft(reversed(children))
+
+
+def projected_sections(text, entries, voice_id, max_chars=220, max_words=40, lead_chars=None):
+    return list(iter_projected_sections(text, entries, voice_id, max_chars, max_words, lead_chars))
 
 
 def inspect_pcm(path, text, language="en"):

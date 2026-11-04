@@ -561,6 +561,18 @@
   text-decoration-color: #287944;
   text-underline-offset: 2px;
 }
+[data-revision-block-move] {
+  box-shadow: inset 2px 0 #66518a;
+}
+[data-revision-block-kind="insertion"] { text-decoration: underline #397849; }
+[data-revision-block-kind="deletion"] { text-decoration: line-through #ad3c3c; }
+[data-revision-move-kind="deletion"] { text-decoration: line-through double #66518a; }
+[data-revision-move-kind="insertion"] { text-decoration: underline double #66518a; }
+.document-revision-insertion[data-revision-move="true"],
+.document-revision-deletion[data-revision-move="true"] {
+  color: #66518a;
+  text-decoration-style: double;
+}
 .document-revision-deletion {
   text-decoration: line-through;
   text-decoration-color: #a13c3c;
@@ -655,3 +667,23 @@
 .source-details label:nth-child(2),.source-details label:nth-child(3),.source-details .source-hint { grid-column:1/-1; }
 .document-citation { cursor:pointer; }
 .document-bibliography { position:relative; }
+.compare-dialog { width:min(32rem,calc((100vw - 2rem) / var(--ui-scale,1))); }
+.compare-dialog .word-dialog-fields { display:grid; gap:.8rem; }
+.compare-dialog .word-dialog-fields>label { display:grid; grid-template-columns:5rem minmax(0,1fr); gap:1rem; align-items:center; }
+.compare-dialog select,.compare-dialog input { min-width:0; width:100%; }
+.review-conflict { border-top:1px solid #aaa; padding:.8rem 0; overflow-wrap:anywhere; }
+.review-conflict label { display:grid; gap:.5rem; }
+
+.symbol-dialog { width:min(30rem,calc((100vw - 2rem) / var(--ui-scale,1))); }
+.symbol-dialog form { max-height:calc((100vh - 2rem) / var(--ui-scale,1)); overflow:auto; }
+.symbol-dialog .word-dialog-fields label { grid-template-columns:5rem minmax(0,1fr); }
+.symbol-grid { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); max-height:14rem; overflow:auto; align-content:start; }
+.symbol-grid button { border-radius:0; padding:.4rem .1rem; min-height:2.4rem; font-size:1.25rem; }
+.symbol-grid button[aria-pressed=true] { color:var(--accent,#283f60); background:var(--selected,#d4dce7); }
+.symbol-grid button:focus-visible { outline:1px solid var(--accent,#283f60); outline-offset:-1px; }
+.symbol-grid p { grid-column:1/-1; }
+.symbol-space { font-size:.65rem; }
+.symbol-detail { display:flex; gap:1rem; align-items:center; min-height:3rem; }
+.symbol-preview { font-size:1.8rem; min-width:4rem; text-align:center; }
+
+.shape-preview{height:150px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--panel);padding:12px}

@@ -4,7 +4,11 @@ import { resolveStyles } from "./styleResolution";
 import type { NoteLine } from "./footnoteLayout";
 import { renderRunningStory } from "./runningStoryLayout";
 import { runningImageVersion } from "./runningImages";
-import {documentText} from './textProjection';
+import { continueNote } from "./noteContinuation";
+import { noteOutlineLabels } from "./noteOutlineLabels";
+import type { NoteProgress } from "./noteProgress";
+import { continueTableNote } from "./tableNoteContinuation";
+import { normaliseListOrders } from "./listFormatting";
 import {
   indexNoteParagraphs,
   measureRichNoteLines,
@@ -29,6 +33,8 @@ export function measureNoteLines(
   maximum = Infinity,
   from = 0,
   continued = false,
+  images = 0,
+  read?: NoteProgress,
 ): MeasuredNoteLines {
   if (maximum <= 0)
     throw new Error(
@@ -43,6 +49,8 @@ export function measureNoteLines(
     maximum,
     from,
     continued,
+    images,
+    read,
   ]);
   let versions = cache.get(source);
   const cached = versions?.get(key);
@@ -74,50 +82,89 @@ export function measureNoteLines(
     ),
     content: node.content?.map(prepare),
   });
-  let remainder=source;
-  if(continued){
-    if(source.content?.some(p=>p.type!=='paragraph'||p.content?.some(c=>!['text','hard_break'].includes(c.type))))
-      throw new Error('A footnote containing lists, tables or pictures cannot continue across different page widths yet. Keep the section text widths equal before publishing.');
-    let position=0;
-    const content:DocNode[]=[];
-    for(const paragraph of source.content||[]){
-      const length=documentText(paragraph).length;
-      if(position+length>=from){
-        let skip=Math.max(0,from-position);
-        const children:DocNode[]=[];
-        for(const child of paragraph.content||[]){
-          const size=documentText(child).length;
-          if(skip>=size && skip>0){skip-=size;continue;}
-          children.push(skip&&child.type==='text'?{...child,text:child.text!.slice(skip)}:child);skip=0;
-        }
-        content.push({...paragraph,attrs:{...paragraph.attrs,...(from>position||from===0?{firstLineIndent:0,spaceBefore:0}:{})},content:children});
-      }
-      position+=length+1;
-    }
-    remainder={...source,content};
+  let remainder = source;
+  let continuation: ReturnType<typeof continueNote> | undefined;
+  if (continued) {
+    const normalizedModel = normaliseListOrders(schema.nodeFromJSON(source));
+    let hasTable = false;
+    normalizedModel.descendants((node) => {
+      if (node.type.name === "table") hasTable = true;
+    });
+    const normalized = normalizedModel.toJSON() as DocNode;
+    const tail =
+      read && hasTable
+        ? continueTableNote(normalized, read)
+        : continueNote(normalized, from, images);
+    continuation = tail;
+    remainder = tail.document;
+    from = tail.from;
+    images = tail.images;
   }
   const body = prepare(remainder);
-  const separateLabel = body.content![0].type !== "paragraph";
+  const separateLabel = !continued && body.content![0].type !== "paragraph";
   if (separateLabel)
     body.content!.unshift({
       type: "paragraph",
       attrs: { fontSize: 9, lineHeight: 1.2, spaceBefore: 0, spaceAfter: 3 },
     });
-  if(!continued)body.content![0].content = [
-    { type: "text", text: number + " " },
-    ...(body.content![0].content || []),
-  ];
+  if (!continued)
+    body.content![0].content = [
+      { type: "text", text: number + " " },
+      ...(body.content![0].content || []),
+    ];
   const rich = body.content!.some((node) =>
     ["table", "bullet_list", "ordered_list"].includes(node.type),
   );
   const offsets = rich
-    ? indexNoteParagraphs(body, number.length + 1 + (separateLabel ? 1 : 0))
+    ? indexNoteParagraphs(
+        body,
+        continued ? 0 : number.length + 1 + (separateLabel ? 1 : 0),
+        continuation?.offsets,
+        continuation?.imageStarts,
+        continuation?.pictureSources,
+        continuation?.paragraphOrigins,
+        separateLabel ? 1 : 0,
+      )
     : null;
   const host = document.createElement("div");
   host.dataset.runningStory = "note-measurement";
   host.style.cssText = `position:fixed;left:-20000px;top:0;visibility:hidden;pointer-events:none;width:${width}px;font-size:9pt;line-height:1.2;white-space:pre-wrap;overflow-wrap:break-word;zoom:1`;
   host.style.fontFamily = fontFamily;
-  renderRunningStory(host, schema.nodeFromJSON(body));
+  const renderedBody = schema.nodeFromJSON(body);
+  const outlineLabels = continuation?.paragraphOrigins
+    ? noteOutlineLabels(
+        schema.nodeFromJSON(source),
+        renderedBody,
+        continuation.paragraphOrigins,
+        [...continuation.suppressedMarkers, ...continuation.hiddenParagraphs],
+      )
+    : undefined;
+  renderRunningStory(host, renderedBody, outlineLabels);
+  for (const index of continuation?.repeatedParagraphs || []) {
+    const paragraph = host.querySelector<HTMLElement>(
+      `[data-reference-target="note_measure_${index}"]`,
+    );
+    if (paragraph) paragraph.dataset.noteRepeatedHeader = "true";
+  }
+  const renderedPictures = host.querySelectorAll<HTMLImageElement>(
+    "img:not(.ProseMirror-separator)",
+  );
+  for (const index of continuation?.repeatedPictures || []) {
+    if (renderedPictures[index])
+      renderedPictures[index].dataset.noteRepeatedHeader = "true";
+  }
+  for (const index of continuation?.hiddenParagraphs || []) {
+    const paragraph = host.querySelector<HTMLElement>(
+      `[data-reference-target="note_measure_${index}"]`,
+    );
+    if (paragraph) paragraph.style.display = "none";
+  }
+  for (const index of continuation?.suppressedMarkers || []) {
+    const paragraph = host.querySelector<HTMLElement>(
+      `[data-reference-target="note_measure_${index}"]`,
+    );
+    if (paragraph) paragraph.dataset.noteContinuedItem = "true";
+  }
   document.body.append(host);
   try {
     if (offsets) {
@@ -132,11 +179,20 @@ export function measureNoteLines(
     }
     const origin = host.getBoundingClientRect(),
       scale = origin.width / width;
-    type Line = { top: number; bottom: number; parts: string[]; sourceFrom?:number };
+    type Line = {
+      top: number;
+      bottom: number;
+      parts: string[];
+      sourceFrom?: number;
+      sourceImages?: number;
+    };
     const lines: Line[] = [];
-    let textOffset = continued ? from : -(number.length + 1) - (separateLabel ? 1 : 0);
+    let textOffset = continued
+      ? from
+      : -(number.length + 1) - (separateLabel ? 1 : 0);
+    let imageOffset = images;
     for (const paragraph of host.children) {
-      const paragraphStart=textOffset;
+      const paragraphStart = textOffset;
       const box = paragraph.getBoundingClientRect(),
         css = getComputedStyle(paragraph),
         leading = parseFloat(css.lineHeight) || parseFloat(css.fontSize) * 1.2;
@@ -171,12 +227,21 @@ export function measureNoteLines(
             }
             line.top = Math.min(line.top, bounds.top);
             line.bottom = Math.max(line.bottom, bounds.bottom);
+            line.sourceFrom = Math.min(
+              line.sourceFrom ?? Infinity,
+              Math.max(0, textOffset),
+            );
+            line.sourceImages = Math.min(
+              line.sourceImages ?? Infinity,
+              imageOffset,
+            );
             const copy = source.cloneNode(true) as HTMLImageElement;
             copy.removeAttribute("data-block-id");
             copy.removeAttribute("id");
             copy.style.cssText = `position:absolute;left:${(bounds.left - origin.left) / scale}px;top:${(bounds.top - box.top) / scale}px;width:${bounds.width / scale}px;height:${bounds.height / scale}px;max-width:none`;
             line.parts.push(copy.outerHTML);
           }
+          imageOffset++;
           continue;
         }
         if (walker.currentNode.nodeType !== Node.TEXT_NODE) {
@@ -221,7 +286,14 @@ export function measureNoteLines(
             line.top = Math.min(line.top, bounds.top);
             line.bottom = Math.max(line.bottom, bounds.bottom);
             const span = document.createElement("span");
-            line.sourceFrom=Math.min(line.sourceFrom??Infinity,Math.max(0,textOffset+start));
+            line.sourceFrom = Math.min(
+              line.sourceFrom ?? Infinity,
+              Math.max(0, textOffset + start),
+            );
+            line.sourceImages = Math.min(
+              line.sourceImages ?? Infinity,
+              imageOffset,
+            );
             const language = text.parentElement
               ?.closest("[lang]")
               ?.getAttribute("lang");
@@ -279,7 +351,8 @@ export function measureNoteLines(
           top: box.top,
           bottom: box.top + leading * scale,
           parts: [],
-          sourceFrom:Math.max(0,paragraphStart),
+          sourceFrom: Math.max(0, paragraphStart),
+          sourceImages: imageOffset,
         });
       const before = Math.max(0, parseFloat(css.marginTop) || 0),
         after = Math.max(0, parseFloat(css.marginBottom) || 0),
@@ -309,7 +382,8 @@ export function measureNoteLines(
         lines.push({
           top: 0,
           bottom: lineHeight,
-          sourceFrom:line.sourceFrom,
+          sourceFrom: line.sourceFrom,
+          sourceImages: line.sourceImages,
           parts: [
             `<div style="position:relative;height:0">${paint.outerHTML}<div style="position:relative;top:${-top + firstSpace}px;height:0">${line.parts.join("")}</div></div>`,
           ],
@@ -320,7 +394,8 @@ export function measureNoteLines(
     const result = lines.map((line) => ({
       html: line.parts.join(""),
       height: line.bottom,
-      sourceFrom:line.sourceFrom,
+      sourceFrom: line.sourceFrom,
+      sourceImages: line.sourceImages,
     }));
     if (!versions) {
       versions = new Map();

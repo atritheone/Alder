@@ -1,26 +1,45 @@
 """Figure/table caption numbering and adjacent native Word caption anchors."""
 import uuid
+import re
+
+
+def sequence_instruction(instruction):
+    return re.fullmatch(r'SEQ\s+(Figure|Table)(?:\s+\\\*\s+ARABIC)?(?:\s+\\\*\s+(?:CHARFORMAT|MERGEFORMAT))?\s*',instruction,re.I)
 
 
 def number_captions(documents):
     counters = {'Figure':0, 'Table':0}
+    destinations={};sources=[]
     def walk(node):
+        move=node.get('attrs',{}).get('revisionMove') or node.get('attrs',{}).get('revisionBlock') or {}
+        if move.get('kind')=='deletion':
+            if move.get('stamp',{}).get('move'):sources.append(node)
+            return
+        if any(mark['type']=='revision_deletion' for mark in node.get('marks',[])):return
+        if move.get('stamp',{}).get('move'):destinations[(move['stamp']['id'],move.get('part',0))]=node
         if node['type'] == 'sequence':
             label = node['attrs']['sequenceName']; counters[label] += 1
             node['content'] = [{'type':'text', 'text':str(counters[label])}]
         for child in node.get('content', []): walk(child)
     for document in documents: walk(document)
+    def mirror(source, live):
+        if source['type']!=live['type']:return
+        if source['type']=='sequence':source['content']=[dict(c) for c in live.get('content',[])]
+        for a,b in zip(source.get('content',[]),live.get('content',[])):mirror(a,b)
+    for node in sources:
+        move=node['attrs']['revisionMove'];target=destinations.get((move['stamp']['id'],move.get('part',0)))
+        if target:mirror(node,target)
 
 
 def associate_captions(document):
     """Recover only an immediately adjacent, unambiguous object association."""
     def object_target(node, label):
         kind = node['type']
-        if (label == 'Table' and kind == 'table') or (label == 'Figure' and kind in ('image','inline_image')):
+        if (label == 'Table' and kind == 'table') or (label == 'Figure' and kind in ('image','inline_image','shape')):
             attrs = node.setdefault('attrs', {}); attrs.setdefault('blockId', 'block_'+uuid.uuid4().hex)
             return attrs['blockId']
         if kind == 'paragraph' and label == 'Figure':
-            images=[child for child in node.get('content', []) if child['type'] in ('image','inline_image')]
+            images=[child for child in node.get('content', []) if child['type'] in ('image','inline_image','shape')]
             if len(images)==1:return object_target(images[0],label)
         return None
     def walk(node):

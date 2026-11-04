@@ -81,7 +81,13 @@ try {
   await expect(target).toHaveCSS("padding-top", "16px");
   await expect(target).toHaveCSS("border-top-color", "rgb(18, 52, 86)");
   await expect(target).toHaveCSS("background-color", "rgb(221, 238, 255)");
-  await expect(target).toHaveCSS("vertical-align", "bottom");
+  // Pagination top-aligns the measuring grid and positions the actual cell
+  // story in each page fragment. Verify the visible bottom edge instead.
+  await expect.poll(()=>target.evaluate(cell=>{
+    const box=cell.getBoundingClientRect(),paragraph=cell.querySelector('p').getBoundingClientRect();
+    const scale=box.width/cell.offsetWidth,css=getComputedStyle(cell);
+    return Math.abs((box.bottom-paragraph.bottom)/scale-parseFloat(css.paddingBottom)-parseFloat(css.borderBottomWidth)/2);
+  })).toBeLessThan(2);
   await expect(table).toHaveAttribute("data-table-align", "right");
   await editor.press("ControlOrMeta+z");
   await expect(target).not.toHaveCSS("background-color", "rgb(221, 238, 255)");
@@ -137,6 +143,27 @@ try {
   await page.getByRole("button", { name: "Untitled", exact: false }).click();
   await expect(table.locator("tr")).toHaveCount(3);
   checks.push("converted table persists after reopening");
+  await page.evaluate(async()=>{
+    const project=await window.alder.request('POST','/api/projects',{name:'Swedish sorting',template:'blank'});
+    const cell=(text,header=false)=>({type:header?'table_header':'table_cell',content:[{type:'paragraph',content:[{type:'text',text}]}]});
+    project.language='sv-SE';project.settings.documentKind='docx';project.settings.includeTitle=false;
+    const rows=['Heading','Zebra','Åland','Apple'].map((text,index)=>({type:'table_row',content:[cell(text,index===0)]}));
+    project.book={version:1,chapters:[{id:'main',title:'Text',include:true,document:{type:'doc',content:[{type:'table',content:rows}]}}]};
+    await window.alder.request('PUT',`/api/projects/${project.id}`,{project,expectedRevision:project.revision});
+  });
+  await page.reload();await page.getByRole('button',{name:'Open',exact:true}).click();
+  await page.locator('.project-list-item').filter({hasText:'Swedish sorting'}).click();
+  await editor.locator('td').filter({hasText:'Åland'}).click();
+  await menu('Sort by this column, ascending');
+  await expect(table.locator('tr')).toHaveText(['Heading','Apple','Zebra','Åland']);
+  await editor.press('Control+z');await expect(table.locator('tr')).toHaveText(['Heading','Zebra','Åland','Apple']);
+  await menu('Sort by this column, descending');
+  await expect(table.locator('tr')).toHaveText(['Heading','Åland','Zebra','Apple']);
+  await expect(page.locator('.save-status')).toHaveText('Saved');
+  await page.reload();await page.getByRole('button',{name:'Open',exact:true}).click();
+  await page.locator('.project-list-item').filter({hasText:'Swedish sorting'}).click();
+  await expect(table.locator('tr')).toHaveText(['Heading','Åland','Zebra','Apple']);
+  checks.push('document-language sorting in both directions, undo and reopening');
   expect(errors).toEqual([]);
   fs.writeFileSync(
     "work/table-properties-report.json",
