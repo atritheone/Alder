@@ -10,11 +10,11 @@ export default function RevisionComparison({
   const right = revised.match(/\s+|[^\s]+/g) || [];
   if (left.length * right.length > 100000)
     return (
-      <>
+      <p aria-label="Revision changes">
         <del>{original}</del>
         <br />
         <ins>{revised}</ins>
-      </>
+      </p>
     );
   const width = right.length + 1;
   const lengths = new Uint16Array((left.length + 1) * width);

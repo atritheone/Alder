@@ -312,24 +312,35 @@ export default function ProofreadingPanel({
             <span className="check-type">{a.type}</span>
             {a.message}
           </button>
-          {a.engine === "model" && <small>Possible issue · local model</small>}
+          {a.engine === "model" && mode !== "hover" && (
+            <small>Possible issue · local model</small>
+          )}
           {a.kind === "sentence-revision" && (
             <div className="sentence-revision-preview">
-              <p>
-                <strong>Suggested revision</strong>
-              </p>
-              <p>{revisionDrafts[a.id] ?? a.replacementText}</p>
-              <details>
-                <summary>Compare original</summary>
-                <p>{a.originalText}</p>
-              </details>
-              <details>
-                <summary>Show changes</summary>
+              {mode === "hover" ? (
                 <RevisionComparison
                   original={a.originalText || ""}
                   revised={revisionDrafts[a.id] ?? a.replacementText ?? ""}
                 />
-              </details>
+              ) : (
+                <>
+                  <p>
+                    <strong>Suggested revision</strong>
+                  </p>
+                  <p>{revisionDrafts[a.id] ?? a.replacementText}</p>
+                  <details>
+                    <summary>Compare original</summary>
+                    <p>{a.originalText}</p>
+                  </details>
+                  <details>
+                    <summary>Show changes</summary>
+                    <RevisionComparison
+                      original={a.originalText || ""}
+                      revised={revisionDrafts[a.id] ?? a.replacementText ?? ""}
+                    />
+                  </details>
+                </>
+              )}
               <details>
                 <summary>Edit revision</summary>
                 <textarea

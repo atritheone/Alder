@@ -65,9 +65,16 @@ try {
     await underline.hover();
     await expect(hover).toBeVisible();
     await expect(report).toBeHidden();
-    await expect(
-      hover.getByText("Suggested revision", { exact: true }),
-    ).toBeVisible();
+    const changes = hover.getByLabel("Revision changes");
+    await expect(changes).toBeVisible();
+    for (const label of [
+      "Suggested revision",
+      "Compare original",
+      "Show changes",
+      "Possible issue · local model",
+    ])
+      await expect(hover.getByText(label, { exact: true })).toHaveCount(0);
+    await expect(changes.locator("xpath=ancestor::details")).toHaveCount(0);
     if (index === 0) {
       await hover
         .getByRole("button", { name: "Another version", exact: true })
@@ -83,17 +90,13 @@ try {
       await expect(hover.getByRole("status")).toBeHidden({ timeout: 120000 });
       await expect(hover).toBeVisible();
     }
-    const proposal = await hover
-      .locator(".sentence-revision-preview > p")
-      .nth(1)
-      .innerText();
+    const proposal = await changes.evaluate((element) => {
+      const revised = element.cloneNode(true);
+      revised.querySelectorAll("del").forEach((node) => node.remove());
+      return revised.textContent;
+    });
     expect(proposal).not.toBe(example.source);
-    await hover.getByText("Compare original", { exact: true }).click();
-    await expect(
-      hover.getByText(example.source, { exact: true }),
-    ).toBeVisible();
-    await hover.getByText("Show changes", { exact: true }).click();
-    await expect(hover.getByLabel("Revision changes")).toBeVisible();
+    await expect(changes).toBeVisible();
     await hover
       .getByRole("button", { name: "Accept rewrite", exact: true })
       .scrollIntoViewIfNeeded();
@@ -134,9 +137,9 @@ try {
         status: "passed",
         checks: [
           "hover without opening report",
-          "full sentence preview",
+          "direct sentence changes without duplicate previews or model label",
           "another version remains on hover",
-          "comparison expansion and scrolling",
+          "comparison visible without a foldout",
           "accept on hover",
           "undo",
           "ignore while another version is pending",
