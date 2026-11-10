@@ -10,8 +10,8 @@ repository metadata. A private external workspace holds downloads and builds.
   Electron and Python. Resource architecture must match the host.
 - Platform helpers cover application data directories, process lifecycle,
   macOS menu roles and file opening, shortcut labels and CPU/CUDA/MPS selection.
-- Fontconfig/CoreText discovery supplements directory scans. New documents use
-  bundled Liberation Serif; missing authored fonts are labelled and rendered
+- Fontconfig/CoreText discovery supplements directory scans. New documents request
+  Cambria, with bundled Liberation Serif as a fallback; missing authored fonts are labelled and rendered
   with a fallback without rewriting their stored names.
 - `scripts/setup/` provisions private interpreters, hashed native dependency locks,
   models and common tools directly from pinned public artifacts. Legacy developer
@@ -26,6 +26,51 @@ The new setup flow does not call the old environment-copy speech helper or requi
 an existing common-resource bundle. Dependencies are fetched and checked locally.
 
 ## Validation status
+
+### Version 0.13 release checks (11 November 2026)
+
+The package, backend and application UI identify this release as 0.13. The
+desktop bridge and About display derive their versions from package metadata.
+The agent runbook covers fresh installs and updates from both compatibility levels
+present in 0.12, including the explicit forward migration from 1 to 2 and the
+restriction on rollback after new-format saves.
+
+The 61-test setup suite passed on Windows and Ubuntu/WSL (three platform/tool
+skips on each). Native Windows and Linux update entry points passed 0.12-to-0.13
+preflight against isolated installations without changing them. All four target
+policies have fixture coverage. The copied build workspace includes current
+document metadata, citations, equation fonts and notices. Missing or inconsistent
+backend release metadata fails preflight.
+
+Developer release qualification exercises fresh document creation, legacy snapshot
+migration, original history/text preservation and save/reopen through the packaged
+backend. On model-enabled targets it also runs the sentence-revision probes for
+AU/GB/US English, unchanged text and citation preservation. This uses synthetic
+data and does not certify editorial quality.
+
+On Windows x64, 694 frontend tests and 2,343 backend tests passed. The packaged
+application passed save/quit and backend shutdown, fonts, publishing, CPU speech
+synthesis and recognition, audio export, native system voices, proofreading and
+the document/sentence-revision probes above. These used isolated data on the
+development host. A subsequently discovered small KaTeX font blocked by the
+content policy was fixed by emitting local assets; the strengthened font check
+passed against the application installed from the minimal download. The backend
+was unchanged by that asset fix; its suite was not rerun for the asset-only change.
+
+End users receive a separate minimal source download with no Alder tests,
+fixtures, developer tooling or test-only dependencies. Normal installation checks
+integrity, matching versions and desktop launch only. Full suites run through the
+[developer release procedure](release-validation.md), never as an end-user step.
+The minimal download passed its ZIP/file hashes, dependency exclusions and all
+four target metadata checks. A Windows install from that download passed integrity,
+version and launch verification. The final archive's Linux update preflight also
+passed against an unchanged isolated 0.12 installation.
+
+Linux/WSL preflight and fixture coverage are not full installed 0.13 Linux desktop
+acceptance. Mac native acceptance remains outstanding; Intel Mac remains
+experimental and rules-only. Existing unresolved provenance for the legacy Sitka
+assets is documented in [the provenance record](sitka-provenance.md), which is now
+included with the installed notices. No new provenance claim is made by packaging it.
 
 ### Version 0.12 update workflow
 

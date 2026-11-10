@@ -128,7 +128,7 @@ class Release012Tests(unittest.TestCase):
             with patch('verify.run') as run:
                 if target=='win32-x64':
                     self.assertEqual(desktop(ROOT,app,target,'node',{},self.root)['status'],'passed')
-                    self.assertEqual(run.call_count,3)
+                    self.assertEqual(run.call_count,1)
                 else:
                     with self.assertRaisesRegex(SetupError,'incorrectly included'):
                         desktop(ROOT,app,target,'node',{},self.root)

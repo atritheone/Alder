@@ -30,6 +30,8 @@ intentionally collected.
 | `ALDER_MIGRATION` | A release changes user-data compatibility without a supported migration; keep the existing install |
 | `ALDER_STAGE`, `ALDER_CAPABILITY`, `ALDER_TIMEOUT` | Read the named stage log and report reproducible failure; do not invent dependency changes |
 
-A successful compilation is not a verified installation. Setup requires actual
-publishing tools, speech generation/recognition and desktop lifecycle checks.
-Headless machines remain pending until verification runs in a graphical session.
+A successful compilation is not a verified installation. Normal setup checks
+payload integrity, matching desktop/backend versions and desktop launch. Developer
+regression suites and feature probes are not installation prerequisites and are
+excluded from end-user downloads. Headless machines remain pending until the
+launch check runs in a graphical session.

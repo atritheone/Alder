@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import { version } from "../package.json";
 contextBridge.exposeInMainWorld("alder", {
   printProof: (resource: string, name: string) =>
     ipcRenderer.invoke("alder:print-proof", resource, name),
@@ -44,7 +45,7 @@ contextBridge.exposeInMainWorld("alder", {
     ipcRenderer.invoke("alder:download", path, name),
   mediaBase: "alder://local",
   platform: process.platform,
-  version: "0.12.0",
+  version,
   onOpenFiles: (callback: (paths: string[]) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, paths: string[]) =>
       callback(paths);

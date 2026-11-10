@@ -49,6 +49,9 @@ def validate_metadata(source):
     lock=read_json(source/'package-lock.json')
     if lock.get('version')!=package['version'] or lock.get('packages',{}).get('',{}).get('version')!=package['version']:
         raise SetupError('ALDER_METADATA','package.json and package-lock.json release versions disagree; obtain a corrected repository.')
+    backend_version=re.search(r'^__version__\s*=\s*[\'"]([^\'"]+)',(source/'backend/alder/__init__.py').read_text(),re.M)
+    if not backend_version or backend_version[1]!=package['version']:
+        raise SetupError('ALDER_METADATA','Backend and desktop release versions disagree; obtain a corrected repository.')
     build=package['build']
     for platform_name, label in [('win32','Windows'),('linux','Linux'),('darwin','Mac')]:
         if package.get('alderSetup',{}).get('descriptions',{}).get(platform_name) != 'Alder Organic Language Engine for '+label:
@@ -154,7 +157,7 @@ def inspect_host(source, state, install, target, *, allow_experimental=False, ne
         check_space(state,(80 if target=='darwin-x64' else 45)*2**30)
         check_space(install,18*2**30)
     optional_voices = {'provider': 'sapi' if sys.platform == 'win32' else 'macos' if sys.platform == 'darwin' else 'espeak',
-                       'required': False, 'verification': 'Native rendering is checked after assembly.'}
+                       'required': False, 'verification': 'Native rendering is qualified separately by the developer.'}
     if sys.platform == 'linux':
         optional_voices['libraryFound'] = bool(os.environ.get('ALDER_ESPEAK_LIBRARY') or ctypes.util.find_library('espeak-ng'))
         if not optional_voices['libraryFound']:
@@ -162,7 +165,7 @@ def inspect_host(source, state, install, target, *, allow_experimental=False, ne
     return {**result,'target':target,'stateDirectory':str(state),'installation':str(install), 'systemVoices': optional_voices,
             'features':feature_plan(source,target),'windowsBuildTools':build_tools,
             'memoryGiB':round(memory/2**30,1) if memory else None,
-            'speechRuntime':'CPU wheels on Windows/Linux; native Torch on Mac; actual device is verified by inference',
+            'speechRuntime':'CPU wheels on Windows/Linux; native Torch on Mac',
             'warnings':warnings,'estimatedPeakGiB':80 if target=='darwin-x64' else 45,
             'support':'experimental' if target=='darwin-x64' else 'native verification required',
             'sourcePolicy':'read-only; all generated state is external'}

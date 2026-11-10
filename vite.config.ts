@@ -12,6 +12,8 @@ export default defineConfig({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
+    // Packaged CSP permits local fonts, not data URLs (including tiny KaTeX faces).
+    assetsInlineLimit: 0,
     // PDF.js also bundles extensionless licence files. Avoid a trailing period,
     // which Windows normalises inconsistently between build and packaging.
     rollupOptions: { output: { assetFileNames: "assets/[name]-[hash][extname]" } },

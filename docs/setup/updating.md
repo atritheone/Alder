@@ -1,15 +1,15 @@
-# Agent runbook: update Alder to 0.12
+# Agent runbook: update Alder to 0.13
 
 **Audience: the coding agent performing the update.** The user's request is simply
 "Update Alder." Carry out the procedure; do not give the user a list of terminal
-commands or ask them to edit the repository. Refer to this release as **0.12**. The package metadata retains the required
+commands or ask them to edit the repository. Refer to this release as **0.13**. The package metadata retains the required
 three-part version internally. It contains all required metadata, icons, checksums and
 dependency locks. A missing or inconsistent item is a repository defect, not
 permission to invent it.
 
 ## 1. Establish the source and installation
 
-Read `AGENTS.md` and `SETUP.md`. Use the obtained 0.12 repository or archive as
+Read `AGENTS.md` and `SETUP.md`. Use the obtained 0.13 repository or archive as
 read-only source. Do not reset, patch, or change dependency pins in the checkout.
 If the available checkout is not the requested release, obtain the correct
 published repository revision in a separate folder; preserve any existing local
@@ -19,11 +19,11 @@ Use the user's normal desktop account on the native OS. Run the applicable entry
 point from this checkout, without Administrator/root elevation:
 
 ```powershell
-.\update.ps1 --check --expect-version 0.12 --json
+.\update.ps1 --check --expect-version 0.13 --json
 ```
 
 ```sh
-bash ./update.sh --check --expect-version 0.12 --json
+bash ./update.sh --check --expect-version 0.13 --json
 ```
 
 `update.ps1` and `update.sh` forward to `setup update`. The check reports
@@ -33,10 +33,10 @@ ownership, target architecture, version order and data compatibility. It does
 not build or activate anything or run feature checks. It may provision the pinned
 private Python bootstrap if absent; no global Node/Python is needed.
 
-### 0.12 resources and prerequisites
+### 0.13 resources and prerequisites
 
-Inspect `features` in the preflight report before provisioning. The release adds
-local spelling/grammar checks and a Windows C++ menu module:
+Inspect `features` in the preflight report before provisioning. The release retains
+local spelling/grammar checks and the Windows C++ menu module:
 
 | Native target | Spelling and grammar | Advanced review | Windows C++ module |
 | --- | --- | --- | --- |
@@ -63,13 +63,31 @@ on Linux or Mac; their existing native OS prerequisites still apply.
 
 Allow about 240 MiB for the rules archive and 2.55 GiB for the model download,
 plus runtime dependencies, extraction, cache and application copies. An existing
-0.11 cache may not contain these new resources. Budget Windows Build Tools/SDK
+0.12 cache can reuse matching resources, but cannot reuse an older assembled app.
+Budget Windows Build Tools/SDK
 space separately from Alder's working-space check. Do not use `--offline` for a
-first 0.12 build: it requires an already assembled app for this exact revision
+first 0.13 build: it requires an already assembled app for this exact revision
 and the corresponding verified caches. Reuse the existing state directory online
 to retain compatible downloads.
 
 Interpret the check:
+
+For 0.13, also inspect `previousDataCompatibility`, `dataCompatibility`,
+`dataMigration` and `automaticRollbackCompatible`. This release uses document
+compatibility **2** and explicitly accepts compatibility **1** installations.
+Older 0.12 copies may report either level. Version-1 project snapshots are migrated
+deterministically on read, preserving authored text, and saved in the new format
+on subsequent edits. The SQLite container and `.alder` archive container remain
+version 1; do not edit those numbers manually.
+
+Create and verify the full data backup before the first normal 0.13 launch.
+Preserve templates, personal vocabulary, linked-file records, comments, revisions,
+assets, narration jobs, settings and history as well as the database. If preflight
+reports `dataMigration: true`, a previous application payload is retained but
+automatic rollback is **not compatible** after saving new-format documents.
+Recovery to the older app requires the pre-update data backup and a separate
+user-approved recovery decision that preserves any newer work. Never bypass the
+rollback guard or point an old binary at new-format data.
 
 | Result | Agent action |
 | --- | --- |
@@ -97,11 +115,11 @@ requirements. It must still target the same managed installation.
 Examples with placeholder locations (substitute discovered absolute paths):
 
 ```powershell
-.\update.ps1 --check --expect-version 0.12 --state-dir "D:\AlderSetup" --install-dir "D:\Apps\AlderLocal" --json
+.\update.ps1 --check --expect-version 0.13 --state-dir "D:\AlderSetup" --install-dir "D:\Apps\AlderLocal" --json
 ```
 
 ```sh
-bash ./update.sh --check --expect-version 0.12 --state-dir "/disk/AlderSetup" --install-dir "/disk/AlderInstall" --json
+bash ./update.sh --check --expect-version 0.13 --state-dir "/disk/AlderSetup" --install-dir "/disk/AlderInstall" --json
 ```
 
 ## 2. Preserve the user's work
@@ -140,11 +158,11 @@ than creating an empty one or guessing another path. Preserve any custom
 Run the same entry point and path/version options, removing only `--check`:
 
 ```powershell
-.\update.ps1 --expect-version 0.12 --json
+.\update.ps1 --expect-version 0.13 --json
 ```
 
 ```sh
-bash ./update.sh --expect-version 0.12 --json
+bash ./update.sh --expect-version 0.13 --json
 ```
 
 If Windows blocks the local script, a process-scoped invocation is available:
@@ -153,18 +171,14 @@ arguments. Do not change machine execution policy. Resolve diagnosed OS
 prerequisites using scoped OS elevation only; never disable Electron's sandbox,
 Gatekeeper, certificate checks, or artifact hash verification.
 
-Progress includes resource reuse/provisioning, source build, staged verification,
-activation, and installed verification. The tests cover saving, fonts, publishing,
-narration and recognition using isolated test data. Keep the checkout stable until
-the command ends. Do not run a second updater against the same installation.
-
-Staged and installed checks also execute local spelling/grammar probes for all
-three dialects and real CPU model inference on targets with advanced review.
-Intel Mac explicitly runs rules-only probes. Windows checks require the compiled
-native module outside ASAR and launch the actual desktop application; Unix
-payloads reject a misplaced Windows module. Check results are in the state's
-`logs/staged` and `logs/installed` directories, including `proofreading.json` and
-`capabilities.json`. Feature policy in preflight is not execution evidence.
+Progress includes resource reuse/provisioning, source build, brief launch checking,
+activation and installed launch checking. Normal installs and updates never run
+Alder's developer regression suites, synthetic editing/export exercises, narration
+benchmarks or model-quality probes. Those are the developer's release qualification
+responsibility. The installed check confirms file integrity, the compiled native
+module where required, matching desktop/backend versions and a working start screen
+using an isolated temporary profile. It does not open or rewrite the user's projects.
+Keep the checkout stable until the command ends. Do not start concurrent updaters.
 
 Setup checks for 45 GiB free working space (80 GiB for experimental Intel Mac
 builds) and checks the installation disk before copying the new version. Budget
@@ -176,12 +190,12 @@ error. No `.deb`, DMG, or compressed installer needs to be produced.
 
 | Result | Agent action |
 | --- | --- |
-| Exit 0, `status: passed` | Installed checks passed. Record `previousVersion`, `version`, `launcher`, and report location. `reused: true` means the intact app was verified without rebuilding. |
+| Exit 0, `status: passed` | Installation integrity and launch checks passed. Record `previousVersion`, `version`, `launcher`, and report location. `reused: true` means the intact app was verified without rebuilding. |
 | Exit 2, `status: pending` | Do not claim completion. Existing-app updates retain/restore the old active version. Rerun **update** from a graphical session to finish. |
 | Nonzero, `status: failed` | Read the current error and named stage log, resolve the diagnosed condition, and retry the same command. A failed installed check restores both old version records and the old launcher. |
 
 A passed update already includes installed verification. Do not immediately repeat
-the expensive checks without a new reason. To check later, use `setup.ps1 verify`
+the installation checks without a new reason. To check later, use `setup.ps1 verify`
 or `bash setup.sh verify` from the matching repository and pass the same locations.
 Reports and logs stay in the external state folder; do not upload them automatically.
 
@@ -191,10 +205,10 @@ them. Use **Alder (local)** on Windows, **Alder** in the Linux application menu,
 `~/Applications/Alder.app` on Mac. Report any user-visible confirmation that could
 not be performed separately from the automated checks.
 
-Use release labels such as **0.12** in user-facing messages. Preflight exposes
+Use release labels such as **0.13** in user-facing messages. Preflight exposes
 `installedRelease` and `repositoryRelease` for this purpose; `installedVersion`,
 `repositoryVersion` and completion `version` retain machine-readable package versions.
-Give the user a short outcome: old → new release, launcher, backup location, and
+Give the user a short outcome: old â†’ new release, launcher, backup location, and
 remaining limitations. Do not hand off routine commands for the user to execute.
 
 Include advanced review's experimental quality status, Intel Mac's rules-only
@@ -243,7 +257,7 @@ updater at those folders. Complete this transition instead:
    original data location and confirm projects/reference voices remain available.
    Prefer Alder's `.alder` import for portable project recovery; never hand-edit
    SQLite contents to make a migration appear successful.
-5. Leave the old copy available and tell the user which launcher now runs 0.12.
+5. Leave the old copy available and tell the user which launcher now runs 0.13.
    Removing the old copy is optional follow-up work; do not uninstall it as part
    of this update unless separately requested. Subsequent updates use update.ps1
    or update.sh against the managed root.

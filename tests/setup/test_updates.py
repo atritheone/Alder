@@ -26,7 +26,7 @@ class UpdateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         # Match the updater's canonical paths: macOS /var aliases /private/var,
         # and Windows TEMP can contain an 8.3 name such as RUNNER~1.
-        self.root=Path(self.temp.name).resolve()/'Alder update é'
+        self.root=Path(self.temp.name).resolve()/'Alder update Ã©'
         self.root.mkdir()
         self.state=self.root/'setup state';cli.own_state(self.state)
         self.install=self.root/'installed app'
@@ -86,12 +86,12 @@ class UpdateTests(unittest.TestCase):
         self.active['fingerprint']=self.fingerprint;write_json(self.install/'active.json',self.active)
         self.assertEqual(self.plan()['status'],'current')
 
-    def test_011_to_012_preserves_previous_installation_during_preflight(self):
-        self.active['version']='0.11.0';write_json(self.install/'active.json',self.active)
+    def test_012_to_013_preserves_previous_installation_during_preflight(self):
+        self.active['version']='0.12.0';write_json(self.install/'active.json',self.active)
         before=inventory(self.install)
-        plan=self.plan(expected_version='0.12')
-        self.assertEqual(plan['installedRelease'],'0.11')
-        self.assertEqual(plan['repositoryRelease'],'0.12')
+        plan=self.plan(expected_version='0.13')
+        self.assertEqual(plan['installedRelease'],'0.12')
+        self.assertEqual(plan['repositoryRelease'],'0.13')
         self.assertEqual(plan['status'],'update-available')
         self.assertEqual(inventory(self.install),before)
 
@@ -106,13 +106,13 @@ class UpdateTests(unittest.TestCase):
 
     def test_short_release_name_accepts_zero_patch_without_accepting_other_patches(self):
         source=self.root/'release source'
-        package=read_json(ROOT/'package.json');package['version']='0.12.0'
+        package=read_json(ROOT/'package.json');package['version']='0.13.0'
         write_json(source/'package.json',package)
-        plan=updates.update_plan(source,self.install,'linux-x64',self.fingerprint,'0.12')
-        self.assertEqual(plan['repositoryRelease'],'0.12')
-        package['version']='0.12.1';write_json(source/'package.json',package)
+        plan=updates.update_plan(source,self.install,'linux-x64',self.fingerprint,'0.13')
+        self.assertEqual(plan['repositoryRelease'],'0.13')
+        package['version']='0.13.1';write_json(source/'package.json',package)
         with self.assertRaisesRegex(SetupError,'not requested version'):
-            updates.update_plan(source,self.install,'linux-x64',self.fingerprint,'0.12')
+            updates.update_plan(source,self.install,'linux-x64',self.fingerprint,'0.13')
 
     def test_missing_legacy_and_unowned_installations_are_not_adopted(self):
         for root in (self.root/'missing',self.root/'legacy'):
@@ -213,7 +213,6 @@ class UpdateTests(unittest.TestCase):
         resources=stack.enter_context(patch('cli.Resources'))
         resources.return_value.prepare.return_value=self.root/'resources'
         desktop=stack.enter_context(patch('cli.desktop',side_effect=desktops or [{'status':'passed'},{'status':'passed'}]))
-        stack.enter_context(patch('cli.capabilities'))
         # setup's source fingerprint maps to this fixture's verification workspace.
         (self.state/'workspace'/self.fingerprint/'node_modules').mkdir(parents=True,exist_ok=True)
         return resources,desktop,integrations
@@ -232,6 +231,14 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(status,0);self.assertEqual(result['status'],'update-available')
         resources.assert_not_called();desktop.assert_not_called()
         self.assertEqual(before,inventory(self.state))
+
+    def test_normal_update_does_not_run_developer_regression_commands(self):
+        self.execution()
+        with patch('cli.run') as commands:
+            status,result=self.invoke('--expect-version',self.version)
+        self.assertEqual(status,0)
+        self.assertEqual(result['verificationScope'],'installation integrity and launch')
+        commands.assert_not_called()  # Build/launch mocked; no pytest, Vitest or inference suite remains.
 
     def test_migration_failure_precedes_native_dependencies(self):
         resources,desktop,_=self.execution()

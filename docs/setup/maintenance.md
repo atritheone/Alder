@@ -3,9 +3,9 @@
 Agent reference: perform these operations for the user and report the outcome.
 Do not ask the user to run the commands or supply repository metadata.
 
-For the usual 0.12 upgrade, start with the [update guide](updating.md) and the
+For the usual 0.13 upgrade, start with the [update guide](updating.md) and the
 dedicated `update.ps1` / `update.sh` scripts. `--check` reports the existing and
-target versions before building; `--expect-version 0.12` prevents using the wrong
+target versions before building; `--expect-version 0.13` prevents using the wrong
 repository. Preserve your original custom paths and back up your data before updating.
 
 Use `setup.ps1` on Windows or `bash setup.sh` on Unix with the following commands:
@@ -14,7 +14,7 @@ Use `setup.ps1` on Windows or `bash setup.sh` on Unix with the following command
 | --- | --- |
 | `doctor` | Validate metadata and inspect prerequisites without modifying the checkout |
 | `install` | Resume verified components or assemble and install the requested revision |
-| `verify` | Check installed hashes, desktop save/export behavior, publishing, speech and recognition |
+| `verify` | Check installed hashes, matching versions and desktop launch |
 | `repair` | Rebuild damaged generated workspace/application components from committed inputs |
 | `update` | Update an existing managed installation; detect version/compatibility problems before building and refuse an accidental fresh install or downgrade |
 | `rollback` | Reactivate a verified previous app with the same declared data compatibility level |
@@ -26,12 +26,16 @@ Setup operations use an OS lock. Close Alder before activation/maintenance; setu
 does not kill the user's app. Re-running an interrupted command revalidates cached
 work instead of trusting directory existence alone.
 
-Updates with a changed data-compatibility declaration stop until the maintainer
-provides a migration. Setup never assumes an older binary can open a newer database.
+Updates accept only explicitly declared forward migrations. 0.13 supports
+document compatibility 1 to 2; other incompatible changes stop. Setup never assumes
+an older binary can open newer documents. A pre-update verified data backup is
+required before normal launch; automatic rollback from compatibility 2 to 1 is
+blocked. Preserve newer work before any separately agreed backup recovery.
 Failed installed verification restores the previous launcher and both version
 records when one exists. Pending graphical verification keeps/restores the old
 active version; rerun update in the desktop session to complete the upgrade.
-The current and previous verified versions permit rollback; older unmodified
+The current and previous verified versions permit rollback only when their data
+compatibility levels match; older unmodified
 payloads are pruned after successful activation. Modified/user-added files are
 preserved. Account for the current and new versions when selecting a disk.
 

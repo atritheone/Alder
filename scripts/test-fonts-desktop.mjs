@@ -18,8 +18,12 @@ const app = await electron.launch({
 });
 try {
   const page = await app.firstWindow();
+  const blockedFonts = [];
   page.on("console", (message) => {
-    if (message.type() === "error") console.error(message.text());
+    if (message.type() === "error") {
+      console.error(message.text());
+      if (/font.*Content Security Policy/is.test(message.text())) blockedFonts.push(message.text());
+    }
   });
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
@@ -99,6 +103,8 @@ try {
       ).settings.fontFamily,
   );
   expect(font).toBe("Alder Missing Font Fixture");
+  await page.evaluate(() => document.fonts.load('12px "KaTeX_Size3"'));
+  expect(blockedFonts, "Packaged fonts must satisfy the local asset policy").toEqual([]);
   console.log(
     JSON.stringify({
       ok: true,

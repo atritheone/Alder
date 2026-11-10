@@ -910,6 +910,8 @@ async function createWindow() {
       "document.body.innerText",
     );
     const result = {
+      version: app.getVersion(),
+      backendVersion: (await request("GET", "/api/health")).version,
       ok:
         text.includes("Alder") && text.includes("New") && text.includes("Open"),
       title: window.getTitle(),

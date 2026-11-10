@@ -1,4 +1,5 @@
 import { formatInteger } from "./numberDisplay";
+import { version as releaseVersion } from "../../package.json";
 import { prepareExport, type ExportProgress } from './documentExports';
 import { useTypingPointer } from "./useTypingPointer";
 import RunningMatterDialog from "./RunningMatterDialog";
@@ -4310,7 +4311,7 @@ export default function App() {
                 <div className="about-panel">
                   <AlderLogo />
                   <h1>Alder</h1>
-                  <p>Organic Language Engine · 0.12.0</p>
+                  <p>Organic Language Engine · {releaseVersion.replace(/\.0$/, "")}</p>
                   <p>
                     Language as material. A workstation for writing,
                     experimenting, collating, and listening.

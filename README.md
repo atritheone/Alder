@@ -14,12 +14,12 @@
 </p>
 
 <p align="center">
-  <a href="https://atritheone.com/alder">Website</a> ·
-  <a href="#update-to-alder-012">Update to 0.12</a> ·
-  <a href="#install-alder">Install</a> ·
-  <a href="#start-writing">Start writing</a> ·
-  <a href="#listen-to-your-writing">Listen</a> ·
-  <a href="#updates-and-help">Updates and help</a> ·
+  <a href="https://atritheone.com/alder">Website</a> Â·
+  <a href="#update-to-alder-013">Update to 0.13</a> Â·
+  <a href="#install-alder">Install</a> Â·
+  <a href="#start-writing">Start writing</a> Â·
+  <a href="#listen-to-your-writing">Listen</a> Â·
+  <a href="#updates-and-help">Updates and help</a> Â·
   <a href="LICENCE.md">MIT Licence</a>
 </p>
 
@@ -27,10 +27,13 @@ Alder is an **Organic Language Engine (OLE)**, an application software used for 
 
 Alder is named after **Dr. Alder Wright**.
 
-## Update to Alder 0.12
+## Update to Alder 0.13
 
-This repository contains **Alder 0.12**. If you already have Alder, open this
-repository in your coding agent and give it this request:
+This repository contains **Alder 0.13**. Use **Alder-0.13-source.zip**, the test-free source download,
+from [Releases](https://github.com/atritheone/Alder/releases) for installation and
+updates. It contains the required source, tools, assets, licences and agent
+instructions, without developer tests or test-only dependencies. Extract it and
+open that folder in your coding agent. If you already have Alder, ask:
 
 > Update Alder for me. Follow AGENTS.md and docs/setup/updating.md, preserve my
 > projects and settings, and tell me when the update has passed verification.
@@ -40,7 +43,12 @@ backs up your data, runs the update, and verifies the result. You do not need to
 edit files or run terminal commands yourself. Existing verified resources are
 reused, and a compatible previous version is retained for rollback.
 
-The 0.12 update includes local spelling and grammar resources. Your agent also
+The 0.13 update expands document editing, review, layout, publishing and local
+sentence revision. It also updates the document format: your agent backs up your
+data before upgrading, and checks whether returning to the previous version is
+compatible. Keep that backup; older versions cannot safely edit the new format.
+
+The update includes local spelling and grammar resources. Your agent also
 checks the C++ build tools needed for Windows' native menus; Linux and Mac do not
 use that Windows component. Advanced review is experimental, with the model
 available on Windows x64, Linux x64 and Apple Silicon. Intel Mac receives the
@@ -52,7 +60,7 @@ Alder first. If this is your first installation, continue below.
 
 ## Install Alder
 
-Start with a copy of this repository on the machine where you want to use Alder.
+Start with the test-free source download from Releases on the machine where you want to use Alder.
 You can ask Codex or another coding agent to install it, or use the commands below
 yourself. You do not need to edit any files, fill in package details, or install
 Node.js or Python yourself. The repository includes the installation instructions,
@@ -67,13 +75,13 @@ platform icons, and dependency information.
 - Use at least **8 GiB of RAM**; **16 GiB is recommended**.
 - Open a normal desktop terminal. Do not run the whole installation as
   Administrator or with `sudo`. Setup will explain any missing system prerequisites.
-- Allow time for the large downloads and the checks of writing, publishing, and
-  speech. Setup can resume after an interruption.
+- Allow time for the large downloads and local build. Setup checks installation
+  integrity and launch, and can resume after an interruption.
 
 | Version | Machine requirements and current status |
 | --- | --- |
 | Alder Organic Language Engine for Windows | Windows x64. Installation and application checks have passed on the Windows development machine using fresh setup resources. |
-| Alder Organic Language Engine for Linux | Linux x64 with glibc 2.35 or newer and a graphical desktop. Installation and application checks have passed on Ubuntu 24.04 under WSL/WSLg; the separate Kali VM has not completed the same checks. |
+| Alder Organic Language Engine for Linux | Linux x64 with glibc 2.35 or newer and a graphical desktop. An earlier release passed installation checks on Ubuntu 24.04 under WSL/WSLg. Full native application validation for 0.13 remains outstanding. |
 | Alder Organic Language Engine for Mac | macOS 14 or newer. Apple Silicon setup is provided but still needs testing on a Mac. Intel Mac setup is experimental and requires additional time and disk space. |
 
 ### Ask your coding agent
@@ -92,14 +100,14 @@ need it running to use Alder.
 
 Open a terminal in the repository folder.
 
-**Windows — PowerShell:**
+**Windows â€” PowerShell:**
 
 ```powershell
 .\setup.ps1 doctor
 .\setup.ps1 install
 ```
 
-**Linux or Mac — Terminal:**
+**Linux or Mac â€” Terminal:**
 
 ```sh
 bash ./setup.sh doctor
@@ -107,8 +115,8 @@ bash ./setup.sh install
 ```
 
 `doctor` checks your machine and explains anything that needs attention.
-`install` downloads the required resources, creates your application, and tests
-it. It works in a separate local folder and leaves the repository unchanged.
+`install` downloads the required resources, creates your application, and checks
+its integrity, version and launch. It works in a separate local folder and leaves the repository unchanged.
 If setup stops, address the reported issue and run the same command again.
 Existing completed work is checked and reused.
 
@@ -129,16 +137,6 @@ After installation, open Alder using the launcher reported by setup:
 You do not need a terminal or the repository to open the installed application.
 Keep access to the matching repository version and setup resources for checking,
 repairing, or updating your installation.
-
-### Test the current checkout on Windows
-
-Run `start.cmd` to rebuild and open the current source code, including uncommitted
-edits. This testing launcher requires Node.js with npm and existing Alder bundled
-runtimes (from a release folder or setup). It closes an open Alder window through
-the normal save handshake, builds outside the checkout under
-`%LOCALAPPDATA%\AlderTesting`, and launches only if the build succeeds. It never
-falls back to an older packaged app. Dependencies are cached between runs.
-Use `start.cmd --build-only` to build without closing or launching Alder.
 
 ## Start writing
 
@@ -215,7 +213,7 @@ GPU support; Mac acceleration has not yet been validated.
 
 ## Updates and help
 
-For version 0.12, follow the [update guide](docs/setup/updating.md) or give your
+For version 0.13, follow the [update guide](docs/setup/updating.md) or give your
 agent the request above. Obtain the new repository version before updating; setup
 does not fetch or alter your repository for you. Close Alder before maintenance
 and keep backups of your projects. The update scripts include verification, so a

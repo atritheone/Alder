@@ -15,12 +15,12 @@ from downloads import fetch, extract
 from resources import Resources
 from install import activate, default_install, restore_activation, resource_dir, require_closed, rollback, uninstall, prune_versions
 from updates import discover_install, update_plan
-from verify import capabilities, desktop
+from verify import desktop
 
 SOURCE = Path(__file__).resolve().parents[2]
 SOURCE_DIRS = ('frontend','electron','backend','scripts','build','resources')
 ROOT_FILES = ('package.json','package-lock.json','tsconfig.json','vite.config.ts','vitest.config.ts',
-              'LICENCE.md','README.md','SETUP.md','AGENTS.md','setup.sh','setup.ps1','update.sh','update.ps1',
+              'LICENCE.md','THIRD-PARTY-NOTICES.md','README.md','SETUP.md','AGENTS.md','setup.sh','setup.ps1','update.sh','update.ps1',
               'requirements.txt','requirements-core.lock.txt','requirements-speech.txt','requirements-qa.txt')
 
 
@@ -34,7 +34,7 @@ def source_files(source):
             if p.is_file() and p.suffix not in ('.pyc','.pyo'):
                 if not p.resolve().is_relative_to(source.resolve()):raise SetupError('ALDER_SOURCE','Source links outside the repository are not accepted.')
                 yield p
-    for name in ROOT_FILES+('chatterbox/LICENSE','chatterbox/pyproject.toml'):
+    for name in ROOT_FILES+('chatterbox/LICENSE','chatterbox/pyproject.toml','docs/sitka-provenance.md'):
         p=source/name
         if p.is_file():yield p
 
@@ -121,7 +121,6 @@ def build(source,state,target,env,node,npm,resources,fingerprint,offline):
         env={**env,'PYTHON':str(resources/'python/python.exe'),'NODE_GYP_FORCE_PYTHON':str(resources/'python/python.exe')}
     logs=state/'logs';check_space(state,20*2**30)
     run([node,npm,'ci','--cache',state/'cache/npm'],workspace,env,logs,'npm-ci')
-    run([node,npm,'test'],workspace,env,logs,'source-tests',timeout=600)
     run([node,npm,'run','build'],workspace,env,logs,'desktop-build',timeout=600)
     run([node,'scripts/prepare-javascript-notices.mjs'],workspace,env,logs,'javascript-notices')
     # Keep installed Linux launcher icons beside resources, independent of source.
@@ -176,14 +175,12 @@ def execute(args):
                 raise SetupError('ALDER_HASH','Installed files failed integrity checking. Run repair.')
             if not (workspace/'node_modules').exists():raise SetupError('ALDER_VERIFY','Verification tools are unavailable. Run install to restore the matching verification workspace.')
             result=desktop(workspace,install/active['directory'],target,node,env,state/'logs')
-            capabilities(workspace,resource_dir(install/active['directory'],target),target,env,state/'logs/installed')
             active['verification']=result['status'];write_json(install/'active.json',active)
             return {'status':result['status'],'version':active['version'],'installation':str(install),'launcher':active.get('launcher'),'checks':result,'features':info.get('features',{})}
         if active and active['fingerprint']==fingerprint and args.command!='repair' and verify_inventory(install/active['directory'],read_json(install/active['inventory'])):
             if not (workspace/'node_modules').exists():
                 raise SetupError('ALDER_VERIFY','Verification workspace is missing. Run repair to restore it.')
             result=desktop(workspace,install/active['directory'],target,node,env,state/'logs')
-            capabilities(workspace,resource_dir(install/active['directory'],target),target,env,state/'logs/installed')
             active['verification']=result['status'];write_json(install/'active.json',active)
             if source_fingerprint(SOURCE)!=fingerprint:raise SetupError('ALDER_SOURCE','Repository changed during verification. Retry against a stable revision.')
             return {'status':result['status'],'version':active['version'],'previousVersion':active['version'],'reused':True,'launcher':active.get('launcher'),'installation':str(install),'sourceUnchanged':True,'features':info.get('features',{})}
@@ -196,10 +193,7 @@ def execute(args):
         resources=resource_builder.prepare()
         workspace,app=build(SOURCE,state,target,env,node,npm,resources,fingerprint,args.offline)
         layout=read_json(SOURCE/'backend/alder/runtime-layout.json')[target.rsplit('-',1)[0]]
-        run([resources/layout['python'],'-m','pytest','backend/tests','-q','-p','no:cacheprovider'],workspace,
-            {**env,'PYTHONPATH':str(workspace/'backend'),'ALDER_RESOURCES_DIR':str(resources)},state/'logs','backend-tests',timeout=600)
         stage_report=desktop(workspace,app,target,node,env,state/'logs/staged')
-        capabilities(workspace,resource_dir(app,target),target,env,state/'logs/staged')
         if active and stage_report['status']!='passed':
             return {'status':'pending','version':active['version'],'requestedVersion':read_json(SOURCE/'package.json')['version'],
                     'installation':str(install),'launcher':active.get('launcher'),'activated':False,
@@ -211,7 +205,6 @@ def execute(args):
         new=activate(install,app,target,version,fingerprint,SOURCE)
         try:
             result=desktop(workspace,install/new['directory'],target,node,env,state/'logs/installed')
-            capabilities(workspace,resource_dir(install/new['directory'],target),target,env,state/'logs/installed')
             if active and result['status']!='passed':
                 restore_activation(install,active,retained)
                 return {'status':'pending','version':active['version'],'requestedVersion':version,'installation':str(install),
@@ -226,7 +219,7 @@ def execute(args):
                 'launcher':new['launcher'],'sourceUnchanged':True,'offlineRuntime':True,
                 'dataCompatibility':new['dataCompatibility'],
                 'automaticRollbackCompatible':bool(active and active.get('dataCompatibility')==new['dataCompatibility']),
-                'speechDevice':'cpu baseline','humanListeningApproval':False,'warnings':info['warnings'],'features':info.get('features',{})}
+                'verificationScope':'installation integrity and launch','warnings':info['warnings'],'features':info.get('features',{})}
 
 
 def report_failure(args, result):
@@ -247,7 +240,7 @@ def main(argv=None):
     parser.add_argument('--state-dir',type=Path,default=state_default())
     parser.add_argument('--install-dir',type=Path,help='Existing managed root for update; application destination for install.')
     parser.add_argument('--check',action='store_true',help='Update only: report installed/repository versions without building or activating.')
-    parser.add_argument('--expect-version',help='Update only: require this release, for example 0.12 (equivalent to package version 0.12.0).')
+    parser.add_argument('--expect-version',help='Update only: require this release, for example 0.13 (equivalent to package version 0.13.0).')
     parser.add_argument('--offline',action='store_true')
     parser.add_argument('--json',action='store_true')
     parser.add_argument('--noninteractive',action='store_true',help='Setup never prompts for credentials or runs elevated prerequisites.')
