@@ -14,129 +14,18 @@
 </p>
 
 <p align="center">
-  <a href="https://atritheone.com/alder">Website</a> Â·
-  <a href="#update-to-alder-013">Update to 0.13</a> Â·
-  <a href="#install-alder">Install</a> Â·
-  <a href="#start-writing">Start writing</a> Â·
-  <a href="#listen-to-your-writing">Listen</a> Â·
-  <a href="#updates-and-help">Updates and help</a> Â·
+  <a href="https://atritheone.com/alder">Website</a> &middot;
+  <a href="#start-writing">Start writing</a> &middot;
+  <a href="#listen-to-your-writing">Listen</a> &middot;
+  <a href="#install-alder">Install</a> &middot;
+  <a href="#update-to-alder-013">Update to 0.13</a> &middot;
+  <a href="#updates-and-help">Updates and help</a> &middot;
   <a href="LICENCE.md">MIT Licence</a>
 </p>
 
 Alder is an **Organic Language Engine (OLE)**, an application software used for processing, editing, and creating language. OLEs like Alder use a sandbox that works from the word level to manipulate language as well as a collation interface to manage and output written files.
 
 Alder is named after **Dr. Alder Wright**.
-
-## Update to Alder 0.13
-
-This repository contains **Alder 0.13**. Use **Alder-0.13-source.zip**, the test-free source download,
-from [Releases](https://github.com/atritheone/Alder/releases) for installation and
-updates. It contains the required source, tools, assets, licences and agent
-instructions, without developer tests or test-only dependencies. Extract it and
-open that folder in your coding agent. If you already have Alder, ask:
-
-> Update Alder for me. Follow AGENTS.md and docs/setup/updating.md, preserve my
-> projects and settings, and tell me when the update has passed verification.
-
-Your agent checks the installed version, preserves your existing locations,
-backs up your data, runs the update, and verifies the result. You do not need to
-edit files or run terminal commands yourself. Existing verified resources are
-reused, and a compatible previous version is retained for rollback.
-
-The 0.13 update expands document editing, review, layout, publishing and local
-sentence revision. It also updates the document format: your agent backs up your
-data before upgrading, and checks whether returning to the previous version is
-compatible. Keep that backup; older versions cannot safely edit the new format.
-
-The update includes local spelling and grammar resources. Your agent also
-checks the C++ build tools needed for Windows' native menus; Linux and Mac do not
-use that Windows component. Advanced review is experimental, with the model
-available on Windows x64, Linux x64 and Apple Silicon. Intel Mac receives the
-spelling/grammar rules only and remains an experimental installation target.
-
-The [agent update runbook](docs/setup/updating.md) covers custom locations,
-recovery, and older installer or portable copies. You do not need to uninstall
-Alder first. If this is your first installation, continue below.
-
-## Install Alder
-
-Start with the test-free source download from Releases on the machine where you want to use Alder.
-You can ask Codex or another coding agent to install it, or use the commands below
-yourself. You do not need to edit any files, fill in package details, or install
-Node.js or Python yourself. The repository includes the installation instructions,
-platform icons, and dependency information.
-
-### Before you begin
-
-- Have an internet connection for the first installation. Setup downloads the
-  application tools, dictionaries, fonts, and local speech models.
-- Allow roughly **45 GiB of free working space**, including downloads and the
-  installed application. Setup checks available space before large steps.
-- Use at least **8 GiB of RAM**; **16 GiB is recommended**.
-- Open a normal desktop terminal. Do not run the whole installation as
-  Administrator or with `sudo`. Setup will explain any missing system prerequisites.
-- Allow time for the large downloads and local build. Setup checks installation
-  integrity and launch, and can resume after an interruption.
-
-| Version | Machine requirements and current status |
-| --- | --- |
-| Alder Organic Language Engine for Windows | Windows x64. Installation and application checks have passed on the Windows development machine using fresh setup resources. |
-| Alder Organic Language Engine for Linux | Linux x64 with glibc 2.35 or newer and a graphical desktop. An earlier release passed installation checks on Ubuntu 24.04 under WSL/WSLg. Full native application validation for 0.13 remains outstanding. |
-| Alder Organic Language Engine for Mac | macOS 14 or newer. Apple Silicon setup is provided but still needs testing on a Mac. Intel Mac setup is experimental and requires additional time and disk space. |
-
-### Ask your coding agent
-
-Open this repository in your coding agent and give it this request:
-
-> Install Alder on this machine. Read AGENTS.md and SETUP.md, run setup doctor,
-> complete the native installation and verification, and tell me how to open
-> Alder and whether any checks remain incomplete. Do not edit the repository or
-> supply missing metadata.
-
-The agent is only needed to help with installation or maintenance. You do not
-need it running to use Alder.
-
-### Or run setup yourself
-
-Open a terminal in the repository folder.
-
-**Windows â€” PowerShell:**
-
-```powershell
-.\setup.ps1 doctor
-.\setup.ps1 install
-```
-
-**Linux or Mac â€” Terminal:**
-
-```sh
-bash ./setup.sh doctor
-bash ./setup.sh install
-```
-
-`doctor` checks your machine and explains anything that needs attention.
-`install` downloads the required resources, creates your application, and checks
-its integrity, version and launch. It works in a separate local folder and leaves the repository unchanged.
-If setup stops, address the reported issue and run the same command again.
-Existing completed work is checked and reused.
-
-Wait for a successful verification result. A result marked **pending** means
-some checks still need to run, for example in a graphical desktop session.
-The [full setup guide](SETUP.md) explains custom disk locations, offline reuse,
-and other installation options.
-
-### Open Alder
-
-After installation, open Alder using the launcher reported by setup:
-
-- **Windows:** **Alder (local)** in the Start menu.
-- **Linux:** **Alder** in your application menu, or `~/.local/bin/alder`.
-- **Mac:** **Alder.app** in your home folder's **Applications** folder
-  (`~/Applications/Alder.app`).
-
-You do not need a terminal or the repository to open the installed application.
-Keep access to the matching repository version and setup resources for checking,
-repairing, or updating your installation.
 
 ## Start writing
 
@@ -207,14 +96,126 @@ Local speech recognition checks generated speech against the intended wording.
 Listening review lets you approve a take separately from the automatic checks.
 Automatic checks do not replace listening to the result yourself.
 
-Setup verifies CPU narration. Generation can take time, especially in a virtual
+Local CPU narration can take time, especially in a virtual
 machine. The Windows and Linux installation path does not currently install CUDA
 GPU support; Mac acceleration has not yet been validated.
+
+## Install Alder
+
+Download **Alder-0.13-source.zip** from [Releases](https://github.com/atritheone/Alder/releases)
+and extract it on the machine where you want to use Alder.
+You can ask Codex or another coding agent to install it, or use the commands below
+yourself. You do not need to edit any files, fill in package details, or install
+Node.js or Python yourself. The repository includes the installation instructions,
+platform icons, and dependency information.
+
+### Before you begin
+
+- Have an internet connection for the first installation. Setup downloads the
+  application tools, dictionaries, fonts, and local speech models.
+- Allow roughly **45 GiB of free working space**, including downloads and the
+  installed application. Setup checks available space before large steps.
+- Use at least **8 GiB of RAM**; **16 GiB is recommended**.
+- Open a normal desktop terminal. Do not run the whole installation as
+  Administrator or with `sudo`. Setup will explain any missing system prerequisites.
+- Allow time for the large downloads and local build. Setup checks installation
+  integrity and launch, and can resume after an interruption.
+
+| Version | Machine requirements and current status |
+| --- | --- |
+| Alder Organic Language Engine for Windows | Windows x64. Installation and application checks have passed on the Windows development machine using fresh setup resources. |
+| Alder Organic Language Engine for Linux | Linux x64 with glibc 2.35 or newer and a graphical desktop. An earlier release passed installation checks on Ubuntu 24.04 under WSL/WSLg. Full native application validation for 0.13 remains outstanding. |
+| Alder Organic Language Engine for Mac | macOS 14 or newer. Apple Silicon setup is provided but still needs testing on a Mac. Intel Mac setup is experimental and requires additional time and disk space. |
+
+### Ask your coding agent
+
+Open this repository in your coding agent and give it this request:
+
+> Install Alder on this machine. Read AGENTS.md and SETUP.md, run setup doctor,
+> complete the native installation and verification, and tell me how to open
+> Alder and whether any checks remain incomplete. Do not edit the repository or
+> supply missing metadata.
+
+The agent is only needed to help with installation or maintenance. You do not
+need it running to use Alder.
+
+### Or run setup yourself
+
+Open a terminal in the repository folder.
+
+**Windows (PowerShell):**
+
+```powershell
+.\setup.ps1 doctor
+.\setup.ps1 install
+```
+
+**Linux or Mac (Terminal):**
+
+```sh
+bash ./setup.sh doctor
+bash ./setup.sh install
+```
+
+`doctor` checks your machine and explains anything that needs attention.
+`install` downloads the required resources, creates your application, and checks
+its integrity, version and launch. It works in a separate local folder and leaves the repository unchanged.
+If setup stops, address the reported issue and run the same command again.
+Existing completed work is checked and reused.
+
+Wait for a successful verification result. A result marked **pending** means
+some checks still need to run, for example in a graphical desktop session.
+The [full setup guide](SETUP.md) explains custom disk locations, offline reuse,
+and other installation options.
+
+### Open Alder
+
+After installation, open Alder using the launcher reported by setup:
+
+- **Windows:** **Alder (local)** in the Start menu.
+- **Linux:** **Alder** in your application menu, or `~/.local/bin/alder`.
+- **Mac:** **Alder.app** in your home folder's **Applications** folder
+  (`~/Applications/Alder.app`).
+
+You do not need a terminal or the repository to open the installed application.
+Keep access to the matching repository version and setup resources for checking,
+repairing, or updating your installation.
+
+## Update to Alder 0.13
+
+This repository contains **Alder 0.13**. Use **Alder-0.13-source.zip**, the test-free source download,
+from [Releases](https://github.com/atritheone/Alder/releases) for installation and
+updates. It contains the required source, tools, assets, licences and agent
+instructions, without developer tests or test-only dependencies. Extract it and
+open that folder in your coding agent. If you already have Alder, ask:
+
+> Update Alder for me. Follow AGENTS.md and docs/setup/updating.md, preserve my
+> projects and settings, and tell me when the update has passed verification.
+
+Your agent checks the installed version, preserves your existing locations,
+backs up your data, runs the update, and verifies the result. You do not need to
+edit files or run terminal commands yourself. Existing verified resources are
+reused, and a compatible previous version is retained for rollback.
+
+The 0.13 update expands document editing, review, layout, publishing and local
+sentence revision. It also updates the document format: your agent backs up your
+data before upgrading, and checks whether returning to the previous version is
+compatible. Keep that backup; older versions cannot safely edit the new format.
+
+The update includes local spelling and grammar resources. Your agent also
+checks the C++ build tools needed for Windows' native menus; Linux and Mac do not
+use that Windows component. Advanced review is experimental, with the model
+available on Windows x64, Linux x64 and Apple Silicon. Intel Mac receives the
+spelling/grammar rules only and remains an experimental installation target.
+
+The [agent update runbook](docs/setup/updating.md) covers custom locations,
+recovery, and older installer or portable copies. You do not need to uninstall
+Alder first. For a first installation, follow [Install Alder](#install-alder).
 
 ## Updates and help
 
 For version 0.13, follow the [update guide](docs/setup/updating.md) or give your
-agent the request above. Obtain the new repository version before updating; setup
+agent the request above. Obtain the new release download before updating; setup
 does not fetch or alter your repository for you. Close Alder before maintenance
 and keep backups of your projects. The update scripts include verification, so a
 passed update does not need an immediate second verification run.
@@ -234,7 +235,7 @@ bash ./setup.sh verify
 
 | Command | When to use it |
 | --- | --- |
-| `verify` | Check the installed application and its writing, publishing, and speech features. |
+| `verify` | Check installed file integrity, versions and application launch. |
 | `repair` | Restore damaged application or setup files. |
 | `update` | Update an existing managed installation; use update.ps1 or update.sh. |
 | `rollback` | Return to the previous verified version when its data format is compatible. |

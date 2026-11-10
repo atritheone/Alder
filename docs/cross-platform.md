@@ -62,8 +62,11 @@ fixtures, developer tooling or test-only dependencies. Normal installation check
 integrity, matching versions and desktop launch only. Full suites run through the
 [developer release procedure](release-validation.md), never as an end-user step.
 The minimal download passed its ZIP/file hashes, dependency exclusions and all
-four target metadata checks. A Windows install from that download passed integrity,
-version and launch verification. The final archive's Linux update preflight also
+four target metadata checks. A Windows install and subsequent update using the
+minimal downloads passed integrity, version and launch verification. The release
+archive was compared against the exercised download: only README text and its
+manifest hash differ; application/setup/dependency bytes are identical.
+The final archive's Linux update preflight also
 passed against an unchanged isolated 0.12 installation.
 
 Linux/WSL preflight and fixture coverage are not full installed 0.13 Linux desktop
