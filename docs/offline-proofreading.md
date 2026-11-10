@@ -8,7 +8,9 @@ With the local model pack available, **Suggest sentence structure and clarity im
 
 Choose **Improve sentence or selection**, or press **F7** with the writing editor focused, to request a revision explicitly. This works even with automatic sentence suggestions disabled. A selection may contain multiple sentences; each paragraph remains a separate editing boundary. **Another version** requests an alternative construction. **Creative writing and dialogue** asks the model to retain intentional fragments, repetition, rhythm and character dialect.
 
-Each suggestion shows the complete replacement. **Show changes** compares wording, **Compare original** shows the source, and **Edit revision** lets the author adjust a proposal before acceptance. **Accept rewrite** applies the revision in one undo step. The report stays open without blocking writing. **Review sentence structure across book** combines rule findings with sentence revisions chapter by chapter.
+Hover over an underlined sentence to see its complete replacement and **Accept rewrite** directly beside the writing. A sentence revision takes priority over a nested word-level grammar underline. The card stays open while requesting another version, expanding comparisons or scrolling inside it; it closes after acceptance or when its source becomes invalid. The full report remains available from the status bar.
+
+**Show changes** compares wording, **Compare original** shows the source, and **Edit revision** lets the author adjust a proposal before acceptance. **Accept rewrite** applies the revision in one undo step. The report stays open without blocking writing. **Review sentence structure across book** combines rule findings with sentence revisions chapter by chapter.
 
 Uniform character formatting survives a revision. Unambiguously matched formatted phrases and hyperlinks can move with their wording. Inline citations and fields are retained as actual document objects, with their displayed wording protected during generation. A revision that changes or ambiguously locates a field or specially formatted phrase is refused rather than silently discarding document structure. The author can adjust the proposal or edit the manuscript manually. Generated bibliography/contents text remains excluded.
 
@@ -17,6 +19,8 @@ Sentence revisions use paragraph context and a separate validation policy; the p
 ### Development evidence, 10 November 2026
 
 The real Windows desktop workflow passed automatic local generation, complete preview, non-modal writing, another-version generation, word comparison, acceptance and single-step undo. Focused editor tests cover moved emphasis, uniform formatting, hyperlinks, citations and stale-source rejection. A broader development regression run passed 2,341 backend tests; a fresh source-launcher build subsequently passed 691 frontend tests. Focused tests are extended as the feature evolves.
+
+On 11 November, the hover-card update passed 694 frontend tests, TypeScript checking and the Windows build. `scripts/test-sentence-hover-desktop.mjs` exercises real local generation directly on hover, another-version loading, expanded comparisons, acceptance and undo; it also captures actual screenshots with isolated test data. The existing report and explicit F7 workflow remains covered separately.
 
 Both the existing 4B model and an isolated, checksum-verified Qwen3.5-9B Q4_K_M candidate completed the same 40 authored development cases (24 difficult, 16 clean). Under the subsequently rescored guardrails, both supplied displayable revisions on 21 difficult cases; the 4B model changed one clean case and 9B left all 16 unchanged. Twenty-eight paired outputs were identical. The user reviewed the blinded proposals and judged them good. This is user review of a small development set, not an independent held-out quality evaluation.
 

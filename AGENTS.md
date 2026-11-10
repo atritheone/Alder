@@ -1,5 +1,11 @@
 # Alder repository instructions
 
+## Git workflow
+
+Work on and push to `main`. This repository must not have other local or origin
+branches. Do not create feature branches. Preserve any unmerged history in a
+verified archive outside the repository before removing obsolete branches.
+
 ## Updating an existing installation (usual 0.12 workflow)
 
 Read docs/setup/updating.md. Refer to this release as 0.12; package.json retains its required three-part version;

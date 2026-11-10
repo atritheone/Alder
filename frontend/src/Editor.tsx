@@ -2637,7 +2637,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                     spans.push(
                       Decoration.inline(from, to, {
                         class: `annotation annotation-${annotation.type}${annotation.type === "spelling" ? "" : " annotation-grammar"}`,
-                        "data-help": `${annotation.type}: ${annotation.message}`,
+                        "aria-description": annotation.message,
                         "data-proofreading-id": annotation.id,
                       }),
                     );
@@ -2652,10 +2652,6 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                           marker.setAttribute("role", "note");
                           marker.setAttribute(
                             "aria-label",
-                            annotation.message,
-                          );
-                          marker.setAttribute(
-                            "data-help",
                             annotation.message,
                           );
                           marker.setAttribute(

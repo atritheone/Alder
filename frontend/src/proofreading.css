@@ -153,8 +153,10 @@
 .proofreading-hover {
   position: fixed;
   z-index: 90;
-  padding: 10px 14px;
-  width: min(360px, calc((100vw - 16px) / var(--ui-scale)));
+  padding: 12px 16px;
+  border-radius: 6px;
+  background: #f4f4f4;
+  width: min(440px, calc((100vw - 16px) / var(--ui-scale)));
   max-height: calc((100dvh - 16px) / var(--ui-scale));
   overflow: auto;
 }
@@ -179,6 +181,20 @@
   border: 0;
 }
 
-.proofreading-hover .proofreading-panel button {
-  font-size: 10px;
+.proofreading-hover .proofreading-panel .check-item button {
+  font-size: 13px;
+}
+.proofreading-hover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.proofreading-hover-header button {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
 }

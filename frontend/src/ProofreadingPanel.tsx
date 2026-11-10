@@ -433,7 +433,7 @@ export default function ProofreadingPanel({
         </div>
       ))}
       {mode === "selected" && !items.length && (
-        <p>Place the text cursor on an underlined issue to review it.</p>
+        <p>Hover over an underlined sentence to review a suggestion.</p>
       )}
       {mode === "selected" && (
         <>

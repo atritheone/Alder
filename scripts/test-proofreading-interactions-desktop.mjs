@@ -72,6 +72,12 @@ try {
     name: "Spelling and Grammar",
     exact: true,
   });
+  // This suite checks rules-only actions; real sentence-model hover has its own suite.
+  const sentenceSuggestions = report.getByRole("checkbox", {
+    name: "Suggest sentence structure and clarity improvements",
+    exact: true,
+  });
+  await sentenceSuggestions.uncheck();
   await expect(report.locator(".check-item[data-review-id]")).toHaveCount(2);
   await report
     .getByRole("button", { name: "Close spelling and grammar" })
@@ -87,7 +93,11 @@ try {
   await writing.locator(".annotation-spelling").last().hover();
   const hover = page.getByRole("dialog", { name: "Review underlined issue" });
   await expect(hover).toBeVisible();
-  const hoverFontSizes = await hover.locator("button").evaluateAll(buttons => buttons.map(button => getComputedStyle(button).fontSize));
+  const hoverFontSizes = await hover
+    .locator(".proofreading-panel button")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => getComputedStyle(button).fontSize),
+    );
   expect(hoverFontSizes.length).toBeGreaterThan(1);
   expect(new Set(hoverFontSizes).size).toBe(1);
   await hover
@@ -156,6 +166,7 @@ try {
     .click();
   await writing.fill("Another mispelled word.");
   await status.click();
+  await sentenceSuggestions.uncheck();
   await expect(report.locator(".book-proofreading-results > li")).toHaveCount(
     2,
   );
@@ -182,6 +193,7 @@ try {
     .click();
   await expect(writing).toHaveText("This is misspelled.");
   await page.keyboard.press("Escape");
+  await expect(report).toBeHidden();
   for (const scale of [0.5, 1.5]) {
     await page.evaluate(
       (value) =>
