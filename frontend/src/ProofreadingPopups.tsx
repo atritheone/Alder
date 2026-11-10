@@ -121,7 +121,7 @@ export default function ProofreadingPopups(
   useLayoutEffect(() => {
     if (!props.open) return;
     const node = dialog.current!;
-    node.showModal();
+    node.show();
     return () => node.close();
   }, [props.open]);
   return createPortal(
@@ -132,6 +132,9 @@ export default function ProofreadingPopups(
           className="proofreading-window"
           aria-label="Spelling and Grammar"
           onCancel={props.onClose}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") props.onClose();
+          }}
         >
           <header>
             <h2>Spelling and Grammar</h2>

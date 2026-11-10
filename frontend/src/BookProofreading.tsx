@@ -12,12 +12,14 @@ export default function BookProofreading({
   onChapter,
   advanced,
   currentTarget,
+  sentenceModelAvailable = false,
 }: {
   project: Project;
   flush: () => Promise<void>;
   onChapter: (id: string, start?: number, end?: number) => void;
   advanced: boolean;
   currentTarget?: string;
+  sentenceModelAvailable?: boolean;
 }) {
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState("");
@@ -41,6 +43,7 @@ export default function BookProofreading({
       p.language,
       p.settings.proofreadingDialect,
       p.settings.proofreadingStyle,
+      p.settings.sentenceRevisionProfile,
       p.settings.ignoredRuleIds,
       p.settings.ignoredRules,
       p.settings.customRules,
@@ -62,7 +65,7 @@ export default function BookProofreading({
     setMessage("");
     return stop;
   }, [project.id]);
-  const check = async () => {
+  const check = async (revise = false) => {
     if (running) return;
     const token = { cancelled: false, job: "" };
     run.current = token;
@@ -76,7 +79,9 @@ export default function BookProofreading({
       for (let index = 0; index < chapters.length; index++) {
         if (token.cancelled) break;
         const chapter = chapters[index];
-        setMessage(`Checking chapter ${formatInteger(index + 1)} of ${formatInteger(chapters.length)}…`);
+        setMessage(
+          `Checking chapter ${formatInteger(index + 1)} of ${formatInteger(chapters.length)}…`,
+        );
         let job = await api<ProofreadingResult>(
           "/api/proofreading/check",
           "POST",
@@ -84,7 +89,7 @@ export default function BookProofreading({
             text: chapter.text,
             projectId: snapshot.id,
             targetId: `${snapshot.id}:book-review:${chapter.id}`,
-            advanced,
+            advanced: revise ? false : advanced,
             languageRanges: proofreadingLanguages(chapter.document, snapshot),
           },
         );
@@ -99,6 +104,44 @@ export default function BookProofreading({
         if (token.cancelled) {
           await api(`/api/proofreading/jobs/${job.id}`, "DELETE");
           break;
+        }
+        if (revise) {
+          const fast = job;
+          job = await api<ProofreadingResult>(
+            "/api/proofreading/check",
+            "POST",
+            {
+              text: chapter.text,
+              projectId: snapshot.id,
+              targetId: `${snapshot.id}:book-revision:${chapter.id}`,
+              revision: true,
+              languageRanges: proofreadingLanguages(chapter.document, snapshot),
+            },
+          );
+          token.job = job.id;
+          while (
+            !token.cancelled &&
+            ["queued", "running"].includes(job.status)
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            if (!token.cancelled)
+              job = await api<ProofreadingResult>(
+                `/api/proofreading/jobs/${job.id}`,
+              );
+          }
+          if (token.cancelled) {
+            await api(`/api/proofreading/jobs/${job.id}`, "DELETE");
+            break;
+          }
+          job = {
+            ...job,
+            annotations: [...fast.annotations, ...job.annotations],
+            warnings: [...fast.warnings, ...job.warnings],
+            status:
+              fast.status === "completed" && job.status === "completed"
+                ? "completed"
+                : "partial",
+          };
         }
         setResults((items) => [
           ...items,
@@ -141,13 +184,19 @@ export default function BookProofreading({
     <details open>
       <summary>Whole book review</summary>
       <p>
-        Scan every chapter with{" "}
-        {advanced ? "rules and the local model" : "spelling and grammar rules"}.
-        Suggestions are applied only after opening the chapter.
+        Check spelling and grammar across chapters, or review sentence structure
+        with the local model. Suggestions are applied only after opening the
+        chapter.
       </p>
       <div className="proofreading-actions">
         <button disabled={running} onClick={() => void check()}>
           Check whole book
+        </button>
+        <button
+          disabled={running || !sentenceModelAvailable}
+          onClick={() => void check(true)}
+        >
+          Review sentence structure across book
         </button>
         <button disabled={!running} onClick={stop}>
           Cancel book review

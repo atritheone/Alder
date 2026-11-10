@@ -3,6 +3,28 @@
   gap: 0.6rem;
   min-width: 0;
 }
+.sentence-revision-preview {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border-left: 3px solid var(--accent, #487da3);
+  padding: 0 12px;
+  max-width: 44em;
+}
+.sentence-revision-preview ins {
+  background: #cee5d5;
+  text-decoration: none;
+}
+.sentence-revision-preview del {
+  background: #edd1ce;
+}
+.sentence-revision-preview textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 7em;
+  font: inherit;
+  line-height: 1.5;
+}
 .proofreading-panel > label {
   display: flex;
   align-items: center;
@@ -92,8 +114,12 @@
   font-size: 13px;
 }
 .proofreading-window {
+  position: fixed;
+  inset: 48px 12px 36px auto;
+  margin: 0;
+  z-index: 89;
   padding: 0;
-  width: min(760px, calc((100vw - 32px) / var(--ui-scale)));
+  width: min(440px, calc((100vw - 32px) / var(--ui-scale)));
   max-height: calc((100dvh - 32px) / var(--ui-scale));
   max-width: none;
 }

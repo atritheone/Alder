@@ -50,8 +50,11 @@ def configuration(project: dict, supplied: dict | None = None) -> dict:
     style = supplied.get("style", settings.get("proofreadingStyle", False))
     if type(style) is not bool:
         raise ValidationError("The style-check setting must be a boolean.")
+    profile = supplied.get('revisionProfile', settings.get('sentenceRevisionProfile', 'standard'))
+    if profile not in ('standard', 'creative'):
+        raise ValidationError('Choose standard or creative sentence revision.')
     return {"dialect": dialect, "acceptedWords": sorted(set(words)),
-            "ignoredRuleIds": sorted(set(ignored)), "style": style}
+            "ignoredRuleIds": sorted(set(ignored)), "style": style, 'revisionProfile':profile}
 
 
 def language_segments(text, ranges, default, selected=None):

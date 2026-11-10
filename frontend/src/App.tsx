@@ -28,6 +28,7 @@ import { useStoredPreference } from "./useStoredPreference";
 import { useProofreading } from "./useProofreading";
 import ProofreadingPanel from "./ProofreadingPanel";
 import ProofreadingPopups from "./ProofreadingPopups";
+import { sentenceRange } from './sentenceRevisions';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { countSentences } from "./textCounts";
 import {
@@ -858,6 +859,19 @@ export default function App() {
   );
   const analysis = proofreading.result;
   const [proofreadingOpen, setProofreadingOpen] = useState(false);
+  useEffect(() => {
+    const improve = (event:KeyboardEvent) => {
+      const editor = targetEditor();
+      if(event.key !== 'F7' || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || !editor?.hasFocus?.())return;
+      event.preventDefault();
+      const selection = editor.getSelectionOffsets();
+      const target = selection.start === selection.end ? sentenceRange(editor.getText(), selection.start) : selection;
+      proofreading.improve(target.start,target.end);
+      setProofreadingOpen(true);
+    };
+    window.addEventListener('keydown',improve);
+    return ()=>window.removeEventListener('keydown',improve);
+  }, [proofreading]);
   useEffect(() => {
     const select = (event: Event) => {
       setDetail("Clip");

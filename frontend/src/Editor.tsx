@@ -963,13 +963,14 @@ export type EditorHandle = {
   getText: () => string;
   replaceAll: (find: string, replacement: string) => void;
   getSelectionOffsets: () => { start: number; end: number };
+  hasFocus?: () => boolean;
   insertDocument: (document: DocNode) => void;
   navigatePage: (page: number) => void;
   movePage: (from: number, to: number) => void;
   insert: (text: string) => void;
   replace: (text: string) => void;
   replaceRange: (start: number, end: number, text: string) => void;
-  applyProofreading: (edits: ProofreadingEdit[], expectedText: string) => void;
+  applyProofreading: (edits: ProofreadingEdit[], expectedText: string, revision?: boolean) => void;
   selectRange: (start: number, end: number) => void;
   selectReviewRange:(from:number,to:number)=>void;
   image: (src: string, assetId: string, alt: string) => void;
@@ -2163,6 +2164,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           end: offset(v.state.selection.to),
         };
       },
+      hasFocus() { return view.current?.hasFocus() === true; },
       getText() {
         return view.current ? projectText(view.current.state.doc).text : "";
       },
@@ -2273,10 +2275,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         v.dispatch(v.state.tr.insertText(text, span.from, span.to));
         v.focus();
       },
-      applyProofreading(edits, expectedText) {
+      applyProofreading(edits, expectedText, revision = false) {
         const v = editableView();
         if (!v) throw new Error("The editor is not available for corrections.");
-        v.dispatch(proofreadingTransaction(v.state, expectedText, edits));
+        v.dispatch(proofreadingTransaction(v.state, expectedText, edits, revision));
         v.dispatch(closeHistory(v.state.tr));
         v.focus();
       },

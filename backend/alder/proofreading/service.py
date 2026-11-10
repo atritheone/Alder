@@ -15,6 +15,7 @@ from ..models import ValidationError
 from .contracts import (DIALECTS, blocks, configuration, diagnostic,
                         fingerprint, model_correction, shift, slice16, u16, language_segments)
 from .engines import ModelEngine, Resources, RuleEngine
+from .revisions import passages as revision_passages, revision
 
 TERMINAL = {"completed", "partial", "failed", "cancelled"}
 
@@ -70,6 +71,17 @@ class ProofreadingService:
         advanced = data.get("advanced", False)
         if type(advanced) is not bool:
             raise ValidationError("Advanced checking must be a boolean.")
+        revise = data.get("revision", False)
+        if type(revise) is not bool:
+            raise ValidationError("Sentence revision must be a boolean.")
+        revision_mode = data.get('revisionMode', 'improve')
+        attempt = data.get('revisionAttempt', 0)
+        if revision_mode not in ('improve', 'rephrase') or type(attempt) is not int or not 0 <= attempt <= 10000:
+            raise ValidationError('Invalid sentence revision mode or attempt.')
+        advanced = advanced or revise
+        focus = data.get('focus', 0)
+        if type(focus) is not int or not 0 <= focus <= u16(text):
+            raise ValidationError('Invalid sentence revision focus.')
         selected = data.get("range")
         offset = 0
         checked_text = text
@@ -91,6 +103,10 @@ class ProofreadingService:
         for segment in segments:
             if segment['language'].lower()=='en':segment['language']=config['dialect']
         config["acceptedWords"] = sorted(set(config["acceptedWords"] + self.personal_words()))
+        if revise:
+            config["task"] = "revise"
+            config['revisionMode'] = revision_mode
+            config['revisionAttempt'] = attempt
         key = fingerprint([config, project.get("settings", {}).get("customRules", []),
                            project.get("settings", {}).get("ignoredRules", []), project.get("dictionary", []),
                            [(s['start'],s['end'],s['language']) for s in segments]])
@@ -115,6 +131,17 @@ class ProofreadingService:
                    "message": "Waiting to check this text.", "truncated": False, "warnings": [],
                    "_cancel": threading.Event(), "_created": time.monotonic()}
             self.jobs[job["id"]] = job
+            if revise:
+                passages = list(revision_passages(text, checked_text, offset, segments, config, selected))
+                passages.sort(key=lambda passage: 0 if passage['start'] <= focus <= passage['start'] + u16(passage['text']) else abs(passage['start'] - focus))
+                coverage = {"totalBlocks": len(passages), "checkedBlocks": 0, "advancedBlocks": 0, "skippedBlocks": 0}
+                self._update(job, status='running', stage='model', coverage=coverage)
+                if not self.resources.capabilities()['model']['available']:
+                    self._update(job, status='partial', warnings=['The local sentence revision model is unavailable.'],
+                                 message='Sentence revision unavailable.')
+                else:
+                    self.advanced_pool.submit(self._advanced, job, passages, config, coverage, [])
+                return self._public(job)
             self.pool.submit(self._run, job, checked_text, project, config, advanced,segments)
             return self._public(job)
 
@@ -232,9 +259,10 @@ class ProofreadingService:
             if self._cancelled(job):
                 self._update(job, status="cancelled", message="Check cancelled.")
 
-    def _advanced(self, job, paragraphs, config, coverage, warnings):
+    def _advanced(self, job, paragraphs, config, coverage, warnings, begin=0):
         try:
-            for block in paragraphs:
+            for position in range(begin, len(paragraphs)):
+                block = paragraphs[position]
                 if self._cancelled(job):
                     return
                 if not block['eligible']:continue
@@ -251,17 +279,29 @@ class ProofreadingService:
                 self._update(job, message="Reviewing grammar with the local model…")
                 try:
                     corrected = self.model.check(block["text"], block.get('configuration',config),
-                                                 lambda: self._cancelled(job) or self.speech_busy())
+                                                 lambda: self.closed.is_set() or self.speech_busy() or
+                                                 (config.get('task') != 'revise' and self._cancelled(job)))
                 except InterruptedError:
                     if self._cancelled(job):
                         return
                     warnings.append("Narration interrupted advanced checking. Run advanced review again to finish.")
                     break
-                item = model_correction(block["text"], corrected, config["acceptedWords"])
+                if self._cancelled(job):
+                    return
+                validator = revision if config.get('task') == 'revise' else model_correction
+                item = validator(block["text"], corrected, block.get('configuration',config)["acceptedWords"])
                 if item and item["ruleId"] not in config["ignoredRuleIds"]:
+                    if config.get('task') == 'revise':
+                        item['preservesGenerated'] = block.get('protected',False)
                     self._append(job, [shift(item, block["start"])])
                 coverage["advancedBlocks"] += 1
                 self._update(job, coverage=coverage.copy())
+                # Yield between passages so a whole-book job cannot monopolise
+                # the model while the author requests a current-sentence edit.
+                if position + 1 < len(paragraphs):
+                    self.advanced_pool.submit(self._advanced, job, paragraphs, config,
+                                              coverage, warnings, position + 1)
+                    return
             self._update(job, status="partial" if warnings else "completed", stage="done", warnings=warnings,
                          coverage=coverage, message="Check incomplete." if warnings else "Check complete.")
         except Exception as exc:

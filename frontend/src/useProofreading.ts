@@ -3,6 +3,7 @@ import { api } from "./api";
 import type { Analysis, Project, DocNode } from "./types";
 import { generatedTextSpans, intersectsTextSpans } from "./textProjection";
 import { proofreadingLanguages } from "./proofreadingLanguages";
+import { useSentenceRevisions } from "./useSentenceRevisions";
 
 export type ProofreadingResult = Analysis & {
   id: string;
@@ -43,6 +44,12 @@ export function useProofreading(
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [advanced, setAdvanced] = useState(false);
+  const [revisionRequest, setRevisionRequest] = useState(0);
+  const [rephrase, setRephrase] = useState(false);
+  const [revisionRange, setRevisionRange] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
   const [capabilities, setCapabilities] = useState<any>(null);
   const [cancelled, setCancelled] = useState(false);
@@ -73,6 +80,7 @@ export function useProofreading(
     ],
   );
   const configuration = JSON.stringify({
+    revisionProfile: project?.settings.sentenceRevisionProfile || "standard",
     dialect:
       project?.settings.proofreadingDialect ||
       (["en-AU", "en-GB", "en-US"].includes(project?.language || "")
@@ -88,6 +96,23 @@ export function useProofreading(
     project?.settings.ignoredRules,
     project?.dictionary,
   ]);
+  const revisions = useSentenceRevisions(
+    text,
+    targetId,
+    project?.id,
+    configuration,
+    languages,
+    capabilities?.engines.model.available === true &&
+      (project?.settings.sentenceRevisions !== false || revisionRequest > 0),
+    revisionRequest + refresh,
+    revisionRange,
+    rephrase,
+    flush,
+  );
+  useEffect(() => {
+    setRevisionRange(null);
+    setRevisionRequest(0);
+  }, [targetId, text]);
   useEffect(() => {
     api("/api/proofreading/capabilities")
       .then(setCapabilities)
@@ -210,8 +235,51 @@ export function useProofreading(
         : null,
     [current, ignored, generated],
   );
+  // Retained sentence revisions are independently source/context validated.
+  // A pending rules request must not hide them while the author types elsewhere.
+  const display =
+    visible ??
+    (text !== undefined &&
+    result?.targetId === targetId &&
+    revisions.annotations.length
+      ? {
+          ...result,
+          sourceText: text,
+          sourceHash: "",
+          configurationHash: "",
+          status: "running" as const,
+          message: "Checking current text…",
+          warnings: [],
+          annotations: [],
+        }
+      : null);
   return {
-    result: visible,
+    result: display
+      ? {
+          ...display,
+          annotations: [
+            ...display.annotations,
+            ...revisions.annotations.filter(
+              (a) =>
+                !ignored.has(a.id) &&
+                (a.preservesGenerated ||
+                  !intersectsTextSpans(generated, a.start, a.end)),
+            ),
+          ],
+        }
+      : display,
+    revisionStatus: revisions.status,
+    revisionBusy: revisions.busy,
+    improve: (start: number, end: number) => {
+      setRephrase(false);
+      setRevisionRange({ start, end });
+      setRevisionRequest((v) => v + 1);
+    },
+    rephrase: (start: number, end: number) => {
+      setRephrase(true);
+      setRevisionRange({ start, end });
+      setRevisionRequest((v) => v + 1);
+    },
     error,
     capabilities,
     advanced,
@@ -232,6 +300,7 @@ export function useProofreading(
     },
     wholeText: () => setSelection(null),
     fastOnly: () => {
+      revisions.cancel();
       setSelection(null);
       setAdvanced(false);
       setRefresh((value) => value + 1);
@@ -243,6 +312,7 @@ export function useProofreading(
       }
     },
     cancel: () => {
+      revisions.cancel();
       setCancelled(true);
       if (active.current)
         void api(`/api/proofreading/jobs/${active.current}`, "DELETE").catch(

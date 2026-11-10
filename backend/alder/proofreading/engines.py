@@ -19,6 +19,7 @@ import urllib.parse
 from ..platform_runtime import resource_executable
 from .contracts import diagnostic, fingerprint, slice16
 from .memory import require_model_memory
+from .revisions import REVISION_PROMPT_VERSION
 
 
 def stop(process):
@@ -230,7 +231,7 @@ class ModelEngine:
         threading.Thread(target=reader, daemon=True, name="proofreading-replies").start()
 
     def check(self, text, config, cancelled):
-        key = fingerprint([text, config["dialect"], config["acceptedWords"], self.resources.revision])
+        key = fingerprint([text, config, self.resources.revision, REVISION_PROMPT_VERSION])
         with self.lock:
             if cancelled():
                 raise InterruptedError()
@@ -240,7 +241,10 @@ class ModelEngine:
             self._start()
             identifier = fingerprint([text, time.monotonic_ns()])[:24]
             payload = {"id": identifier, "text": text, "dialect": config["dialect"],
-                       "acceptedWords": config["acceptedWords"][:100]}
+                       "acceptedWords": [word for word in config["acceptedWords"] if word.casefold() in text.casefold()][:100],
+                       "task": config.get("task", "proofread"), "context": config.get("context", ""),
+                       "revisionMode": config.get('revisionMode', 'improve'), 'revisionAttempt':config.get('revisionAttempt',0),
+                       'revisionProfile':config.get('revisionProfile','standard')}
             try:
                 self.process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
                 self.process.stdin.flush()

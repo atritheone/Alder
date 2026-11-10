@@ -219,6 +219,9 @@ export type Chapter = {
   voiceId: string | null;
 };
 export type Annotation = {
+  kind?: 'sentence-revision';
+  replacementText?: string;
+  preservesGenerated?: boolean;
   id: string;
   type: string;
   start: number;

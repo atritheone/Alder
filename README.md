@@ -151,7 +151,10 @@ draft into a chapter copies its content; later sandbox experiments do not change
 the book. **Language Tools** offers checks and transformations you can preview.
 
 **Checks** adds local spelling and grammar for Australian, British and US English,
-with an experimental local model for advanced review. It needs the new proofreading
+with a local model for complete sentence revisions, restructuring and clarity suggestions.
+Review the full replacement, compare or edit it, and accept it in one undoable step;
+F7 improves the current sentence or selection. Model suggestions remain experimental.
+It needs the new proofreading
 resource pack. See [offline proofreading](docs/offline-proofreading.md) for controls,
 measured results and platform limitations. Grammarly parity is not yet established.
 

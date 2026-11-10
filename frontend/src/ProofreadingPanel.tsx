@@ -7,6 +7,8 @@ import type { useProofreading } from "./useProofreading";
 import BookProofreading from "./BookProofreading";
 import ProofreadingVocabulary from "./ProofreadingVocabulary";
 import "./proofreading.css";
+import { sentenceRange } from "./sentenceRevisions";
+import RevisionComparison from "./RevisionComparison";
 
 export type ProofreadingPanelProps = {
   mode?: "selected" | "report" | "hover";
@@ -35,6 +37,20 @@ export default function ProofreadingPanel({
   const [category, setCategory] = useState("all");
   const [position, setPosition] = useState(-1);
   const [caretIssue, setCaretIssue] = useState<string>();
+  const [revisionDrafts, setRevisionDrafts] = useState<Record<string, string>>(
+    {},
+  );
+  useEffect(() => setRevisionDrafts({}), [c.result?.sourceText, project.id]);
+  const improve = () => {
+    const current = editor();
+    const range = current?.getSelectionOffsets();
+    if (!range || !current) return;
+    const target =
+      range.start === range.end
+        ? sentenceRange(current.getText(), range.start)
+        : range;
+    c.improve(target.start, target.end);
+  };
   useEffect(() => {
     if (mode !== "selected") return;
     const update = () => {
@@ -43,7 +59,12 @@ export default function ProofreadingPanel({
         range &&
         c.result?.annotations
           .filter((a) => a.start <= range.start && a.end >= range.end)
-          .sort((a, b) => a.end - a.start - (b.end - b.start))[0];
+          .sort(
+            (a, b) =>
+              Number(b.kind === "sentence-revision") -
+                Number(a.kind === "sentence-revision") ||
+              a.end - a.start - (b.end - b.start),
+          )[0];
       setCaretIssue(issue?.id);
     };
     update();
@@ -104,6 +125,23 @@ export default function ProofreadingPanel({
       {mode === "report" && (
         <>
           <label>
+            Sentence revision style
+            <select
+              aria-label="Sentence revision style"
+              value={String(
+                project.settings.sentenceRevisionProfile || "standard",
+              )}
+              onChange={(e) =>
+                change((p) => {
+                  p.settings.sentenceRevisionProfile = e.target.value;
+                })
+              }
+            >
+              <option value="standard">Standard prose</option>
+              <option value="creative">Creative writing and dialogue</option>
+            </select>
+          </label>
+          <label>
             English conventions{" "}
             <select
               aria-label="Proofreading dialect"
@@ -141,6 +179,13 @@ export default function ProofreadingPanel({
             Include optional style advice
           </label>
           <div className="proofreading-actions">
+            <button
+              disabled={!c.capabilities?.engines.model.available}
+              onClick={improve}
+              title="Improve the current sentence or selected text (F7)"
+            >
+              Improve sentence or selection
+            </button>
             <button onClick={c.fastOnly}>Check spelling and grammar</button>
             <button
               onClick={() => {
@@ -164,7 +209,8 @@ export default function ProofreadingPanel({
             <button
               onClick={c.cancel}
               disabled={
-                !c.result || !["queued", "running"].includes(c.result.status)
+                !c.revisionBusy &&
+                (!c.result || !["queued", "running"].includes(c.result.status))
               }
             >
               Cancel
@@ -173,9 +219,23 @@ export default function ProofreadingPanel({
           <p role="status" aria-live="polite">
             {c.status}
           </p>
+          <p role="status">{c.revisionStatus}</p>
+          <label>
+            <input
+              type="checkbox"
+              checked={project.settings.sentenceRevisions !== false}
+              onChange={(e) =>
+                change((p) => {
+                  p.settings.sentenceRevisions = e.target.checked;
+                })
+              }
+            />
+            Suggest sentence structure and clarity improvements
+          </label>
           {c.result && (
             <p>
-              {formatInteger(c.result.annotations.length)} issues · {formatInteger(c.result.words)} words ·{" "}
+              {formatInteger(c.result.annotations.length)} issues ·{" "}
+              {formatInteger(c.result.words)} words ·{" "}
               {formatInteger(c.result.sentences)} sentences
             </p>
           )}
@@ -216,6 +276,7 @@ export default function ProofreadingPanel({
                 "all",
                 "spelling",
                 "grammar",
+                "clarity",
                 "punctuation",
                 "style",
                 "terminology",
@@ -252,6 +313,50 @@ export default function ProofreadingPanel({
             {a.message}
           </button>
           {a.engine === "model" && <small>Possible issue · local model</small>}
+          {a.kind === "sentence-revision" && (
+            <div className="sentence-revision-preview">
+              <p>
+                <strong>Suggested revision</strong>
+              </p>
+              <p>{revisionDrafts[a.id] ?? a.replacementText}</p>
+              <details>
+                <summary>Compare original</summary>
+                <p>{a.originalText}</p>
+              </details>
+              <details>
+                <summary>Show changes</summary>
+                <RevisionComparison
+                  original={a.originalText || ""}
+                  revised={revisionDrafts[a.id] ?? a.replacementText ?? ""}
+                />
+              </details>
+              <details>
+                <summary>Edit revision</summary>
+                <textarea
+                  aria-label="Edit proposed sentence revision"
+                  value={revisionDrafts[a.id] ?? a.replacementText ?? ""}
+                  onChange={(event) =>
+                    setRevisionDrafts((previous) => ({
+                      ...previous,
+                      [a.id]: event.target.value,
+                    }))
+                  }
+                />
+              </details>
+              <button
+                onClick={() => {
+                  setRevisionDrafts((previous) => {
+                    const next = { ...previous };
+                    delete next[a.id];
+                    return next;
+                  });
+                  c.rephrase(a.start, a.end);
+                }}
+              >
+                Another version
+              </button>
+            </div>
+          )}
           {(a.alternatives || []).map((alternative, index) => (
             <button
               className="suggestion-button"
@@ -261,8 +366,15 @@ export default function ProofreadingPanel({
                 if (!current || !c.result) return;
                 try {
                   current.applyProofreading(
-                    alternative.edits,
+                    a.kind === "sentence-revision" &&
+                      revisionDrafts[a.id] !== undefined
+                      ? alternative.edits.map((edit) => ({
+                          ...edit,
+                          replacement: revisionDrafts[a.id],
+                        }))
+                      : alternative.edits,
                     c.result.sourceText,
+                    a.kind === "sentence-revision",
                   );
                   setActionError("");
                 } catch (e) {
@@ -270,11 +382,13 @@ export default function ProofreadingPanel({
                 }
               }}
             >
-              {alternative.edits.length > 1
-                ? "Apply linked corrections"
-                : alternative.edits[0]?.replacement === ""
-                  ? "Delete repeated or unnecessary text"
-                  : `Use “${alternative.edits[0]?.replacement}”`}
+              {a.kind === "sentence-revision"
+                ? "Accept rewrite"
+                : alternative.edits.length > 1
+                  ? "Apply linked corrections"
+                  : alternative.edits[0]?.replacement === ""
+                    ? "Delete repeated or unnecessary text"
+                    : `Use “${alternative.edits[0]?.replacement}”`}
             </button>
           ))}
           {a.alternatives?.some(
@@ -321,16 +435,34 @@ export default function ProofreadingPanel({
       {mode === "selected" && !items.length && (
         <p>Place the text cursor on an underlined issue to review it.</p>
       )}
+      {mode === "selected" && (
+        <>
+          <button
+            onClick={improve}
+            disabled={!c.capabilities?.engines.model.available}
+          >
+            Improve sentence or selection
+          </button>
+          <p role="status">{c.revisionStatus}</p>
+        </>
+      )}
       {mode === "report" && (
         <>
           {!items.length && c.result?.status === "completed" && (
-            <p>No issues found in the checked text.</p>
+            <p>
+              {category === "all"
+                ? "No spelling or grammar rule issues found."
+                : "No suggestions in this category."}
+            </p>
           )}
           <BookProofreading
             project={project}
             flush={flush}
             onChapter={onChapter}
             advanced={c.advanced}
+            sentenceModelAvailable={
+              c.capabilities?.engines.model.available === true
+            }
             currentTarget={
               c.scope === "Selected text" ? undefined : c.result?.targetId
             }
