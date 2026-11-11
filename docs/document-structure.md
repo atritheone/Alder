@@ -1,10 +1,12 @@
 # Visual document structure
 
-Write and Sandbox show document structure by default. The existing ¶ toolbar
-button and View > Show/Hide Structure switch the complete guide layer together.
-The choice is saved on this device as `alder.structure`; a missing preference
-means on, and an explicit off choice survives reopening Alder. Raw mode and
-publication preview remain clean.
+Write and Sandbox show document structure by default. Each editor's ¶ toolbar
+button switches its own complete guide layer independently. View > Show/Hide
+Structure targets the focused editor. The choices are saved on this device as
+`alder.structure.write` and `alder.structure.sandbox`. Each initially inherits
+the former shared `alder.structure` choice, or defaults to on. Subsequent choices
+are independent and survive reopening Alder. Raw mode and publication preview
+remain clean.
 
 A blank page shows its writing-area boundary and the existing empty paragraph's
 ¶. More guides appear only when the document contains the corresponding feature:
@@ -65,7 +67,7 @@ guides and generated symbols.
 - `test-structure-toggle-desktop.mjs`: repeated toggles, native-menu stability,
   stable document/scroll/pages, and undo.
 - `test-document-structure-desktop.mjs`: blank defaults, saved preference,
-  shared Sandbox switch, mixed paper/columns, object anchors, identical geometry,
+  independent saved Write/Sandbox switches, mixed paper/columns, object anchors, identical geometry,
   UI scale/zoom, clean Arrangement/publication preview and clean Raw mode.
 - `test-structure-reading-desktop.mjs`: 120 paragraphs, reading highlights deep
   in a long document, and stable text/page count while toggling guides.

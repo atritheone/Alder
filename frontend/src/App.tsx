@@ -362,7 +362,8 @@ export default function App() {
   } | null>(null);
   useEffect(() => setOutlineOpen(false), [project?.id]);
   const [voiceTestPlaying, setVoiceTestPlaying] = useState(false);
-  const [structure, toggleStructure] = useStructurePreference();
+  const [structure, toggleStructure] = useStructurePreference("write");
+  const [sandboxStructure, toggleSandboxStructure] = useStructurePreference("sandbox");
   const [browserOpen, setBrowserOpen] = useState(
       () => localStorage.getItem("alder.browserOpen") === "true",
     ),
@@ -2225,8 +2226,8 @@ export default function App() {
         action: () => setDetailOpen((v) => !v),
       },
       {
-        label: structure ? "Hide structure" : "Show structure",
-        action: toggleStructure,
+        label: (writingFocus ? structure : sandboxStructure) ? "Hide structure" : "Show structure",
+        action: writingFocus ? toggleStructure : toggleSandboxStructure,
       },
     ],
     Options: [
@@ -2877,8 +2878,8 @@ export default function App() {
                       !writingFocus ? analysis?.annotations : undefined
                     }
                     annotationText={analysis?.sourceText}
-                    showStructure={structure}
-                    onToggleStructure={toggleStructure}
+                    showStructure={sandboxStructure}
+                    onToggleStructure={toggleSandboxStructure}
                     onImage={() => chooseImage(false)}
                     onCollectImage={collectStoryImage}
                     onComplete={() => {

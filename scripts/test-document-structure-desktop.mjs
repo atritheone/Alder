@@ -308,7 +308,7 @@ try {
       expect(value).toBeCloseTo(region[index], 3),
     );
   }
-  // The separate Sandbox uses the same master switch.
+  // Each editor keeps its own setting, including across reopening Alder.
   const sandboxToggle = page.getByRole("button", {
     name: "Toggle sandbox",
     exact: true,
@@ -329,8 +329,66 @@ try {
     .getByRole("button", { name: "Show structure", exact: true });
   await expect(sandboxStructure).toHaveAttribute("aria-pressed", "true");
   await sandboxStructure.click();
+  await expect(sandboxStructure).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(sandboxStructure).toHaveAttribute("aria-pressed", "false");
   await sandboxStructure.click();
+  await expect(sandboxStructure).toHaveAttribute("aria-pressed", "true");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".save-status")).toHaveText("Saved");
+  await reopen();
+  if ((await sandboxToggle.getAttribute("aria-expanded")) === "false")
+    await sandboxToggle.click();
+  await page
+    .locator(".detail-heading")
+    .getByRole("tab", { name: "Sandbox", exact: true })
+    .click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(sandboxStructure).toHaveAttribute("aria-pressed", "true");
+  const menuStructure = async (expectedLabel) => {
+    await expect
+      .poll(() =>
+        app.evaluate(
+          ({ Menu }) =>
+            Menu.getApplicationMenu()
+              .items.find((item) => item.label === "View")
+              .submenu.items.find((item) =>
+                /^(Show|Hide) Structure$/.test(item.label),
+              )?.label,
+        ),
+      )
+      .toBe(expectedLabel);
+    await app.evaluate(({ Menu, BrowserWindow }) => {
+      const item = Menu.getApplicationMenu()
+        .items.find((item) => item.label === "View")
+        .submenu.items.find((item) =>
+          /^(Show|Hide) Structure$/.test(item.label),
+        );
+      Reflect.apply(item.click, item, [
+        { triggeredByAccelerator: false },
+        BrowserWindow.getAllWindows()[0],
+        {},
+      ]);
+    });
+  };
+  await sandbox.focus();
+  await menuStructure("Hide Structure");
+  await expect(sandboxStructure).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await editor.focus();
+  await menuStructure("Show Structure");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await reopen();
+  if ((await sandboxToggle.getAttribute("aria-expanded")) === "false")
+    await sandboxToggle.click();
+  await page
+    .locator(".detail-heading")
+    .getByRole("tab", { name: "Sandbox", exact: true })
+    .click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(sandboxStructure).toHaveAttribute("aria-pressed", "false");
   await sandboxToggle.click();
   // Arrangement copies and publication preview contain no editing guide layer.
   await page.getByRole("tab", { name: "Pages", exact: true }).click();
@@ -366,6 +424,7 @@ try {
       persisted: true,
       geometryUnchanged: true,
       sandbox: true,
+      independentPreferences: true,
       mixedLayouts: true,
       anchors: true,
       cleanArrangementAndPreview: true,
