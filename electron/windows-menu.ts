@@ -20,6 +20,40 @@ const WM_COMMAND = 0x111,
   WM_ENTERMENULOOP = 0x211,
   WM_EXITMENULOOP = 0x212;
 
+// Keep Electron's detached command model when only labels/state change. Installing
+// a new application menu briefly attaches Chromium's bar, so detaching it again
+// resizes and flashes the whole client area on commands such as Show structure.
+function sameMenuShape(a: Menu, b: Menu): boolean {
+  return (
+    a.items.length === b.items.length &&
+    a.items.every((item, index) => {
+      const next = b.items[index];
+      return (
+        item.type === next.type &&
+        item.role === next.role &&
+        item.accelerator === next.accelerator &&
+        item.visible === next.visible &&
+        (item.submenu && next.submenu
+          ? sameMenuShape(item.submenu, next.submenu)
+          : !item.submenu && !next.submenu)
+      );
+    })
+  );
+}
+
+function updateMenuModel(current: Menu, next: Menu) {
+  current.items.forEach((item, index) => {
+    const replacement = next.items[index];
+    item.label = replacement.label;
+    item.enabled = replacement.enabled;
+    if (item.type === "checkbox" || item.type === "radio")
+      item.checked = replacement.checked;
+    item.click = replacement.click;
+    if (item.submenu && replacement.submenu)
+      updateMenuModel(item.submenu, replacement.submenu);
+  });
+}
+
 function invoke(
   item: MenuItem,
   window: BrowserWindow,
@@ -40,6 +74,7 @@ export class WindowsMenu {
   private handle: Buffer;
   private commands = new Map<number, MenuItem>();
   private accelerators: MenuItem[] = [];
+  private electronModel?: Menu;
   private pending: { menu: Menu; background: string } | null = null;
   private open = false;
   private altOnly = false;
@@ -121,9 +156,15 @@ export class WindowsMenu {
           };
         });
     const entries = convert(menu.items, true);
-    // Retain the shared model for command inspection, but remove Chromium's visual bar.
-    Menu.setApplicationMenu(menu);
-    this.window.setMenu(null);
+    // Reuse the detached Electron model for label/state changes. Windows keeps
+    // its bar attached throughout the native replacement below.
+    if (this.electronModel && sameMenuShape(this.electronModel, menu)) {
+      updateMenuModel(this.electronModel, menu);
+    } else {
+      Menu.setApplicationMenu(menu);
+      this.window.setMenu(null);
+      this.electronModel = menu;
+    }
     this.bridge.set(this.handle, entries, parseInt(background.slice(1), 16));
     if (this.window.isFullScreen()) this.bridge.visible(this.handle, false);
     this.commands = commands;
