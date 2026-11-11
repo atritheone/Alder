@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "reviewed": "2026-11-11",
+  "scope": "Checkpoint eligibility inspection, not model qualification or a legal conclusion about derived weights. Weight declarations and training-data provenance are separate records.",
+  "models": [
+    {
+      "repo": "grammarly/coedit-large",
+      "revision": "5637bcdf9d8d4419f97c8cfea36f7d35c79232b6",
+      "modelCardSHA256": "bb9ed5aa73b9f59a10578a89fa07593f06646f95189b81df7c4759664e22ac5f",
+      "declaredWeightLicence": "CC-BY-NC-4.0",
+      "productionQualificationEligible": false,
+      "decision": "Excluded from the unrestricted redistributable-pack search because its weight licence contains a noncommercial restriction.",
+      "sources": ["https://huggingface.co/grammarly/coedit-large/blob/5637bcdf9d8d4419f97c8cfea36f7d35c79232b6/README.md"]
+    },
+    {
+      "repo": "Unbabel/gec-t5_small",
+      "revision": "c958d53bfbce19c87342b69fc6bcaba7303d076f",
+      "modelCardSHA256": "c5284e7fb1d5febbbf9a9b2de4addf43ff6091c4248f4bef50fefe3bde1245a3",
+      "declaredWeightLicence": "Apache-2.0",
+      "productionQualificationEligible": false,
+      "decision": "The card declares Apache-2.0 weights, but the documented cLang-8 training source has research/educational-only CC-BY-NC-SA-4.0 terms. A production source audit is unresolved; no model was downloaded or selected.",
+      "sources": [
+        "https://huggingface.co/Unbabel/gec-t5_small/blob/c958d53bfbce19c87342b69fc6bcaba7303d076f/README.md",
+        "https://github.com/google-research-datasets/clang8/blob/0fa5bf90bfa7a038b62175c7b262c4b72023393d/README.md"
+      ],
+      "trainingSourceNoticeSHA256": "6ab0e48b8f95a3ca9a10a4ba8c10b2d6f24a423c38b1d9cd611163d4c482b54b"
+    },
+    {
+      "repo": "qingy2024/GRMR-V3-Q4B",
+      "revision": "27358021e5751bd7f3a8a654722338fcf164e9b4",
+      "modelCardSHA256": "acde5f00e8958f3635999fe8cd2f032489bdf47653b128ad83648392250c4d54",
+      "declaredWeightLicence": "Apache-2.0",
+      "productionQualificationEligible": false,
+      "decision": "The card names grmr-v4-60k as training data. Its reviewed dataset metadata does not declare reuse terms; no verified training-data rights record was established. No model was downloaded or selected.",
+      "trainingSourceRevision": "1b2376467ad0cbdbe103cbcbe4a5f17c8c0c1950",
+      "sources": [
+        "https://huggingface.co/qingy2024/GRMR-V3-Q4B/blob/27358021e5751bd7f3a8a654722338fcf164e9b4/README.md",
+        "https://huggingface.co/datasets/qingy2024/grmr-v4-60k/tree/1b2376467ad0cbdbe103cbcbe4a5f17c8c0c1950"
+      ]
+    }
+  ],
+  "developerResourceCandidates": [
+    {
+      "repo": "unsloth/Qwen3.5-9B-GGUF",
+      "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+      "baseRepo": "Qwen/Qwen3.5-9B",
+      "declaredWeightLicence": "Apache-2.0; ungated export repository",
+      "file": "Qwen3.5-9B-UD-IQ3_XXS.gguf",
+      "sha256": "40d0f32cd3030b04f0784139a589fb63e876cfbf8667d56311b79783c74fd149",
+      "bytes": 4016235744,
+      "scope": "One resource-only probe after Q4 batch/flash profiles exceeded the prospective 7 GiB budget. Selected by published file size and previous measured overhead, without quality-score selection. Quantization may erase capacity gains; no eligibility, quality or shipping conclusion yet."
+    }
+  ],
+  "developerEvaluatorCandidates": [
+    {
+      "repo": "microsoft/Phi-4-reasoning-plus",
+      "revision": "69baf8528e1bcf05f475034d9e5dd32875ed125f",
+      "modelCardSHA256": "f69218261cb11d0afd25720537eeea4082efe9b80be0c23eb6919aed38ca4016",
+      "baseFamily": "Phi-4, reasoning-plus fine-tune",
+      "declaredWeightLicence": "MIT; ungated publisher and export repositories",
+      "exportRepo": "unsloth/Phi-4-reasoning-plus-GGUF",
+      "exportRevision": "80fff8542dc7b88dba725b660beefd80e91e80c9",
+      "file": "Phi-4-reasoning-plus-Q4_K_M.gguf",
+      "sha256": "faf720745e20df40f52ee218be14c72b33070f7aacc508b3fbc61d47f32b4ffe",
+      "bytes": 9053117120,
+      "publisherSystemPromptSHA256": "88df15fe1f347e9837ab4579c60f4fbae1cd1abf5a5ceab1bd93b846f65e1228",
+      "scope": "Prospective developer-only reasoning evaluator selected for possible full GPU residency after partial-offload 24B decisions took several minutes. Use the publisher's exact mandatory system prompt and native ChatML/think boundaries, with its .8/50/.95 reasoning sampling recommendation and a bounded token budget; final JSON remains constrained/deterministic. This is a declared bounded-profile adaptation, not a replication of unrestricted publisher benchmarks or qualification of the earlier nonreasoning Phi checkpoint. No application model, memory or dependency change."
+    },
+    {
+      "repo": "mistralai/Magistral-Small-2509",
+      "revision": "a31cc96ab10cf19bc42c628fedf1e359e0853c49",
+      "modelCardSHA256": "5b8e286d7f1402844bdcb76650a2e96f60c6df1b1708d4ae2f6cd0789c437ade",
+      "baseFamily": "Mistral Small 3.2, reasoning fine-tune",
+      "declaredWeightLicence": "Apache-2.0; ungated first-party repositories",
+      "exportRepo": "mistralai/Magistral-Small-2509-GGUF",
+      "exportRevision": "429b90d8a8f0037241db6fab46a20b0f90859b03",
+      "file": "Magistral-Small-2509-Q4_K_M.gguf",
+      "sha256": "d3a024d29e0e8f35d9353f5d4f08fc3715406835c8ae1328ce2f3bd212a43434",
+      "bytes": 14334432256,
+      "referenceTokenizerSHA256": "05e051a32ae9d6333459da0083d36507116334fc85378321cfb32dfff7187531",
+      "publisherSystemPromptSHA256": "8966c889221023e7b0e76995c0e528e32871b8a2238bb2da3c7d38de1ce189ba",
+      "developerRuntimeArtifactSHA256": "b142eb9bc1c1280ca553fe1a918e67b376fd64bd0a9b30c2a5cddff9cd4f8e96",
+      "developerArtifactRepair": "Original preserved; four metadata bytes at offset 7335584 change the verified all-zero tokenizer score array type from INT32 to FLOAT32. Score bits and all tensors unchanged; separate manifest retained outside Git.",
+      "scope": "Developer-only independent-family reasoning evaluator probe. Publisher warns the embedded string template may be incorrect; use local pinned mistral-common 1.8.5 reference tokenization, verify the complete GGUF vocabulary mapping and preserve native thinking boundaries. No qualification, application dependency or shipping memory change."
+    },
+    {
+      "repo": "Qwen/Qwen3.5-35B-A3B",
+      "revision": "59d61f3ce65a6d9863b86d2e96597125219dc754",
+      "modelCardSHA256": "71c3bbc2eadadd5980bbdbb15df958c27d42ede24821015602a021109aacf492",
+      "baseFamily": "Qwen3.5 MoE",
+      "declaredWeightLicence": "Apache-2.0; ungated publisher and export repositories",
+      "exportRepo": "unsloth/Qwen3.5-35B-A3B-GGUF",
+      "exportRevision": "bc014a17be43adabd7066b7a86075ff935c6a4e2",
+      "file": "Qwen3.5-35B-A3B-Q4_K_M.gguf",
+      "sha256": "3b46d1066bc91cc2d613e3bc22ce691dd77e6f0d33c9060690d24ce6de494375",
+      "bytes": 22016023168,
+      "scope": "Preregistered developer-only larger evaluator probe after smaller/native specialist failures. Same family as generator; cannot replace the independent non-Qwen requirement. No application model, memory-limit or dependency change."
+    },
+    {
+      "repo": "flowaicom/Flow-Judge-v0.1",
+      "revision": "b7a47acd7c86e981145168e4dea1bef7d84a0894",
+      "modelCardSHA256": "f1392c4ef4ea17126a758b2c4a0ccfca702f8840e93cd8f21d29cae68185090e",
+      "baseFamily": "Phi-3.5 Mini",
+      "declaredWeightLicence": "Apache-2.0",
+      "exportRepo": "flowaicom/Flow-Judge-v0.1-GGUF",
+      "exportRevision": "3ca3f58d3623a058b0c286e4cc55d69adbe14575",
+      "file": "flow-judge-v0.1-bf16.gguf",
+      "sha256": "91eb4383a427d166aab5222cdd0c77da52fedf520b5d50ba6e8939fc5bf118ef",
+      "bytes": 7643296992,
+      "scope": "Developer-only evaluator screen using publisher frames with a declared structured-feedback adaptation; fresh grammar calibration required, no application redistribution or runtime change."
+    },
+    {
+      "repo": "AtlaAI/Selene-1-Mini-Llama-3.1-8B",
+      "revision": "427792f1c3e2073cb7da216924fd884b1ba496e0",
+      "modelCardSHA256": "18b272718f5d2f0852909b489acb4614f79861597fa4ae75991c5efb9cc81414",
+      "baseFamily": "Llama-3.1",
+      "declaredWeightLicence": "Original card: Apache-2.0; publisher GGUF: Llama-3.1. Preserve both declarations and upstream terms; no production redistribution conclusion.",
+      "exportRepo": "AtlaAI/Selene-1-Mini-Llama-3.1-8B-Q8_0-GGUF",
+      "exportRevision": "566b705b7ea78cb9634c86f879f854f69c2d7696",
+      "file": "selene-1-mini-llama-3.1-8b-q8_0.gguf",
+      "sha256": "6c251ccba72b221f3c4f48025641fc60cb07a420684274633603f52ea6f4b65f",
+      "bytes": 8540776032,
+      "promptRepo": "https://github.com/atla-ai/selene-mini",
+      "promptRevision": "418c5ce2d8c4d89c5bd971ce60c7589eb8f9d8de",
+      "scope": "Developer-only evaluator screen, never an Alder generator upgrade or dependency."
+    }
+  ],
+  "retainedDefault": "Existing pinned Qwen3.5-4B Q4_K_M; any replacement still requires measured quality and resource qualification."
+}

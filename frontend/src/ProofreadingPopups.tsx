@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Annotation } from "./types";
-import { proofreadingHoverIssue } from "./proofreadingHover";
+import {
+  proofreadingHoverIssue,
+  proofreadingHoverCandidates,
+  proofreadingPointerIssue,
+} from "./proofreadingHover";
 import ProofreadingPanel, {
   type ProofreadingPanelProps,
 } from "./ProofreadingPanel";
@@ -51,7 +55,7 @@ export default function ProofreadingPopups(
         ? current
         : null;
     const anchor = current.editor.querySelector<HTMLElement>(
-      `[data-proofreading-id="${CSS.escape(issue.id)}"]`,
+      `.proofreading-issue-${CSS.escape(issue.id)}, [data-proofreading-id="${CSS.escape(issue.id)}"]`,
     );
     if (!anchor)
       return controller.current.revisionBusy &&
@@ -95,17 +99,23 @@ export default function ProofreadingPopups(
         return;
       }
       const result = controller.current.result;
-      const issue =
-        result &&
-        proofreadingHoverIssue(
-          result.annotations,
-          element.dataset.proofreadingId!,
-        );
       const editor = element.closest<HTMLElement>(".ProseMirror");
+      const ids: string[] = [];
+      for (
+        let node: HTMLElement | null = element;
+        node && node !== editor;
+        node = node.parentElement
+      ) {
+        if (node.dataset.proofreadingId) ids.push(node.dataset.proofreadingId);
+        for (const name of node.classList)
+          if (name.startsWith("proofreading-issue-"))
+            ids.push(name.slice("proofreading-issue-".length));
+      }
+      const issue = result && proofreadingPointerIssue(result.annotations, ids);
       if (!result || !issue || !editor) return;
       const anchor =
         editor.querySelector<HTMLElement>(
-          `[data-proofreading-id="${CSS.escape(issue.id)}"]`,
+          `.proofreading-issue-${CSS.escape(issue.id)}, [data-proofreading-id="${CSS.escape(issue.id)}"]`,
         ) || element;
       cancelHide();
       // Use the line under the pointer for wrapped annotations.
@@ -169,7 +179,7 @@ export default function ProofreadingPopups(
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["data-proofreading-id"],
+      attributeFilter: ["data-proofreading-id", "class"],
     });
     return () => observer.disconnect();
   }, [hover?.editor]);
@@ -263,6 +273,40 @@ export default function ProofreadingPopups(
               ×
             </button>
           </header>
+          {props.controller.result &&
+            proofreadingHoverCandidates(
+              props.controller.result.annotations,
+              hover.issue,
+            ).length > 1 && (
+              <div
+                role="group"
+                aria-label="Suggestions for this text"
+                className="proofreading-hover-choices"
+              >
+                {proofreadingHoverCandidates(
+                  props.controller.result.annotations,
+                  hover.issue,
+                ).map((issue) => (
+                  <button
+                    key={issue.id}
+                    aria-pressed={issue.id === hover.id}
+                    title={issue.originalText || issue.message}
+                    onClick={() =>
+                      setHover(
+                        (current) =>
+                          current && { ...current, id: issue.id, issue },
+                      )
+                    }
+                  >
+                    {issue.kind === "sentence-revision"
+                      ? "Sentence rewrite"
+                      : issue.type === "spelling"
+                        ? `Spelling: ${issue.originalText}`
+                        : issue.message}
+                  </button>
+                ))}
+              </div>
+            )}
           {props.controller.revisionBusy && (
             <p role="status">Checking sentence structure…</p>
           )}

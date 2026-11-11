@@ -15,7 +15,8 @@ from ..models import ValidationError
 from .contracts import (DIALECTS, blocks, configuration, diagnostic,
                         fingerprint, model_correction, shift, slice16, u16, language_segments)
 from .engines import ModelEngine, Resources, RuleEngine
-from .revisions import passages as revision_passages, revision
+from .revisions import passages as revision_passages, revision, complete_spelling, unchanged_internal_names
+from .invariants import source_identifiers,restore_money_notation,narrowed_plural_terms
 
 TERMINAL = {"completed", "partial", "failed", "cancelled"}
 
@@ -278,9 +279,33 @@ class ProofreadingService:
                         return
                 self._update(job, message="Reviewing grammar with the local model…")
                 try:
-                    corrected = self.model.check(block["text"], block.get('configuration',config),
-                                                 lambda: self.closed.is_set() or self.speech_busy() or
-                                                 (config.get('task') != 'revise' and self._cancelled(job)))
+                    block_config = block.get('configuration', config)
+                    if config.get('task')=='revise':
+                        block_config={**block_config,'acceptedWords':sorted(set(block_config['acceptedWords'])|source_identifiers(block['text']))}
+                    interrupted = lambda: self.closed.is_set() or self.speech_busy() or (config.get('task') != 'revise' and self._cancelled(job))
+                    corrected = self.model.check(block["text"], block_config, interrupted)
+                    if config.get('task') == 'revise' and not self._cancelled(job):
+                        corrected=restore_money_notation(block['text'],corrected)
+                        plural_terms=narrowed_plural_terms(block['text'],corrected)
+                        if plural_terms:
+                            # Retry from the original message, not the narrowed
+                            # draft. The existing accepted-terms prompt constrains
+                            # this one repair to retain the explicit plural forms.
+                            corrected=self.model.check(block['text'],{**block_config,
+                                'acceptedWords':sorted(set(block_config['acceptedWords'])|plural_terms),
+                                'repairReason':'plurality','pluralityTerms':sorted(plural_terms)},lambda:self._cancelled(job) or self.speech_busy())
+                            corrected=restore_money_notation(block['text'],corrected)
+                        if self.resources.capabilities().get('rules', {}).get('available'):
+                            audit_config = {**block_config, 'acceptedWords': sorted(set(block_config['acceptedWords']) |
+                                            unchanged_internal_names(block['text'], corrected))}
+                            corrected = complete_spelling(corrected, audit_config, self.rules.check, self.model.check,
+                                                         lambda: self._cancelled(job) or self.speech_busy(),allow_repair=not plural_terms)
+                            if corrected is None:
+                                warning = 'A sentence proposal was withheld because its spelling could not be verified. Word-level corrections remain available.'
+                                if warning not in warnings: warnings.append(warning)
+                        else:
+                            warning = 'Sentence spelling verification is unavailable: the local rules pack is missing.'
+                            if warning not in warnings: warnings.append(warning)
                 except InterruptedError:
                     if self._cancelled(job):
                         return
@@ -289,7 +314,7 @@ class ProofreadingService:
                 if self._cancelled(job):
                     return
                 validator = revision if config.get('task') == 'revise' else model_correction
-                item = validator(block["text"], corrected, block.get('configuration',config)["acceptedWords"])
+                item = validator(block["text"], corrected, block_config["acceptedWords"])
                 if item and item["ruleId"] not in config["ignoredRuleIds"]:
                     if config.get('task') == 'revise':
                         item['preservesGenerated'] = block.get('protected',False)

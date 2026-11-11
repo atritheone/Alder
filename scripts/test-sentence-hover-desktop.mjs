@@ -22,6 +22,11 @@ const cases = [
     source:
       "The proposal was discussed by the committee and a decision was made by them to postpone it.",
   },
+  {
+    name: "04-overlapping-spelling",
+    source:
+      "The report which was written by the team it contains several mispelled words that needs to be corrected.",
+  },
 ];
 const app = await electron.launch({
   executablePath: desktopExecutable(),
@@ -62,9 +67,54 @@ try {
     await writing.fill(example.source);
     const underline = writing.locator(".annotation-clarity").first();
     await expect(underline).toBeVisible({ timeout: 120000 });
-    await underline.hover();
+    if (index === 3) {
+      await writing
+        .locator(".annotation-spelling")
+        .filter({ hasText: "mispelled" })
+        .hover();
+    } else await underline.hover();
     await expect(hover).toBeVisible();
     await expect(report).toBeHidden();
+    if (index === 3) {
+      const spelling = hover.getByRole("button", {
+        name: "Spelling: mispelled",
+        exact: true,
+      });
+      const sentence = hover.getByRole("button", {
+        name: "Sentence rewrite",
+        exact: true,
+      });
+      await expect(spelling).toHaveAttribute("aria-pressed", "true");
+      await expect(
+        hover.getByRole("button", { name: "Use “misspelled”", exact: true }),
+      ).toBeVisible();
+      await hover.screenshot({
+        path: path.join(output, "04-overlapping-spelling-word.png"),
+        scale: "css",
+      });
+      await sentence.click();
+      await expect(sentence).toHaveAttribute("aria-pressed", "true");
+      await expect(hover.getByLabel("Revision changes")).toBeVisible();
+      await spelling.click();
+      await hover
+        .getByRole("button", { name: "Use “misspelled”", exact: true })
+        .click();
+      await expect(writing).toHaveText(
+        example.source.replace("mispelled", "misspelled"),
+      );
+      await expect(hover).toBeHidden();
+      await writing.focus();
+      await page.keyboard.press("Control+z");
+      await expect(writing).toHaveText(example.source);
+      await expect(underline).toBeVisible({ timeout: 120000 });
+      await writing
+        .locator(".annotation-spelling")
+        .filter({ hasText: "mispelled" })
+        .hover();
+      await hover
+        .getByRole("button", { name: "Sentence rewrite", exact: true })
+        .click();
+    }
     const changes = hover.getByLabel("Revision changes");
     await expect(changes).toBeVisible();
     for (const label of [
@@ -96,6 +146,11 @@ try {
       return revised.textContent;
     });
     expect(proposal).not.toBe(example.source);
+    if (index === 3) {
+      expect(proposal).toContain("misspelled");
+      expect(proposal).not.toContain("mispelled");
+      expect(proposal).not.toContain("needs");
+    }
     await expect(changes).toBeVisible();
     await hover
       .getByRole("button", { name: "Accept rewrite", exact: true })
@@ -143,6 +198,9 @@ try {
           "accept on hover",
           "undo",
           "ignore while another version is pending",
+          "overlapping spelling and sentence suggestions independently selectable",
+          "word-only correction and complete sentence correction both apply and undo",
+          "complete sentence correction also fixes spelling",
         ],
         cases,
       },

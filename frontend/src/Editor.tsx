@@ -2643,7 +2643,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                   if (to > from)
                     spans.push(
                       Decoration.inline(from, to, {
-                        class: `annotation annotation-${annotation.type}${annotation.type === "spelling" ? "" : " annotation-grammar"}`,
+                        class: `annotation annotation-${annotation.type} proofreading-issue-${annotation.id}${annotation.type === "spelling" ? "" : " annotation-grammar"}`,
                         "aria-description": annotation.message,
                         "data-proofreading-id": annotation.id,
                       }),

@@ -8,7 +8,9 @@ With the local model pack available, **Suggest sentence structure and clarity im
 
 Choose **Improve sentence or selection**, or press **F7** with the writing editor focused, to request a revision explicitly. This works even with automatic sentence suggestions disabled. A selection may contain multiple sentences; each paragraph remains a separate editing boundary. **Another version** requests an alternative construction. **Creative writing and dialogue** asks the model to retain intentional fragments, repetition, rhythm and character dialect.
 
-Hover over an underlined sentence to see its changes and **Accept rewrite** directly beside the writing. The changes appear immediately, without a label, foldout or duplicate original/revised previews. A sentence revision takes priority over a nested word-level grammar underline. The card stays open while requesting another version or scrolling inside it; it closes after acceptance or when its source becomes invalid. The full report remains available from the status bar.
+Hover over an underlined sentence to see its changes and **Accept rewrite** directly beside the writing. The changes appear immediately, without a label, foldout or duplicate original/revised previews. Overlapping spelling, grammar and sentence suggestions remain independently selectable using buttons in the card. Hovering the misspelled word selects spelling first. The card stays open while requesting another version or scrolling inside it; it closes after acceptance or when its source becomes invalid. The full report remains available from the status bar.
+
+Sentence revisions also correct spelling and punctuation. With the rules pack installed, Alder audits the entire proposed sentence for spelling, makes at most one contextual model repair if needed, and checks it again before offering it. Remaining detected misspellings cause the sentence proposal to be withheld while individual word corrections remain available. Accepted terms and protected fields are preserved. This audit cannot guarantee correct real-word usage or perfect grammar; missing spelling verification is reported explicitly.
 
 **Show changes** compares wording, **Compare original** shows the source, and **Edit revision** lets the author adjust a proposal before acceptance. **Accept rewrite** applies the revision in one undo step. The report stays open without blocking writing. **Review sentence structure across book** combines rule findings with sentence revisions chapter by chapter.
 
@@ -22,15 +24,29 @@ The real Windows desktop workflow passed automatic local generation, complete pr
 
 On 11 November, the hover-card update passed 694 frontend tests, TypeScript checking and the Windows build. `scripts/test-sentence-hover-desktop.mjs` exercises real local generation directly on hover, another-version loading, expanded comparisons, acceptance and undo; it also captures actual screenshots with isolated test data. The existing report and explicit F7 workflow remains covered separately.
 
+The subsequent overlap/completeness fix passed 696 frontend tests, 54 focused backend tests, TypeScript checking and a fresh Windows build. Real desktop tests covered switching between overlapping spelling and sentence suggestions, applying either correction and undoing it, including a complete sentence rewrite that fixes the misspelling. The separate real spelling-repair pass also passed AU/UK/US probes. Existing rules-only hover, Sandbox isolation, report navigation and 50%/150% UI-scale checks passed. These are functional regression checks, not a new editorial-quality qualification.
+
 Both the existing 4B model and an isolated, checksum-verified Qwen3.5-9B Q4_K_M candidate completed the same 40 authored development cases (24 difficult, 16 clean). Under the subsequently rescored guardrails, both supplied displayable revisions on 21 difficult cases; the 4B model changed one clean case and 9B left all 16 unchanged. Twenty-eight paired outputs were identical. The user reviewed the blinded proposals and judged them good. This is user review of a small development set, not an independent held-out quality evaluation.
 
 Observed median times were approximately 3.74 seconds for 4B and 5.66 seconds for 9B; maxima were 7.39 and 14.36 seconds. Tests and other work overlapped these runs, so these are not controlled hardware measurements. The 9B candidate did not establish a sufficient benefit to replace the smaller default. Its weights and runtime testing state remain outside the checkout; no shipped dependency or model pins were changed.
 
-Grammarly's public free sentence rewriter, with its default tone, returned the same rewrite as the local 4B model for the reference meeting-cancellation sentence. This single comparison is not evidence of equivalence to paid Grammarly in Word. Native Word comparison was blocked by desktop capture/activation failures. Native Mac, reference 16–32 GiB hardware, GPU and broad independent editorial qualification remain separate release gates.
+Grammarly's public free sentence rewriter, with its default tone, returned the same rewrite as the local 4B model for the reference meeting-cancellation sentence. This single comparison is not evidence of equivalence to paid Grammarly in Word. Native Word comparison was blocked by desktop capture/activation failures. Reference Windows hardware and broad independent editorial qualification still need measured evidence. Native Mac and application GPU acceleration remain unverified; they are outside the agreed Windows delivery scope.
 
 The user confirmed Windows as the delivery target on 11 November 2026; Mac remains explicitly unverified. Native Linux CPU sentence-revision probes also passed under Ubuntu WSL with external networking blocked (only the loopback interface existed). These exercised all three English dialect requests, an unchanged reference sentence and citation preservation, without claiming an installed Linux desktop qualification. The current Windows source launcher was rebuilt with the required native menu module and the existing verified proofreading pack. No active managed Windows installation was found, so no legacy copy was overwritten or fresh managed installation created.
 
 `scripts/benchmark-sentence-revisions.py` records full proposals and implementation hashes. `scripts/prepare-sentence-review.py` creates offline blinded review packets with local rating export. `scripts/verify-sentence-revisions.py` performs real model, dialect, unchanged-text and citation-preservation smoke checks. All generated reports, review packets, candidate weights and test data directories belong outside the checkout.
+
+The [grammar quality and autonomous evaluation plan](grammar-quality-plan.md) specifies human-rated evaluator calibration, held-out benchmarks, independent judging, controlled generation/model experiments and a measured Grammarly comparison without requiring ongoing user ratings. Its [execution record](grammar-quality-progress.md) distinguishes implemented developer tooling and provisional measurements from outstanding qualification gates. The complete quality evaluation is not yet qualified.
+
+The current development candidate also preserves source acronyms and CamelCase
+identifiers during the spelling audit, recognises a bounded set of malformed
+contractions, and rejects known negation-scope and explicit plural-to-singular
+changes. A plurality failure can request one constrained retry from the original
+sentence. That retry shares the existing repair budget with spelling repair;
+there is no unbounded regeneration loop. Equal dollar/euro amounts can recover
+the source's notation before the strict final fact checks. Changed amounts,
+currency denominations and unsupported transformations are still withheld.
+These checks cover explicit forms and do not establish general meaning equivalence.
 
 Assigned paragraph languages and inherited style languages choose the local rules for each passage in Write, Sandbox and whole-book review. English conventions remain the default for unmarked English text; an explicit `en-US`, `en-GB` or other supported paragraph tag overrides that default. The installed LanguageTool instance supplies its supported-language list. Unknown languages are reported as unchecked, never submitted to English spelling rules. The advanced model checks English only. Generated wording is excluded from ordinary corrections; sentence revisions can retain inline fields unchanged. Text offsets remain tied to the original UTF-16 source, including selected passages and emoji; changing language or style metadata invalidates stale results even when wording is unchanged.
 
@@ -82,6 +98,12 @@ The rules service uses loopback; the model uses private pipes. Requests and manu
 
 Fast checks have their own worker pool. Advanced review yields to active narration and unloads its model after idle time. A conservative launch check requires about 6 GiB of available memory; this is an admission estimate, not a reservation or proof of operation on every 16 GiB computer. If narration interrupts active inference, the panel reports that review is incomplete and must be restarted.
 
+The user has allowed a modest memory increase if it produces a substantial
+measured quality benefit. Developer qualification protocol v2 therefore permits
+up to 7 GiB for a prospective candidate while retaining the latency and physical
+16 GiB reference-machine requirements. The current model and admission estimate
+remain unchanged; no larger default has established the necessary benefit.
+
 Paragraphs and table-cell boundaries are preserved. Long paragraphs split at sentence endings, falling back to word boundaries (or character boundaries for oversized tokens). Every passage is checked; the 2,400-character engine request size is not a document limit. There is no fixed document-length or finding-count cap. The model sees one passage at a time. Cross-paragraph contextual analysis and seamless retention of underlines during typing remain future work.
 
 ## Verification and measured limits
@@ -96,11 +118,11 @@ The authored development corpus has only 18 short examples: nine incorrect and n
 | Local rules | 9 / 9 | 0 / 9 | 32 ms |
 | Local model after validators | 8 / 9 | 0 / 9 | 2.77 s |
 
-The first rule check took 4.31 seconds; the slowest model check took 6.84 seconds. These timings came from this development machine, which has about 50 GiB RAM, using CPU inference while other tests were also running. They are development observations, not isolated performance measurements or guarantees for 16–32 GiB systems.
+The first rule check took 4.31 seconds; the slowest model check took 6.84 seconds. These timings came from this development machine using CPU inference while other tests were also running. They are development observations, not isolated performance measurements or guarantees for 16–32 GiB systems. Current quality-study reports record physical RAM in bytes; this host has about 47 GiB usable RAM.
 
 The model initially changed quote typography and currency notation in correct text. Validators now suppress these changes. It still changed “The dogs is hungry” to “The dog is hungry”, which loses the intended plurality. The rule engine supplied the expected plural correction. This is a concrete reason to keep model suggestions experimental and separate from automatic correction.
 
-The full plan is not complete. Release qualification still requires independent editorial evaluation, a legitimate frozen Grammarly comparison before claiming parity, broader engine/model comparison or adaptation, real Mac testing, Intel Mac advanced packaging, 16–32 GiB performance and concurrent narration measurements, GPU qualification if advertised, full installed offline/update/rollback tests, and completion of the redistributable pack's source/licence audit. There is no claimed human quality approval or cross-platform installed verification.
+The grammar quality plan remains incomplete. Windows quality qualification still requires a qualified editorial evaluator, the measured precision/meaning/coverage gates and reference-hardware measurements. A legitimate frozen Grammarly comparison is required before claiming parity. Model adaptation is conditional on qualified measurement, rather than a reason to train against unreliable labels. Mac remains unverified by the agreed scope, and Intel Mac has rules only. Developer GPU judging does not qualify or enable application GPU acceleration. Managed install/update/rollback checks remain a separate release workflow; this study does not update the user's installation or assert cross-platform installed verification.
 
 ## Developer verification entry points
 

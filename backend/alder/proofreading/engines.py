@@ -245,6 +245,10 @@ class ModelEngine:
                        "task": config.get("task", "proofread"), "context": config.get("context", ""),
                        "revisionMode": config.get('revisionMode', 'improve'), 'revisionAttempt':config.get('revisionAttempt',0),
                        'revisionProfile':config.get('revisionProfile','standard')}
+            if config.get('spellingRepair') or config.get('spellingIssues'):
+                payload.update(spellingRepair=bool(config.get('spellingRepair')), spellingIssues=config.get('spellingIssues', []))
+            if config.get('repairReason')=='plurality':
+                payload.update(repairReason='plurality',pluralityTerms=config.get('pluralityTerms',[])[:32])
             try:
                 self.process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
                 self.process.stdin.flush()

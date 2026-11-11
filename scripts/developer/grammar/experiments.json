@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "trialBudget": {"pipelineTrials": 15, "modelFamilies": 3},
+  "budgetAmendment": "12 November: pipeline 13 added fallible rule hints; configuration 14 measured a lower-memory 9B IQ3 export. Pipeline 15 prospectively tests one-pass source-defect diagnosis after fresh dialogue checks exposed unnecessary rewriting of a clean sentence. It retains full structural corrections but has an explicit unchanged branch. These amendments change no quality gate, generator-family limit, model pin or sealed-test rule.",
+  "baseline": "starting-4b-prompt3",
+  "candidates": [
+    {"id": "starting-4b-prompt3", "pipeline": "baseline", "model": "installed-pinned-pack", "scope": "Working-copy fixes at quality-plan start; not a claim that prompt 3 was already released"},
+    {"id": "4b-source-spelling-hints", "pipeline": "source-hints", "model": "installed-pinned-pack"},
+    {"id": "9b-prompt3", "pipeline": "baseline", "model": "separately-verified-9b-candidate"},
+    {"id": "4b-few-shot", "pipeline": "few-shot", "model": "installed-pinned-pack"},
+    {"id": "4b-correctness-then-structure", "pipeline": "correctness-then-structure", "model": "installed-pinned-pack"},
+    {"id": "4b-minimal", "pipeline": "minimal", "model": "installed-pinned-pack"},
+    {"id": "4b-invariants", "pipeline": "baseline", "model": "installed-pinned-pack", "scope": "Measured vocabulary, negation, plurality and currency-notation fixes; exact implementation hashes bind each run"},
+    {"id": "4b-semantic-veto", "pipeline": "semantic-veto", "model": "installed-pinned-pack", "scope": "Developer prototype with separately verified NLI checkpoint; no production dependency or pin change"},
+    {"id": "4b-q6-quantization", "pipeline": "baseline", "model": "separately-verified-4b-q6", "scope": "Matched-source developer quantization ablation; no production pin change"},
+    {"id": "4b-bf16-reference", "pipeline": "baseline", "model": "separately-verified-4b-bf16", "scope": "Developer numerical reference; above shipping memory budget"},
+    {"id": "phi4-mini-native", "pipeline": "native-template", "generatorFamily": "phi4", "model": "separately-verified-phi4-mini-q4", "scope": "Developer family screen with the same production instructions and native GGUF template"},
+    {"id": "ministral3b-native", "pipeline": "native-template", "generatorFamily": "ministral3", "model": "separately-verified-ministral3b-q4", "scope": "Developer family screen with the same production instructions and native GGUF template"},
+    {"id": "4b-rule-guidance", "pipeline": "rule-hints", "model": "installed-pinned-pack", "scope": "One additional bounded development pipeline with contextual local grammar/spelling/punctuation hints; a separately rendered worker, not a shipping change"},
+    {"id": "9b-iq3xxs", "pipeline": "baseline", "model": "separately-verified-9b-iq3xxs", "scope": "One lower-memory quantization of the existing 9B family, selected by resource fit rather than quality scores; compare against a fresh current-service 4B baseline before any validation or promotion"},
+    {"id": "4b-source-diagnosis", "pipeline": "source-diagnosis", "model": "installed-pinned-pack", "scope": "One-pass developer ablation requiring exact source-defect evidence or explicit no-change. Same model/service guards; self-assessment is not an independent evaluator or approval."}
+  ],
+  "promotion": "Only a complete passed qualification report; otherwise retain incumbent",
+  "limitations": "Candidate declarations do not imply qualification or completion of model selection"
+}

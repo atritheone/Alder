@@ -198,3 +198,13 @@
   line-height: 1;
   cursor: pointer;
 }
+.proofreading-hover-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.proofreading-hover-choices button[aria-pressed="true"] {
+  box-shadow: inset 0 -2px var(--accent, #487da3);
+  font-weight: bold;
+}

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "dimensions": ["correctness", "fluency", "meaning", "voice", "dialect", "completeness"],
+  "scale": {"0": "unacceptable", "1": "major defects", "2": "minor defects", "3": "fully satisfactory"},
+  "critical": ["changed participant roles", "changed negation", "changed quantities", "changed conditions", "invented information", "damaged fields"],
+  "rule": "Judge the delivered output against source and context. Prefer unchanged effective text over gratuitous edits. Do not reward brevity alone. Every alleged defect needs an exact quotation and a reason. Missing evidence, invalid output, order instability and unavailable judges are abstentions."
+}
