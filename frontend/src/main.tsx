@@ -4,6 +4,7 @@ import App from "./App";
 import ContextMenus from "./ContextMenu";
 import "./styles.css";
 import "./controls.css";
+import "./structure.css";
 import "./equations.css";
 import "mathlive/fonts.css";
 if (new URLSearchParams(location.search).has("publication")) {

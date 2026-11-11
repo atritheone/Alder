@@ -4,6 +4,7 @@ import { pageFrame } from "./sectionLayout";
 import { PageFurniture } from "./pageFurniture";
 import { columnRulesHTML } from "./columns";
 import { lineNumbersHTML } from "./lineNumberLayout";
+import { PageStructureGuides } from "./PageStructureGuides";
 import {
   samePagePresentation,
   type PagePresentation,
@@ -32,6 +33,7 @@ export const PageSheets = memo(
                 height: frame.layout.height,
               }}
             >
+              <PageStructureGuides layout={frame.layout} page={index} />
               {(page?.from !== page?.to || page?.noteHTML) && (
                 <PageFurniture
                   layout={frame.layout}

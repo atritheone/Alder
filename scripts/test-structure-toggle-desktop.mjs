@@ -37,7 +37,7 @@ try {
   const toggle = page
     .locator(".book-main .format-toolbar")
     .getByRole("button", { name: "Show structure", exact: true });
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await app.evaluate(({ BrowserWindow }) => {
     const w = BrowserWindow.getAllWindows()[0];
     globalThis.structureGeometry = {
@@ -65,7 +65,7 @@ try {
     };
   });
   for (let index = 0; index < 6; index++) {
-    const visible = index % 2 === 0;
+    const visible = index % 2 !== 0;
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", String(visible));
     await expect
@@ -80,9 +80,13 @@ try {
         }),
       )
       .toBe(visible);
-    if (visible)
-      await expect(editor.locator(".structure-marker").first()).toBeAttached();
-    else await expect(editor.locator(".structure-marker")).toHaveCount(0);
+    expect(await editor.locator(".structure-marker").count()).toBe(65);
+    expect(
+      await editor
+        .locator(".structure-marker")
+        .first()
+        .evaluate((element) => getComputedStyle(element, "::after").visibility),
+    ).toBe(visible ? "visible" : "hidden");
     const after = await editor.evaluate((element) => {
       const scroll = element.closest(".editor-scroll");
       return {
@@ -112,5 +116,10 @@ try {
     JSON.stringify({ status: "passed", toggles: 6, geometry, errors }),
   );
 } finally {
-  await app.close();
+  const timer = setTimeout(() => app.process().kill(), 10000);
+  try {
+    await app.close();
+  } finally {
+    clearTimeout(timer);
+  }
 }

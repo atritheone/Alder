@@ -168,6 +168,7 @@ import { persistentCaret } from "./persistentCaret";
 import { directTyping } from './directTyping';
 import { readingHighlight } from "./readingHighlight";
 import { structureMarks } from "./structureMarks";
+import { structureGuides, refreshStructureGuides } from "./structureGuides";
 import { useFontCatalogue } from "./useInstalledFonts";
 import { shortcutLabel } from "./platform";
 import {
@@ -2450,8 +2451,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         horizontalPagePlacement(),
         columnPlacementPlugin(),
         structureMarks(
-          () => latest.current.showStructure && !blocked.current,
+          () => !blocked.current && !latest.current.rawMode,
         ),
+        structureGuides(() => ({
+          enabled: !blocked.current && !latest.current.rawMode,
+          layout: latest.current.pageLayout,
+          pages: measuredPages.current,
+          styles: latest.current.styles,
+        })),
         ...(props.persistentCaret && !blocked.current
           ? [persistentCaret()]
           : []),
@@ -3162,7 +3169,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   }, [visibleAnnotations, props.annotationText]);
   useLayoutEffect(() => {
     if (view.current) refreshEditorDecorations(view.current);
-  }, [props.showStructure, props.styles, props.headingStarts, props.pageLayout?.noteStarts, props.pageLayout?.noteOptions]);
+  }, [props.styles, props.headingStarts, props.pageLayout?.noteStarts, props.pageLayout?.noteOptions]);
   useLayoutEffect(() => {
     const v = view.current;
     if (!v) return;
@@ -3302,6 +3309,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         pages=numberedLines(v,pages,layout,invalidateFlow);
         if (!hasColumns && !pages.some(page => page.frame || page.fragments)) settleHyphenation(v, true);
         measuredPages.current = pages;
+        refreshStructureGuides(v);
         const headerCache = new Map<string, string>();
         const headers = pages.map((page, index) => {
           if(page.columnHeaders)return page.columnHeaders.join('');
@@ -4288,7 +4296,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       )}
       <div
         className={
-          "editor-scroll" + (props.showStructure ? " show-structure" : "")
+          "editor-scroll" + (props.showStructure && !props.rawMode ? " show-structure" : "")
         }
         onScroll={(e) => {
           if (!props.pageLayout) return;
@@ -4395,7 +4403,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             </div>
           </div>
         ) : (
-          <div ref={host} />
+          <div ref={host} style={{ position: "relative" }} />
         )}
       </div>
     </div>

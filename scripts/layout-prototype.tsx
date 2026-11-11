@@ -82,6 +82,7 @@ function Prototype() {
   const [doc, setDoc] = useState(document);
   const [zoom, setZoom] = useState(1);
   const [scale, setScale] = useState(1);
+  const [structure, setStructure] = useState(false);
   const [generation, setGeneration] = useState(0);
   const pages = useRef<FlowPage[] | null>(null);
   const operation = useRef<{ kind: string; start: number } | null>(null);
@@ -121,6 +122,7 @@ function Prototype() {
     doc: () => doc,
     zoom: setZoom,
     scale: setScale,
+    structure: setStructure,
     document: (value: DocNode) => {
       pages.current = null;
       setDoc(identifiedDocument(schema.nodeFromJSON(value)).toJSON());
@@ -178,9 +180,9 @@ function Prototype() {
       fontFamily="Cambria"
       fontSize={16}
       styles={[]}
-      showStructure={false}
+      showStructure={structure}
       suppressChecks
-      onToggleStructure={() => {}}
+      onToggleStructure={() => setStructure(value => !value)}
       onImage={() => {}}
       onLink={() => {}}
       onSelection={() => {}}

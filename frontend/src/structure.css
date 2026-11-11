@@ -1,0 +1,110 @@
+/* Guides are painted outside the authored document. The master switch changes
+   paint only; it never changes the size of a line, paragraph, object or page. */
+.page-structure-guides,
+.document-structure-layer {
+  display: none;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: #6b8796;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.75px;
+}
+.show-structure .page-structure-guides,
+.show-structure .document-structure-layer {
+  display: block;
+}
+.page-structure-guides rect {
+  stroke-dasharray: 2 4;
+  opacity: 0.43;
+}
+.page-structure-guides .structure-region-column {
+  opacity: 0.3;
+}
+.page-structure-guides .structure-region-header,
+.page-structure-guides .structure-region-footer {
+  opacity: 0.26;
+}
+.document-structure-layer {
+  z-index: 2;
+}
+.document-structure-layer .structure-paragraph-cue {
+  opacity: 0.4;
+}
+.document-structure-layer .structure-active {
+  opacity: 0.95;
+  stroke-width: 1px;
+}
+.document-structure-layer .structure-object-cue {
+  stroke-dasharray: 2 3;
+  opacity: 0.5;
+}
+.document-structure-layer .structure-anchor-link {
+  stroke-dasharray: 2 3;
+  opacity: 0.9;
+}
+.document-structure-layer .structure-break-cue {
+  stroke-dasharray: 3 3;
+  opacity: 0.65;
+}
+.document-structure-layer text {
+  fill: currentColor;
+  stroke: none;
+  font:
+    12px Arial,
+    sans-serif;
+}
+.structure-marker::after,
+.structure-whitespace::after,
+.structure-tab::before {
+  visibility: hidden;
+  color: #6b8796;
+  content: attr(data-symbol) / "";
+  text-indent: 0;
+  letter-spacing: normal;
+  word-spacing: normal;
+  white-space: pre;
+}
+.show-structure .structure-marker::after,
+.show-structure .structure-whitespace::after,
+.show-structure .structure-tab::before {
+  visibility: visible;
+}
+.structure-tab {
+  position: relative;
+}
+/* A tab's ::after belongs to its authored leader. Keep the guide separate. */
+.structure-tab::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 0.8em;
+  font-weight: normal;
+  font-style: normal;
+}
+/* The original break box remains in flow, including Sandbox's spacing. */
+.editor-scroll .ProseMirror .page-break {
+  color: transparent;
+  border-color: transparent;
+}
+@media print {
+  .page-structure-guides,
+  .document-structure-layer {
+    display: none !important;
+  }
+  .structure-marker::after,
+  .structure-whitespace::after,
+  .structure-tab::before {
+    visibility: hidden !important;
+  }
+  .show-structure .document-bookmark::after,
+  .show-structure .document-index-entry::after {
+    display: none !important;
+  }
+}

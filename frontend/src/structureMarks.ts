@@ -4,6 +4,8 @@ import { Decoration, DecorationSet } from "prosemirror-view";
 
 /** Visual overlays only: never replace text or add characters to the document. */
 export function structureMarks(enabled: () => boolean) {
+  type Mark = { from: number; to?: number; symbol: string; kind: string };
+  const blocks = new WeakMap<Node, Mark[]>();
   let previousDoc: Node | undefined;
   let previousEnabled = false;
   let cached = DecorationSet.empty;
@@ -24,6 +26,7 @@ export function structureMarks(enabled: () => boolean) {
               (view) => {
                 const element = view.dom.ownerDocument.createElement("span");
                 element.className = "structure-marker";
+                element.dataset.kind = kind;
                 element.dataset.symbol = symbol;
                 element.setAttribute("aria-hidden", "true");
                 return element;
@@ -33,28 +36,54 @@ export function structureMarks(enabled: () => boolean) {
           );
         };
         state.doc.descendants((node, position) => {
-          if (node.type.name === "paragraph" || node.type.name === "heading")
-            marker(position + node.nodeSize - 1, "\u00b6", "paragraph");
-          if (node.type.name === "hard_break")
-            marker(position, "\u21b5", "break");
-          if (node.isText) {
-            for (const match of node.text!.matchAll(/[ \t\u00a0\n]/g)) {
-              const from = position + match.index!;
-              if (match[0] === "\n") marker(from, "\u21b5", "break");
-              else
-                marks.push(
-                  Decoration.inline(from, from + 1, {
-                    class: "structure-whitespace",
-                    "data-symbol":
+          if (!node.isTextblock) return;
+          let descriptions = blocks.get(node);
+          if (!descriptions) {
+            descriptions = [];
+            if (["paragraph", "heading"].includes(node.type.name))
+              descriptions.push({
+                from: node.nodeSize - 1,
+                symbol: "¶",
+                kind: "paragraph",
+              });
+            node.descendants((child, offset) => {
+              const start = offset + 1;
+              if (child.type.name === "hard_break")
+                descriptions!.push({ from: start, symbol: "↵", kind: "break" });
+              if (child.isText)
+                for (const match of child.text!.matchAll(/[ \t\u00a0\n]/g)) {
+                  const from = start + match.index!;
+                  descriptions!.push({
+                    from,
+                    ...(match[0] === "\n" ? {} : { to: from + 1 }),
+                    symbol:
                       match[0] === "\t"
-                        ? "\u2192"
+                        ? "→"
                         : match[0] === "\u00a0"
-                          ? "\u00b0"
-                          : "\u00b7",
-                  }),
-                );
-            }
+                          ? "°"
+                          : match[0] === "\n"
+                            ? "↵"
+                            : "·",
+                    kind: "whitespace",
+                  });
+                }
+            });
+            blocks.set(node, descriptions);
           }
+          for (const mark of descriptions)
+            if (mark.to == null)
+              marker(position + mark.from, mark.symbol, mark.kind);
+            else
+              marks.push(
+                Decoration.inline(position + mark.from, position + mark.to, {
+                  class:
+                    mark.symbol === "→"
+                      ? "structure-tab"
+                      : "structure-whitespace",
+                  "data-symbol": mark.symbol,
+                }),
+              );
+          return false;
         });
         return (cached = DecorationSet.create(state.doc, marks));
       },

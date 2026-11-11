@@ -137,6 +137,7 @@ import {
   type ReferenceIndex,
 } from "./documentReferences";
 import { helpFor } from "./contextHelp";
+import { useStructurePreference } from "./structurePreference";
 import { useNarrationGain } from "./audioPlayback";
 import PlaybackSpeed from "./PlaybackSpeed";
 import { useWheelSlider } from "./useWheelSlider";
@@ -361,13 +362,13 @@ export default function App() {
   } | null>(null);
   useEffect(() => setOutlineOpen(false), [project?.id]);
   const [voiceTestPlaying, setVoiceTestPlaying] = useState(false);
+  const [structure, toggleStructure] = useStructurePreference();
   const [browserOpen, setBrowserOpen] = useState(
       () => localStorage.getItem("alder.browserOpen") === "true",
     ),
     [detailOpen, setDetailOpen] = useState(
       () => localStorage.getItem("alder.detailOpen") === "true",
     ),
-    [structure, setStructure] = useState(false),
     [loop, setLoop] = useState(false),
     [playing, setPlaying] = useState(false),
     [documentPlaying, setDocumentPlaying] = useState(false),
@@ -2225,7 +2226,7 @@ export default function App() {
       },
       {
         label: structure ? "Hide structure" : "Show structure",
-        action: () => setStructure((v) => !v),
+        action: toggleStructure,
       },
     ],
     Options: [
@@ -2446,7 +2447,7 @@ export default function App() {
           )}
           <BookWorkspace
             showStructure={structure}
-            onToggleStructure={() => setStructure((v) => !v)}
+            onToggleStructure={toggleStructure}
             externalPlayback={playing || voiceTestPlaying || sandboxPlaying}
             onPlaybackChange={setDocumentPlaying}
             key={project.id}
@@ -2877,7 +2878,7 @@ export default function App() {
                     }
                     annotationText={analysis?.sourceText}
                     showStructure={structure}
-                    onToggleStructure={() => setStructure((v) => !v)}
+                    onToggleStructure={toggleStructure}
                     onImage={() => chooseImage(false)}
                     onCollectImage={collectStoryImage}
                     onComplete={() => {

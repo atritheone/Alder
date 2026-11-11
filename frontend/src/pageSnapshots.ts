@@ -333,6 +333,7 @@ export function pageSnapshots(
           "annotation",
           "annotation-repetition",
           "structure-whitespace",
+          "structure-tab",
         );
       }
       copy
