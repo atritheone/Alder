@@ -2,8 +2,13 @@
 
 Started 11 November 2026. **Plan incomplete; no Grammarly parity claim.**
 
-Stopped on 12 November at the user's **20% weekly-usage limit**. All owned
-inference work was stopped and partial evidence retained. The larger source-
+Stopped on 12 November after incorrectly interpreting the budget threshold as
+20% used. The user clarified that the threshold is **20% remaining (80% used)**.
+The usage API subsequently reported 20% consumed, conflicting with the user's
+reported 80% consumed. Work remains stopped using the user's reported figure;
+the discrepancy is unresolved and is not grounds to resume inference. The
+implementation checkpoint was committed and pushed to main as `3cf9e61`.
+All owned inference work was stopped and partial evidence retained. The larger source-
 diagnosis screen has 20/100 incumbent reviewed-text cases, with candidate and
 natural phases unstarted. The control-passed Magistral evaluator has seven of
 80 calibration pairs recorded; its process was stopped during the next request,
@@ -13,8 +18,9 @@ was promoted and no installation, package version, model pin or memory limit was
 changed. The stopping-point run passed **167 relevant tests** (81 sentence/service,
 86 evaluation-tool cases); the complete application suite was not repeated.
 
-The user authorized work until completion or weekly usage reaches 20%, with Git
-writes only to main at either stopping point. Development evidence and research
+The user authorized work until completion or weekly usage reaches **80% used
+(20% remaining)**, with commits and pushes only to main at either stopping point.
+Development evidence and research
 assets are held outside the checkout in the local `AlderTesting/grammar-quality`
 workspace. Do not upload user manuscripts or raw logs.
 
