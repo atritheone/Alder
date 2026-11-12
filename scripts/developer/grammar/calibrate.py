@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from common import read, records, digest, write, execution_stamp, require_unchanged
 from compare import interval
-from judge import adjudicate
+from judge import adjudicate, validate
 
 
 def calibrate(pairs, ratings, confidence=.95, document_map=None, partition_pairs=None, split='validation'):
@@ -19,7 +19,7 @@ def calibrate(pairs, ratings, confidence=.95, document_map=None, partition_pairs
     if len(gold) != len([p for p in pairs if p['split'] == split]):
         raise ValueError('Duplicate human pair ids.')
     seen, decisions, unstable = set(), 0, 0
-    ordered_pairs, order_changes = 0, 0
+    ordered_pairs, order_changes, verified = 0, 0, 0
     outcomes = {p['id']: 0 for p in gold.values() if p['humanWinner'] != 'tie'}
     for row in ratings['records']:
         if row['id'] not in gold: continue
@@ -28,6 +28,17 @@ def calibrate(pairs, ratings, confidence=.95, document_map=None, partition_pairs
             raise ValueError('Repeated or mismatched judgment.')
         seen.add(row['id'])
         if pair['humanWinner'] == 'tie': continue
+        responses=row.get('responses')
+        if responses is not None:
+            if not isinstance(responses,list) or len(responses)!=2:
+                raise ValueError('Calibration requires both saved public responses.')
+            reconstructed=[]
+            for swapped,response in enumerate(responses):
+                a,b=(pair['b'],pair['a']) if swapped else (pair['a'],pair['b'])
+                reconstructed.append(validate(response,pair['source'],a,b) if response is not None else 'abstain')
+            if row.get('orderDecisions')!=reconstructed or row['winner']!=adjudicate(*reconstructed):
+                raise ValueError('Calibration winner disagrees with its saved public evidence.')
+            verified+=1
         decisions += 1
         if row['winner'] == 'abstain': unstable += 1
         orders=row.get('orderDecisions',[])
@@ -66,7 +77,9 @@ def calibrate(pairs, ratings, confidence=.95, document_map=None, partition_pairs
             'pairsSHA256':digest(pairs),'ratingsSHA256':digest(ratings),
             'analyzedPairsSHA256':digest([pair for pair in pairs if pair['split']==split]),
             'evaluationImplementationSHA256':digest(code_stamp),
-            'pairwiseGatePassed': bool(split=='validation' and not training_overlap and document_map and document_overlap==0 and len(decisive) >= 100 and len(grouped) >= 20 and agreement >= .8 and bounds and bounds[0] > .75 and abstentions <= .1 and order_instability is not None and order_instability<=.05 and order_coverage>=.9),
+            'pairwiseGatePassed': bool(split=='validation' and verified==decisions and order_coverage>=.9 and not training_overlap and document_map and document_overlap==0 and len(decisive) >= 100 and len(grouped) >= 20 and agreement >= .8 and bounds and bounds[0] > .75 and abstentions <= .1 and order_instability is not None and order_instability<=.05),
+            'publicEvidenceVerified':bool(decisions and verified==decisions),
+            'publicEvidenceCoverage':verified/len(decisive) if decisive else 0,
             'agreement': agreement, 'interval': bounds, 'abstentions': abstentions,
             'orderInstability':order_instability,'orderCoverage':order_coverage,'orderChanges':order_changes,
             'confidence':confidence,

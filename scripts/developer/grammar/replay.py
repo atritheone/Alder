@@ -20,6 +20,17 @@ def select(rows,expected,split,ids=None):
     return [row for row in population if row['id'] in set(ids)]
 
 
+def recorded_request(trace,used,text,config):
+    """A matching sentence alone does not bind locale, context or vocabulary."""
+    phase='spelling-repair' if config.get('spellingRepair') else 'generation'
+    configuration=digest(config)
+    candidates=[(i,item) for i,item in enumerate(trace) if i not in used and item['source']==text
+      and item['phase']==phase and item.get('configurationSHA256')==configuration]
+    if not candidates:
+        raise RuntimeError('Replay requested an unrecorded model input/configuration; fresh inference is required.')
+    index,item=candidates[0];used.append(index);return item['proposal']
+
+
 def main():
     stamp=execution_stamp(__file__);implementation=generate.source_snapshot()
     parser=argparse.ArgumentParser(description=__doc__)
@@ -39,16 +50,16 @@ def main():
     selected=select(baseline,expected,args.split,args.case_ids)
     service=generate.ProofreadingService(Path(args.resources),target.parent/'replay-service-data')
     fingerprint=digest([origin['fingerprint'],implementation,stamp,sorted(args.case_ids) if args.case_ids else None])
+    invalid_requests=[]
     try:
         for row in selected:
-            case=expected[row['id']];trace=row['modelTrace'];used=[]
+            case=expected[row['id']];trace=row['modelTrace'];used=[];request_errors=[]
             if not trace or any('error' in item for item in trace):raise ValueError('Inference failure cannot be replayed as a successful candidate.')
             def recorded(text,config,cancelled):
                 if cancelled():raise InterruptedError()
-                phase='spelling-repair' if config.get('spellingRepair') else 'generation'
-                candidates=[(i,item) for i,item in enumerate(trace) if i not in used and item['source']==text and item['phase']==phase]
-                if not candidates:raise RuntimeError('Replay requested an unrecorded model input; fresh inference is required.')
-                index,item=candidates[0];used.append(index);return item['proposal']
+                try:return recorded_request(trace,used,text,config)
+                except RuntimeError:
+                    request_errors.append('UnrecordedModelRequest');raise
             service.model.check=recorded
             context=case.get('context',case['source'])
             if context.count(case['source'])!=1:raise ValueError('Ambiguous replay target context.')
@@ -72,13 +83,17 @@ def main():
               'serviceStatus':job['status'],'warnings':job['warnings'],'fingerprint':fingerprint,
               'evidenceKind':'recorded-model-integration-replay','recordedFingerprint':row['fingerprint'],
               'recordedCallsUsed':used,'recordedCallsAvailable':len(trace)}
+            result['replayRequestsBound']=not request_errors
+            if request_errors:invalid_requests.append(row['id'])
             with target.open('a',encoding='utf-8') as stream:stream.write(json.dumps(result,ensure_ascii=False)+'\n')
         require_unchanged(stamp)
-        write(target.with_suffix('.manifest.json'),{'status':'completed','fingerprint':fingerprint,
+        write(target.with_suffix('.manifest.json'),{'status':'failed' if invalid_requests else 'completed','fingerprint':fingerprint,
           'evidenceKind':'recorded-model-integration-replay','scope':__doc__,'cases':len(selected),
           'corpusSHA256':digest(data),'recordedInferenceSHA256':digest(baseline),
           'caseSelection':sorted(args.case_ids) if args.case_ids else None,
-          'recordedManifestSHA256':digest(origin),'implementation':implementation})
+          'recordedManifestSHA256':digest(origin),'implementation':implementation,
+          'unboundRequestCaseIds':invalid_requests})
+        if invalid_requests:raise RuntimeError('Replay contains unrecorded model requests; preserve failures and run fresh inference.')
         print(json.dumps({'cases':len(selected),'scope':'recorded-model integration replay, not fresh inference'}))
     finally:service.shutdown()
 

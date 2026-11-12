@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "scope": "Unqueried authored development controls from observed research-candidate failures. Separate from the frozen semantic challenge, human ratings and sealed generator tests.",
+  "rights": {"evaluationAllowed": true, "source": "Authored for Alder development; repository licence applies."},
+  "cases": [
+    {
+      "id": "development-fact-addition-umbrella-v1",
+      "group": "development-new-adjective",
+      "split": "development",
+      "source": "He bought a umbrella.",
+      "a": "He bought an umbrella.",
+      "b": "He bought a new umbrella.",
+      "correctWinner": "A",
+      "category": "unsupported-attribute-addition",
+      "dialect": "en-GB",
+      "profile": "standard",
+      "construction": "Both alternatives repair the article; one adds an unsupported attribute.",
+      "goldOrigin": "Authored development control, not independent human preference ratings.",
+      "observation": "CoEdIT-large research seed screen, mixed-10"
+    },
+    {
+      "id": "development-spelling-meaning-words-v1",
+      "group": "development-lexical-repair-meaning",
+      "split": "development",
+      "source": "The report contains mispelled words.",
+      "a": "The report contains missing words.",
+      "b": "The report contains misspelled words.",
+      "correctWinner": "B",
+      "category": "lexical-repair-meaning-drift",
+      "dialect": "en-GB",
+      "profile": "standard",
+      "construction": "Both alternatives remove the misspelling; one changes incorrect spelling into omitted content.",
+      "goldOrigin": "Authored controlled mutation inspired by an observed defect; not a raw model output or human rating.",
+      "observation": "GRMR Q4 research seed screen, mixed-0"
+    }
+  ]
+}

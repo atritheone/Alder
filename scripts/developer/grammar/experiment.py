@@ -108,7 +108,7 @@ def language_hints(text,findings,accepted):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__,add_help=False)
-    parser.add_argument('--variant',choices=['minimal','correctness-then-structure','few-shot','semantic-veto','rule-hints','source-diagnosis'],required=True)
+    parser.add_argument('--variant',choices=['minimal','correctness-then-structure','few-shot','semantic-veto','rule-hints','source-diagnosis','hybrid-hints'],required=True)
     parser.add_argument('--semantic-model',type=Path)
     options,remaining=parser.parse_known_args()
     if '--pipeline' in remaining:raise ValueError('Run one ablation at a time; use generate.py for source hints.')
@@ -122,11 +122,12 @@ def main():
         from score_nli import EntailmentVerifier
         verifier=EntailmentVerifier(options.semantic_model)
     elif options.semantic_model:raise ValueError('Change one pipeline component at a time.')
-    if options.variant in ('few-shot','rule-hints','source-diagnosis'):
+    if options.variant in ('few-shot','rule-hints','source-diagnosis','hybrid-hints'):
         source=(generate.ROOT/'backend/alder/proofreading/worker.py').read_text('utf-8')
-        if options.variant=='source-diagnosis':
+        if options.variant in ('source-diagnosis','hybrid-hints'):
             from source_diagnosis import render_worker
-            rendered=render_worker(source,str(output)+'.source-assessments.jsonl')
+            rendered=render_worker(source,str(output)+'.source-assessments.jsonl',rule_guided=options.variant=='hybrid-hints')
+            if options.variant=='hybrid-hints':rendered=rule_hints_worker(rendered)
         else:
             render=few_shot_worker if options.variant=='few-shot' else rule_hints_worker
             rendered=render(source)
@@ -161,7 +162,7 @@ def main():
                 start=time.monotonic()
                 value=original(text,config,cancelled)
                 detail={'source':text,'proposal':value,'phase':label,'configurationSHA256':digest(config)}
-                if options.variant=='rule-hints':detail['requestedLanguageHints']=config.get('spellingIssues',[])
+                if options.variant in ('rule-hints','hybrid-hints'):detail['requestedLanguageHints']=config.get('spellingIssues',[])
                 self.model.evaluation_trace.append(detail)
                 with trace.open('a',encoding='utf-8') as stream:
                     stream.write(json.dumps({'specificationSHA256':digest(specification),**detail,
@@ -184,7 +185,7 @@ def main():
                     return value if meaning and meaning['accepted'] else source
                 if config.get('task')!='revise' or config.get('spellingRepair') or options.variant in ('few-shot','source-diagnosis'):
                     return phase(text,config,cancelled,'normal')
-                if options.variant=='rule-hints':
+                if options.variant in ('rule-hints','hybrid-hints'):
                     if cancelled():raise InterruptedError()
                     hints=language_hints(text,self.rules.check(text,config),config['acceptedWords'])
                     if cancelled():raise InterruptedError()

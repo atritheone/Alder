@@ -42,12 +42,24 @@ def summarize(data,rows,manifest):
         successful_responses+=success;without_response+=int(success==0)
         errors.update(call['error'] for call in trace if 'error' in call)
         memory_samples.append(row.get('memory',{}))
+    incomplete=set();full_samples=[]
     for sample in memory_samples:
+        flag=sample.get('processTreeCoverage')
+        if flag is not None and type(flag) is not bool:raise ValueError('Invalid process-tree coverage flag.')
+        missing=sample.get('incompleteComponents',[])
+        if not isinstance(missing,list) or any(name not in peaks for name in missing):
+            raise ValueError('Invalid missing process-tree components.')
+        incomplete.update(missing)
+        if all(sample.get('componentPeakRSSBytes',{}).get(name) is not None for name in peaks):
+            full_samples.append(flag)
         for name,value in sample.get('componentPeakRSSBytes',{}).items():
             if name not in peaks:continue
             if value is None:continue
             if type(value) is not int or value<0:raise ValueError('Invalid memory measurement.')
             peaks[name]=max(peaks[name] or 0,value)
+    tree_coverage=(False if incomplete or False in full_samples else
+                   True if full_samples and all(flag is True for flag in full_samples) else None)
+    observed_peak=sum(peaks.values()) if all(value is not None for value in peaks.values()) else None
     complete=manifest.get('status')=='completed' and len(seen)==len(expected)
     return {'status':'unverified','scope':__doc__,'inferenceComplete':complete,
       'manifestStatus':manifest.get('status'),'casesExpected':len(expected),'casesRecorded':len(rows),
@@ -60,9 +72,11 @@ def summarize(data,rows,manifest):
         'coldCases':len(cold),'unclassifiedCases':len(seconds)-len(warm)-len(cold),
         'scope':'Development host, including service audits/repair; concurrent workloads are not controlled'},
       'memory':{'componentPeakRSSBytes':peaks,
-        'sumComponentPeakRSSBytes':sum(peaks.values()) if all(value is not None for value in peaks.values()) else None,
+        'sumComponentPeakRSSBytes':observed_peak if tree_coverage is True else None,
+        'observedComponentPeakSumBytes':observed_peak,'processTreeCoverage':tree_coverage,
+        'incompleteComponents':sorted(incomplete),
         'physicalRAMBytes':settings.get('hardware',{}).get('physicalRAMBytes'),
-        'scope':'Conservative sum of owned lifetime peaks; not simultaneous RSS or reference-hardware qualification'},
+        'scope':'Verified owned component/descendant lifetime peaks when lineage coverage is true; observed legacy/partial numbers remain diagnostic, not simultaneous RSS or reference-hardware qualification'},
       'corpusSHA256':digest(data),'resultsSHA256':digest(rows),'manifestSHA256':digest(manifest),
       'implementationSHA256':digest(settings['implementation']),'modelSHA256':settings['model'],
       'limitation':'Recorded inference completion, literal checks and resource samples do not establish editorial quality.'}

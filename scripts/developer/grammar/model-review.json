@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewed": "2026-11-11",
+  "reviewed": "2026-11-13",
   "scope": "Checkpoint eligibility inspection, not model qualification or a legal conclusion about derived weights. Weight declarations and training-data provenance are separate records.",
   "models": [
     {
@@ -10,7 +10,16 @@
       "declaredWeightLicence": "CC-BY-NC-4.0",
       "productionQualificationEligible": false,
       "decision": "Excluded from the unrestricted redistributable-pack search because its weight licence contains a noncommercial restriction.",
-      "sources": ["https://huggingface.co/grammarly/coedit-large/blob/5637bcdf9d8d4419f97c8cfea36f7d35c79232b6/README.md"]
+      "researchBenchmark": {
+        "declared": "2026-11-12",
+        "file": "model.safetensors",
+        "sha256": "c692f68bca5c6899801bc9fad626fefd3359ccd95e26dccae4dd72186fd98852",
+        "bytes": 3132439432,
+        "scope": "Separate developer-only specialization baseline under the publisher GEC task prefix. Verified assets stay outside Git and the application. This does not change the production exclusion or establish training-data rights, distribution eligibility or quality."
+      },
+      "sources": [
+        "https://huggingface.co/grammarly/coedit-large/blob/5637bcdf9d8d4419f97c8cfea36f7d35c79232b6/README.md"
+      ]
     },
     {
       "repo": "Unbabel/gec-t5_small",
@@ -31,15 +40,75 @@
       "modelCardSHA256": "acde5f00e8958f3635999fe8cd2f032489bdf47653b128ad83648392250c4d54",
       "declaredWeightLicence": "Apache-2.0",
       "productionQualificationEligible": false,
-      "decision": "The card names grmr-v4-60k as training data. Its reviewed dataset metadata does not declare reuse terms; no verified training-data rights record was established. No model was downloaded or selected.",
+      "decision": "Initial production review: the card names grmr-v4-60k as training data, but its reviewed metadata does not declare reuse terms. No verified training-data rights record was established and no model was selected for shipping. The later, separately declared development-only download/benchmark is recorded below; it does not resolve the production exclusion.",
+      "researchBenchmark": {
+        "declared": "2026-11-12",
+        "repo": "qingy2024/GRMR-V3-Q4B-GGUF",
+        "revision": "3e8a0b2beb1ab373baee873ba9498ebbbef5aa02",
+        "file": "GRMR-V3-Q4B-Q4_K_M.gguf",
+        "sha256": "ac5a134fa44ca8fe176d5059b4a427bedb44beff9eb30a3d649a693037a5bf2f",
+        "bytes": 2496718144,
+        "scope": "Separate later developer-only task-specialization benchmark; publisher GGUF weights and README downloaded with verification. The original exclusion decision records the earlier production review. Training-source audit remains unresolved and productionQualificationEligible stays false. Use documented task delimiters and recommended fixed sampler; no installed assets or shipping conclusion."
+      },
       "trainingSourceRevision": "1b2376467ad0cbdbe103cbcbe4a5f17c8c0c1950",
       "sources": [
         "https://huggingface.co/qingy2024/GRMR-V3-Q4B/blob/27358021e5751bd7f3a8a654722338fcf164e9b4/README.md",
         "https://huggingface.co/datasets/qingy2024/grmr-v4-60k/tree/1b2376467ad0cbdbe103cbcbe4a5f17c8c0c1950"
       ]
+    },
+    {
+      "repo": "google/gemma-4-E4B-it-qat-q4_0-gguf",
+      "revision": "4b4a2c1d584be7264f87aac328a1bc739ce81b6c",
+      "modelCardSHA256": "6c8dbc23d482d76d6a02e6804941fae6dccdcd20e6372c26e4dec35e21348607",
+      "declaredWeightLicence": "Apache-2.0; first-party ungated QAT GGUF",
+      "baseFamily": "Google Gemma 4",
+      "file": "gemma-4-E4B_q4_0-it.gguf",
+      "sha256": "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee",
+      "bytes": 5154941280,
+      "publisherInstructionRevision": "4ecc2ba63bcac23ba4a767fc87025b1450f84c9c",
+      "publisherChatTemplateSHA256": "0a2c8073c878ab1da004bee933a998606537bbb62016310352c7285c3f01c5b5",
+      "productionQualificationEligible": true,
+      "decision": "One prospective resource-first candidate beyond the previous 20 screens. Published weight size is not complete-service memory evidence. Require <=7 GiB conservative owned-process peak before a fresh matched 52-case screen. Runtime/template compatibility, quality, latency and final product qualification remain unverified.",
+      "sources": [
+        "https://ai.google.dev/gemma/docs/core",
+        "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf"
+      ],
+      "researchBenchmark": {
+        "declared": "2026-11-12",
+        "scope": "Text-only, native explicit non-thinking profile; no vision/audio projector, new app dependency, installed-model replacement or benchmark-based default selection. A same-family Gemma judge cannot be the sole authority selecting this candidate."
+      },
+      "qualityQualificationStatus": "unverified",
+      "eligibilityScope": "Publisher weight licence permits evaluation as a production candidate; this is not quality/resource qualification, a training-data rights warranty or selection for shipping."
     }
   ],
   "developerResourceCandidates": [
+    {
+      "repo": "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+      "revision": "0102285ad796bd99af90f58de616092e5630e970",
+      "declaredWeightLicence": "Apache-2.0; first-party publisher export",
+      "file": "Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
+      "sha256": "33e7a72cf5e6e2cfc2f2847075acc013d68bba023e35310cef86b5cf8fdca761",
+      "developerRuntimeArtifactSHA256": "3d4f67b0a7f0d02f8ff4d350bcd81bf5181375f1fcbcb615ffe880f70744202e",
+      "bytes": 5198911904,
+      "scope": "Configuration 18 complete-service CPU feasibility probe using already retained assets. Four metadata bytes change the verified all-zero tokenizer score-array type from INT32 to FLOAT32; tensors and original files remain unchanged. No production eligibility or shipping-model conclusion.",
+      "sources": [
+        "https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF/tree/0102285ad796bd99af90f58de616092e5630e970"
+      ]
+    },
+    {
+      "repo": "deepquillapp/gector-grammar",
+      "revision": "2232e0ef109dd12e11e2c74b565b7318e36379e4",
+      "modelCardSHA256": "d5833dc1ec88d4655c3a0cd6dd8f6439767d0a6e4908faa1a31d27d0cb767f4a",
+      "declaredWeightLicence": "Apache-2.0; publisher declares commercial-use synthetic/public-domain training sources",
+      "file": "model.onnx",
+      "sha256": "c8ce4fcc952f33d399cd668e200527f28b94136b61bec24d7852504d5c7c53e9",
+      "bytes": 256279090,
+      "decision": "Rejected at the six-case CPU feasibility probe before complete-service integration: a useful has/have hint was accompanied by plural narrowing and emoji deletion, with 947965952 bytes standalone peak RSS. No production eligibility or redistribution conclusion; no installed dependency.",
+      "sources": [
+        "https://huggingface.co/deepquillapp/gector-grammar/blob/2232e0ef109dd12e11e2c74b565b7318e36379e4/README.md",
+        "https://github.com/google-research-datasets/C4_200M-synthetic-dataset-for-grammatical-error-correction"
+      ]
+    },
     {
       "repo": "unsloth/Qwen3.5-9B-GGUF",
       "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
@@ -123,6 +192,35 @@
       "promptRepo": "https://github.com/atla-ai/selene-mini",
       "promptRevision": "418c5ce2d8c4d89c5bd971ce60c7589eb8f9d8de",
       "scope": "Developer-only evaluator screen, never an Alder generator upgrade or dependency."
+    },
+    {
+      "repo": "google/gemma-4-26B-A4B-it-qat-q4_0-gguf",
+      "revision": "d1c082be9cf3c8a514acf63b8761f4b41935842e",
+      "modelCardSHA256": "f9e8c5e65c069adf1ea0e212f5c20303e68e78469bf549d10e631fe9c3612873",
+      "baseFamily": "Google Gemma 4",
+      "declaredWeightLicence": "Apache-2.0; first-party ungated QAT GGUF",
+      "file": "gemma-4-26B_q4_0-it.gguf",
+      "sha256": "3eca3b8f6d7baf218a7dd6bba5fb59a56ee25fe2d567b6f5f589b4f697eca51d",
+      "bytes": 14439363584,
+      "publisherInstructionRevision": "4d7ae4984b7db7de8f8457170b3f1a419ee76d52",
+      "publisherChatTemplateSHA256": "ae53464bf3be25802b3a5b37def7fd89667067d7577049b3b2d74c4d8de4c6d4",
+      "knownPretrainingOverlap": "Unknown; publisher describes broad web pretraining through January 2025, not an auditable benchmark exclusion.",
+      "scope": "Prospective independent-family developer judge only. Verify native non-thinking framing and existing runtime support, then sequential resource/readiness/80-pair calibration with unchanged quality gates. No API spending, application dependency or shipping-model/memory change."
+    },
+    {
+      "repo": "microsoft/phi-4-gguf",
+      "revision": "6edc2ef6664b739a8e11e62f2672ff6afe0c15ac",
+      "baseFamily": "Phi-4",
+      "declaredWeightLicence": "MIT; existing verified first-party GGUF",
+      "file": "phi-4-Q5_K.gguf",
+      "sha256": "1cf76820e5b9b7ae11dafe82e0769e5564754616384c08fc3d1372eb06683aec",
+      "bytes": 10604187840,
+      "modelCardSHA256": "56303278e2a944743135ab5a84f3c0ab355bbbbfa184802bec4a425729054634",
+      "licenceSHA256": "c49419617a6070bcb197cfe272f7007fdec3e790dbb529cb995473bd69c0bd51",
+      "scope": "One bounded faster local fallback after source-context, grammar-aware rubric, stable request state and canonical ordering fixes. Preserve earlier raw/source-only Phi failures. No download or shipping change. Plain instruction model, native Phi frame, 28 GPU layers, F16 GPU KV, 4096 context, 128 batches, four threads; >=1 GiB VRAM/6 GiB RAM reserve. Fresh ten readiness controls and 80 calibration pairs before any conditional original held-out validation, semantic or fixed full-human ranking stage. Same Phi family as reasoning-plus, not another independent vote.",
+      "sources": [
+        "https://huggingface.co/microsoft/phi-4-gguf/tree/6edc2ef6664b739a8e11e62f2672ff6afe0c15ac"
+      ]
     }
   ],
   "retainedDefault": "Existing pinned Qwen3.5-4B Q4_K_M; any replacement still requires measured quality and resource qualification."

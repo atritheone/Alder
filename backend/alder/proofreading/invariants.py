@@ -57,7 +57,7 @@ def source_identifiers(text):
 
 def control_literals(text):
     """Native protocol literals are document content, not grammatical words."""
-    return re.findall(r'<\|[A-Za-z0-9_:-]{1,80}\|>|\[/?INST\]|</?(?:s|think)>|<(?:start_of_turn|end_of_turn)>',text)
+    return re.findall(r'<\|[A-Za-z0-9_:-]{1,80}\|>|<\|(?:turn|channel)>|<(?:turn|channel)\|>|\[/?INST\]|</?(?:s|think)>|<(?:bos|eos|start_of_turn|end_of_turn)>',text)
 
 
 def restore_money_notation(source,target):
@@ -139,3 +139,39 @@ def changes_known_negation_scope(source,target):
     # Unknown constructions supply no evidence. This does not claim an unknown
     # synonym changes meaning simply because the recognized predicate vanished.
     return bool(before and after and before!=after)
+
+
+def changes_known_past_to_present(source,target):
+    """Protect narrow, aligned pronoun events from an invented present tense.
+
+    Mixed tense can be intentional: a sibling attends a school the narrator
+    previously attended. Match known finite forms plus two following words so
+    another clause's existing present tense cannot justify changing that event.
+    Unknown synonyms, subjects and constructions remain outside this heuristic.
+    Present-to-past repairs and past-tense agreement repairs remain possible.
+    """
+    forms={}
+    for base,past,present in (
+      ('be',('was','were'),('am','is','are')),
+      ('go',('went',),('go','goes')),('come',('came',),('come','comes')),
+      ('know',('knew',),('know','knows')),('think',('thought',),('think','thinks')),
+      ('say',('said',),('say','says')),('take',('took',),('take','takes')),
+      ('give',('gave',),('give','gives')),('see',('saw',),('see','sees')),
+      ('do',('did',),('do','does')),('have',('had',),('have','has')),
+      ('leave',('left',),('leave','leaves')),('feel',('felt',),('feel','feels')),
+      ('write',('wrote',),('write','writes')),('send',('sent',),('send','sends')),
+      ('pay',('paid',),('pay','pays'))):
+        for word in past:forms[word]=(base,'past')
+        for word in present:forms[word]=(base,'present')
+    pattern=r'\b(i|you|he|she|we|they|it)\s+('+ '|'.join(sorted(forms,key=len,reverse=True))+r')\b'
+    def events(text):
+        text=negative_forms(text);result={'past':Counter(),'present':Counter()}
+        for match in re.finditer(pattern,text):
+            base,tense=forms[match[2]]
+            tail=re.match(r'(?:\s+'+WORD+r'){0,2}',text[match.end():]).group()
+            key=(match[1],base,tuple(re.findall(WORD,tail)))
+            result[tense][key]+=1
+        return result
+    before,after=events(source),events(target)
+    return any(after['past'][event]<count and after['present'][event]>before['present'][event]
+      for event,count in before['past'].items())

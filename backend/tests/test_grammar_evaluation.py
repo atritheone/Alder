@@ -375,7 +375,8 @@ def test_sealed_access_binds_the_qualified_evaluator_corpus_source_and_candidate
     evaluator={'status':'passed','protocol':'alder-grammar-gate-v2','gate':'evaluator',
       'corpusSHA256':'synthetic-human-fixture','implementationSHA256':'synthetic-evaluator-fixture',
       'metrics':{'qualifiedIndependentFamilies':2,'nonQwenFamilies':1,'pairAgreementLower95':.81,
-        'pairAgreement':.9,'rankingSpearman':.9,'harmfulDetection':.98,'orderInstability':0,'abstentions':.01}}
+        'pairAgreement':.9,'rankingSpearman':.9,'harmfulDetection':.98,'harmfulPreferences':0,
+        'publicEvidenceVerified':True,'orderInstability':0,'abstentions':.01}}
     permit={'protocol':'alder-sealed-test-permit-v1','status':'passed','corpusSHA256':digest(data),
       'candidate':'fixture','sourceSHA256':'source','evaluatorArtifactSHA256':digest(evaluator)}
     result=runner.sealed_access(data,permit,evaluator,'fixture','source')
@@ -557,9 +558,11 @@ def test_inference_audit_retains_failures_and_memory_before_no_work_resume(evalu
     case={'id':'a','source':'He go.','split':'development','group':'g','track':'correctness','dialect':'en-AU','profile':'standard'}
     data={'cases':[case]}
     manifest={'fingerprint':'run','status':'completed','settings':{'corpus':digest(data),'split':'development',
-      'implementation':{},'model':'weights'},'memory':{'componentPeakRSSBytes':{'backend':1,'model':None,'rules':None}}}
+      'implementation':{},'model':'weights'},'memory':{'componentPeakRSSBytes':{'backend':1,'model':None,'rules':None},
+      'processTreeCoverage':False,'incompleteComponents':[]}}
     row={'id':'a','source':case['source'],'fingerprint':'run','status':'failed','seconds':.1,
-      'modelTrace':[{'error':'RuntimeError'}],'memory':{'componentPeakRSSBytes':{'backend':10,'model':200,'rules':30}}}
+      'modelTrace':[{'error':'RuntimeError'}],'memory':{'componentPeakRSSBytes':{'backend':10,'model':200,'rules':30},
+      'processTreeCoverage':True,'incompleteComponents':[]}}
     result=evaluation['audit_inference'].summarize(data,[row],manifest)
     assert result['inferenceComplete'] and result['status']=='unverified'
     assert result['serviceStatuses']=={'failed':1} and result['casesWithoutModelResponse']==1
@@ -826,7 +829,7 @@ def test_reasoning_sampling_profile_is_explicit_and_cannot_change_native_boundar
       detokenize=lambda ids,**kwargs:{8:b'<think>',9:b'</think>'}[ids[0]],generate=generate,token_eos=lambda:0)
     evaluation['native_reasoning'].reasoning_prefix(model,[1],128,opening=b'<think>',
       sampling={'temp':.8,'top_k':50,'top_p':.95})
-    assert calls==[{'temp':.8,'top_k':50,'top_p':.95,'repeat_penalty':1,'reset':True}]
+    assert calls==[{'temp':.8,'top_k':50,'top_p':.95,'min_p':0,'repeat_penalty':1,'reset':True}]
     with pytest.raises(ValueError,match='sampling profile'):
         evaluation['native_reasoning'].reasoning_prefix(model,[1],128,sampling={'temp':.8})
 

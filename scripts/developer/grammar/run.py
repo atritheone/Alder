@@ -21,6 +21,10 @@ def trials(plan,registry,stage):
         raise ValueError('Select distinct registered trials.')
     if len(ids)>registry['trialBudget']['pipelineTrials']:raise ValueError('Pipeline trial budget exceeded.')
     chosen=[known[key] for key in ids]
+    if stage!='development' and any(row.get('productionQualificationEligible') is False for row in chosen):
+        raise ValueError('Restricted research candidates are development-only; no validation or sealed-test access.')
+    if any(row.get('developmentStatus')=='rejected-native-probe' for row in chosen):
+        raise ValueError('Selected configuration was rejected at its native probe; preserve that result and declare a new protocol before reconsideration.')
     if len({row.get('generatorFamily','qwen3.5') for row in chosen})>registry['trialBudget']['modelFamilies']:
         raise ValueError('Generator family budget exceeded.')
     if stage=='validation' and len(ids)>2:raise ValueError('Validate at most two frozen candidates.')
@@ -112,12 +116,25 @@ def main():
         if stop.exists():report['status']='interrupted';write(ledger,report);return 2
         pipeline=candidate['pipeline'];extra=[]
         script='generate.py'
-        if pipeline in ('minimal','correctness-then-structure','few-shot','semantic-veto','rule-hints','source-diagnosis'):
+        if pipeline in ('minimal','correctness-then-structure','few-shot','semantic-veto','rule-hints','source-diagnosis','hybrid-hints'):
             script='experiment.py';extra=['--variant',pipeline]
         elif pipeline=='source-hints':extra=['--pipeline',pipeline]
         elif pipeline=='native-template':
             script='native_generate.py'
             if not plan.get('models',{}).get(candidate['id']):raise ValueError('Native-template candidates require a pinned model manifest.')
+        elif pipeline=='gemma-native':
+            script='gemma_generate.py'
+            if not plan.get('models',{}).get(candidate['id']):raise ValueError('Gemma native candidates require a pinned model manifest.')
+        elif pipeline=='seq2seq-task':
+            script='seq2seq_generate.py'
+            if not plan.get('models',{}).get(candidate['id']) or not plan.get('seq2seqPython'):
+                raise ValueError('Task-specific research candidates require pinned assets and an explicit developer runtime.')
+            if args.stage!='development':raise ValueError('This restricted research baseline is development-only.')
+            extra=['--runtime-python',str(Path(plan['seq2seqPython']).resolve())]
+        elif pipeline=='gguf-task':
+            script='grmr_generate.py'
+            if not plan.get('models',{}).get(candidate['id']):raise ValueError('Task-specific native research requires a pinned model manifest.')
+            if args.stage!='development':raise ValueError('This restricted research baseline is development-only.')
         elif pipeline!='baseline':raise ValueError('Unsupported registered pipeline.')
         python=plan.get('metricPython',sys.executable) if pipeline=='semantic-veto' else sys.executable
         if pipeline=='semantic-veto':extra+=['--semantic-model',str(Path(plan['semanticModel']).resolve())]

@@ -5,7 +5,7 @@ from bisect import bisect_right
 
 from .contracts import diagnostic, fingerprint, u16, slice16, blocks, DIALECTS
 from .roles import reverses_named_roles
-from .invariants import negative_forms,repaired_non_names,narrows_explicit_plural,changes_known_negation_scope,currency_symbols,CONTRACTION_REPAIRS,INITIAL_REPAIRS,control_literals
+from .invariants import negative_forms,repaired_non_names,narrows_explicit_plural,changes_known_negation_scope,changes_known_past_to_present,currency_symbols,CONTRACTION_REPAIRS,INITIAL_REPAIRS,control_literals
 
 REVISION_PROMPT_VERSION = "sentence-revision-4"
 
@@ -233,7 +233,7 @@ def revision(text, corrected, accepted):
         return None
     if reverses_named_roles(text,corrected,names):
         return None
-    if narrows_explicit_plural(text,corrected) or changes_known_negation_scope(text,corrected):
+    if narrows_explicit_plural(text,corrected) or changes_known_negation_scope(text,corrected) or changes_known_past_to_present(text,corrected):
         return None
     item = diagnostic(text, 0, u16(text), 'clarity', 'model:sentence-revision',
                       'Consider this sentence structure and clarity revision.', [corrected], 'model')

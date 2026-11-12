@@ -5,11 +5,11 @@ import generate
 from alder.proofreading import engines
 
 
-def main():
+def main(*,worker_name='native_worker.py',extra_sources=()):
     snapshot=generate.source_snapshot
     def source_snapshot():
         result=snapshot()
-        for name in ('native_generate.py','native_worker.py'):
+        for name in ('native_generate.py','native_worker.py',*extra_sources):
             path=Path(__file__).with_name(name)
             result[str(path.relative_to(generate.ROOT))]=hashlib.sha256(path.read_bytes()).hexdigest()
         return result
@@ -17,7 +17,7 @@ def main():
     launch=engines.launch
     worker=(generate.ROOT/'backend/alder/proofreading/worker.py').resolve()
     def native_launch(argv,**kwargs):
-        argv=[str(Path(__file__).with_name('native_worker.py')) if str(arg)==str(worker) else arg for arg in argv]
+        argv=[str(Path(__file__).with_name(worker_name)) if str(arg)==str(worker) else arg for arg in argv]
         return launch(argv,**kwargs)
     engines.launch=native_launch
     generate.main()

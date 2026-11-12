@@ -75,9 +75,12 @@ def main():
     if args.stop_file and Path(args.stop_file).resolve().is_relative_to(ROOT):
         raise ValueError('Judge cancellation state must be outside the checkout.')
     config = read(args.judge_config)
-    if not config.get('family') or not config.get('modelSHA256') or not isinstance(config['command'], list):
+    if not config.get('family') or not (config.get('modelSHA256') or config.get('modelIdentitySHA256')) or not isinstance(config['command'], list):
         raise ValueError('A pinned judge identity and explicit argv command are required.')
-    if config.get('serverIdentity') and not config.get('preflightCommand'):
+    expected_preflight=config.get('preflightIdentity',config.get('serverIdentity'))
+    if config.get('preflightIdentity') and config.get('serverIdentity') and config['preflightIdentity']!=config['serverIdentity']:
+        raise ValueError('Conflicting declared preflight identities.')
+    if expected_preflight and not config.get('preflightCommand'):
         raise ValueError('A local server judge requires an identity-only preflight command.')
     rubric = read(__file__.replace('judge.py', 'rubric.json'))
     from pathlib import Path
@@ -117,7 +120,7 @@ def main():
             raise ValueError('Judge implementation changed during the run; current pair not recorded.')
     if config.get('preflightCommand'):
         preflight=subprocess.run(config['preflightCommand'],capture_output=True,text=True,encoding='utf-8',timeout=30,check=True)
-        if config.get('serverIdentity') and digest(json.loads(preflight.stdout))!=digest(config['serverIdentity']):
+        if expected_preflight and digest(json.loads(preflight.stdout))!=digest(expected_preflight):
             raise ValueError('Preflight server identity differs from the frozen judge.')
     if futility and futility['futile']:save('futile');return
     save('running');stopped=False
@@ -125,10 +128,12 @@ def main():
         for pair in pairs:
             if pair['id'] in completed:continue
             if args.stop_file and Path(args.stop_file).exists():stopped=True;break
-            unchanged();decisions, errors, responses = [], [], []
+            unchanged();decisions, errors, responses = [], [], [];transport_failed=False
             for swapped in (False, True):
                 responses.append(None)
                 a, b = (pair['b'], pair['a']) if swapped else (pair['a'], pair['b'])
+                if transport_failed:
+                    decisions.append('abstain');errors.append('TransportUnavailable');continue
                 if pair.get('aAvailable',True) is not True or pair.get('bAvailable',True) is not True:
                     decisions.append('abstain');responses[-1]={'winner':'abstain','defects':[]}
                     errors.append('ComparisonUnavailable');continue
@@ -145,6 +150,8 @@ def main():
                     decision = validate(response, pair['source'], a, b)
                 except (ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
                     decision = 'abstain'; errors.append(type(error).__name__)
+                    if isinstance(error,subprocess.TimeoutExpired) or isinstance(error,subprocess.CalledProcessError) and error.returncode==75:
+                        transport_failed=True
                 decisions.append(decision)
             unchanged()
             rows.append({'id': pair['id'], 'group': pair['group'], 'split': pair['split'],
@@ -153,6 +160,8 @@ def main():
             if args.futility:futility=calibration_futility(pairs,rows)
             save('running')
             print(json.dumps({'id':pair['id'],'winner':rows[-1]['winner'],'errors':errors}),flush=True)
+            if transport_failed:
+                save('interrupted',interruptionReason='Local judge transport unavailable; current pair retained as abstention.');return
             if futility and futility['futile']:break
         unchanged();save('futile' if futility and futility['futile'] else 'interrupted' if stopped else 'completed')
     except BaseException as error:

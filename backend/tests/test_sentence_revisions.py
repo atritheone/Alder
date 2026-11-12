@@ -475,3 +475,40 @@ def test_preserved_name_does_not_block_repairing_other_spelling_in_a_sentence(tm
         assert len(calls)==2 and 'Edu' in calls[1]['acceptedWords']
         assert [item['word'] for item in calls[1]['spellingIssues']]==['mispelled']
     finally:service.shutdown()
+
+
+@pytest.mark.parametrize('source,proposal',[
+    ('My brother goes to the same school that I went to.','My brother goes to the same school that I go to.'),
+    ('She knew the answer, but he does not.','She knows the answer, but he does not.'),
+    ('We were waiting for the train.','We are waiting for the train.'),
+    ('I went to school and I go to work.','I go to school and I went to work.'),
+])
+def test_revisions_reject_known_past_event_changed_to_present(source,proposal):
+    assert revision(source,proposal,[]) is None
+
+
+@pytest.mark.parametrize('source,proposal',[
+    ('Yesterday I go to school.','Yesterday I went to school.'),
+    ('The trains was late, but I went to school.','The trains were late, but I went to school.'),
+    ('I went to school and I goes to work.','I went to school and I go to work.'),
+    ('I went to school because the train were late.','I did go to school because the train was late.'),
+])
+def test_past_event_protection_keeps_tense_and_agreement_repairs_usable(source,proposal):
+    assert revision(source,proposal,[]) is not None
+
+
+@pytest.mark.parametrize('original,changed',[
+    ('<|turn>','<turn>'),('<turn|>','<turn>'),
+    ('<|channel>','<channel>'),('<channel|>','<channel>'),
+    ('<bos>','<eos>'),('<eos>',''),
+])
+def test_revisions_preserve_gemma_protocol_literals_in_document_text(original,changed):
+    source='The results was unexpected. '+original
+    proposal='The results were unexpected. '+changed
+    assert revision(source,proposal,[]) is None
+
+
+def test_revisions_can_fix_grammar_around_unchanged_gemma_literals():
+    markers='<bos><|turn><turn|><|channel><channel|><eos>'
+    assert revision('The results was unexpected. '+markers,
+        'The results were unexpected. '+markers,[]) is not None

@@ -24,7 +24,7 @@ def artifact_status(gate, artifact):
     try:
         tests={
           'corpus':lambda:metrics['cases']>=1300 and metrics['sealedTestCases']>=600 and metrics['leakedGroups']==0 and metrics['independentSourceGroups']>=130 and metrics['naturalCases']>=300,
-          'evaluator':lambda:metrics['qualifiedIndependentFamilies']>=2 and metrics['nonQwenFamilies']>=1 and metrics['pairAgreementLower95']>.75 and metrics['pairAgreement']>=.8 and metrics['rankingSpearman']>=.85 and metrics['harmfulDetection']>=.95 and metrics['orderInstability']<=.05 and metrics['abstentions']<=.1,
+          'evaluator':lambda:metrics['qualifiedIndependentFamilies']>=2 and metrics['nonQwenFamilies']>=1 and metrics['pairAgreementLower95']>.75 and metrics['pairAgreement']>=.8 and metrics['rankingSpearman']>=.85 and metrics['harmfulDetection']>=.95 and metrics['harmfulPreferences']==0 and metrics['publicEvidenceVerified'] is True and metrics['orderInstability']<=.05 and metrics['abstentions']<=.1,
           'correctness':lambda:metrics['judgedPrecision']>=.95 and metrics['remainingErrorReduction']>=.1 and metrics['precisionRegressions']==0,
           'meaning':lambda:metrics['testedCases']>=150 and metrics['independentConstructions']>=6 and metrics['criticalFailures']==0 and metrics['significantRegression'] is False,
           'clean':lambda:metrics['cases']>=300 and metrics['unnecessaryRate']<=.02 and metrics['unnecessaryUpper95']<=.05,

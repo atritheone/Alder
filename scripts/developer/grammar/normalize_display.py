@@ -34,6 +34,13 @@ def pairs(rows,detokenize,unlabelled_ranking_matrix=False):
         for field in ('source','a','b'):
             row[field]=text(original[field],detokenize);counts[field]+=row[field]!=original[field]
         if 'context' in original:row['context']=text(original['context'],detokenize)
+        if 'contexts' in original:
+            if not isinstance(original['contexts'],list) or not original['contexts']:
+                raise ValueError('Context windows require a nonempty list.')
+            row['contexts']=[text(value,detokenize) for value in original['contexts']]
+        if 'contextWindows' in original:
+            row['contextWindows']=[{**window,'sentences':[text(value,detokenize) for value in window['sentences']]}
+                for window in original['contextWindows']]
         if 'references' in original:row['references']=[text(value,detokenize) for value in original['references']]
         if row['a']==row['b'] and original['a']!=original['b']:
             if not unlabelled_ranking_matrix:

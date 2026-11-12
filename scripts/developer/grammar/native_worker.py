@@ -4,6 +4,7 @@ The system instruction, service validators, decoding budget and CPU profile stay
 the same. Only the verified GGUF's own chat serialization replaces ChatML.
 """
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -32,7 +33,23 @@ def messages(prompt):
     return [{'role':'system','content':system},{'role':'user','content':inert_json(content)}]
 
 
-def main():
+def render_prompt(formatter,prompt,gemma_nonthinking=False):
+    result=formatter(messages=messages(prompt),**({'enable_thinking':False} if gemma_nonthinking else {}))
+    if gemma_nonthinking:
+        suffixes=('<|turn>model\n','<|turn>model\n<|channel>thought\n<channel|>')
+        if (not result.prompt.startswith('<bos><|turn>') or '<|think|>' in result.prompt
+            or not result.prompt.endswith(suffixes)):
+            raise ValueError('Unverified Gemma non-thinking generation boundary.')
+    return result
+
+
+def verify_gemma_template(metadata,template,expected):
+    if (metadata.get('general.architecture')!='gemma4' or not expected
+        or hashlib.sha256(template.encode('utf-8')).hexdigest()!=expected):
+        raise ValueError('Gemma architecture or publisher template differs from its pin.')
+
+
+def main(*,gemma_nonthinking=False,template_sha256=None):
     import llama_cpp
     from llama_cpp.llama_chat_format import Jinja2ChatFormatter
     original=llama_cpp.Llama
@@ -42,13 +59,14 @@ def main():
             super().__init__(*args,**kwargs)
             template=self.metadata.get('tokenizer.chat_template')
             if not isinstance(template,str) or not template:raise ValueError('GGUF has no native chat template.')
+            if gemma_nonthinking:verify_gemma_template(self.metadata,template,template_sha256)
             self.native_formatter=Jinja2ChatFormatter(template=template,
                 eos_token=self.detokenize([self.token_eos()],special=True).decode('utf-8'),
                 bos_token=self.detokenize([self.token_bos()],special=True).decode('utf-8'),
                 add_generation_prompt=True)
 
         def native(self,prompt):
-            return self.native_formatter(messages=messages(prompt))
+            return render_prompt(self.native_formatter,prompt,gemma_nonthinking)
 
         def tokenize(self,text,*args,**kwargs):
             if self.native_formatter is not None and text.startswith(PREFIX.encode()):

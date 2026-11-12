@@ -23,6 +23,29 @@ SCHEMA={'oneOf':[
  {'type':'object','properties':{'winner':{'type':'string','enum':['tie','abstain']},'defects':DEFECTS},
   'required':['winner','defects'],'additionalProperties':False}]}
 
+# Separate prospective research rubric. Keep the original protocol reproducible.
+GRAMMAR_AWARE_INSTRUCTION=INSTRUCTION.replace(
+ 'A fluent change to a plural participant, condition or obligation is a serious meaning defect. ',
+ 'Distinguish grammatical repair from changing an established fact. '
+ 'Inflection, article choice, generic count-noun number, and verb form may need correction; '
+ 'a changed surface form alone is not evidence of changed meaning. '
+ 'Resolve malformed wording using the whole sentence and supplied context. '
+ 'Treat explicitly established participant counts, event time, roles, conditions and obligations as facts to preserve. '
+ 'Evaluate negation and quantifier scope in the resulting proposition, rather than counting negative words. '
+ 'When neither context nor the source establishes a unique intended reading, do not invent a semantic defect. '
+ 'Compare all remaining grammatical defects and their severity; both candidates can be imperfect. ')
+
+EVIDENCE_FIRST_INSTRUCTION=(
+ ' Before choosing a winner, report at most two concrete remaining defects across '
+ 'the candidates in the defects array. Use an empty array when neither has a '
+ 'demonstrable defect. These are brief public editorial findings, not a reasoning '
+ 'transcript. Then give the winner. A decisive preference still requires an actual '
+ 'defect in the losing candidate; uncertainty requires abstention.'
+)
+EVIDENCE_FIRST_SCHEMA={'type':'object','properties':{
+ 'defects':DEFECTS,'winner':{'type':'string','enum':['A','B','tie','abstain']}},
+ 'required':['defects','winner'],'additionalProperties':False}
+
 
 def document_json(payload):
     import json
@@ -79,3 +102,17 @@ def evidence_schema(payload):
       'defects':{'type':'array','items':DEFECTS['items'],'maxItems':0}},
       'required':['winner','defects'],'additionalProperties':False})
     return {'oneOf':branches}
+
+
+def evidence_first_schema(payload):
+    """Bound exact public findings before the verdict, without a preferred label."""
+    branches=[]
+    for candidate in ('A','B'):
+        spans=representable_quote_spans(payload[candidate])
+        if spans:
+            branches.append({**DEFECTS['items'],'properties':{**DEFECTS['items']['properties'],
+              'candidate':{'type':'string','enum':[candidate]},
+              'quote':{'type':'string','enum':spans}}})
+    findings={**DEFECTS,'items':{'oneOf':branches}} if branches else {**DEFECTS,'maxItems':0}
+    return {**EVIDENCE_FIRST_SCHEMA,'properties':{
+        'defects':findings,'winner':EVIDENCE_FIRST_SCHEMA['properties']['winner']}}

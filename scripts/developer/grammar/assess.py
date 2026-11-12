@@ -114,6 +114,16 @@ def main():
                   '--checkpoint',sure['checkpoint'],'--base-model',sure['baseModel'],'--pairs',pairs],ratings,plan['metricPython'])
                 result['surePreferences']=dict(Counter(row['winner'] for row in read(ratings)['records']))
         ledger['candidates'][name]=result;write(ledger_path,ledger)
+    if plan.get('referenceMetrics') is True:
+        # Wait for every reference report, regardless of candidate-map order.
+        # Reuse the same matched population; never rerun neural inference here.
+        for name in candidates:
+            if name==baseline:continue
+            target=root/name/'reference-comparison.json'
+            execute(name+':reference-comparison','reference_comparison.py',
+              ['--baseline',root/baseline/'reference.json','--candidate',root/name/'reference.json'],target)
+            ledger['candidates'][name]['pairedReferenceComparison']=read(target)
+            write(ledger_path,ledger)
     current={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in directory.glob('*.py')}
     if current!=sources:raise ValueError('Assessment source changed during the run.')
     if any(population(path,data,split)[0]!=inputs[name] for name,path in candidates.items()):raise ValueError('Inference inputs changed during assessment.')

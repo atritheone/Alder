@@ -3,9 +3,11 @@ import argparse
 from collections import defaultdict
 import json
 import math
+import hashlib
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from common import records,read,digest,write,output_path,execution_stamp,require_unchanged
+from human_rankings import source_indices,matched_sources
 
 
 def rating_score(row,pair):
@@ -62,7 +64,8 @@ def prepare(args):
 def evaluate(args):
     import trueskill
     from scipy.stats import spearmanr
-    stamp={**execution_stamp(__file__),**execution_stamp(Path(__file__).with_name('judge.py'))}
+    stamp={**execution_stamp(__file__),**execution_stamp(Path(__file__).with_name('judge.py')),
+           **execution_stamp(Path(__file__).with_name('human_rankings.py'))}
     pairs=records(args.pairs);ratings=read(args.ratings)
     expected={p['id']:p for p in pairs}
     if len(expected)!=len(pairs):raise ValueError('Duplicate ranking ids.')
@@ -80,7 +83,10 @@ def evaluate(args):
     complete={index for index in all_sources if len(matrix[index])==len(systems) and all(v is not None for v in matrix[index].values())}
     env=trueskill.TrueSkill()
     human={name:env.create_rating() for name in systems};counts=defaultdict(int)
-    items=ET.parse(args.seeda/'data/judgments_sent.xml').getroot().iter('ranking-item')
+    human_data=(args.seeda/'data/judgments_sent.xml').read_bytes()
+    items=list(ET.fromstring(human_data).iter('ranking-item'))
+    source_count=len((args.seeda/'outputs/all/INPUT.txt').read_text('utf8').splitlines())
+    complete,population=matched_sources(all_sources,complete,source_indices(items,source_count))
     for item in items:
         if int(item.attrib['src-id'])-1 not in complete:continue
         names=[];ranks=[]
@@ -93,15 +99,17 @@ def evaluate(args):
     scores={name:sum(matrix[index][name] for index in complete)/len(complete) for name in systems} if complete else {}
     correlation=float(spearmanr([scores[name] for name in systems],[human[name].mu for name in systems]).statistic) if complete else None
     if correlation is not None and not math.isfinite(correlation):correlation=None
-    coverage=len(complete)/len(all_sources) if all_sources else 0
-    passed=correlation is not None and correlation>=.85 and coverage>=.9 and len(complete)>=100 and all(counts[name] for name in systems)
+    coverage=population['coverage']
+    passed=population['populationAlignmentVerified'] and correlation is not None and correlation>=.85 and coverage>=.9 and len(complete)>=100 and all(counts[name] for name in systems)
     require_unchanged(stamp)
     write(args.output,{'status':'passed' if passed else 'unverified','scope':__doc__,
       'spearman':correlation,'completeSources':len(complete),'totalSources':len(all_sources),'coverage':coverage,
       'systems':{name:{'metric':scores.get(name),'humanMu':human[name].mu,'humanComparisons':counts[name]} for name in systems},
       'matrixSHA256':digest(pairs),'ratingsSHA256':digest(ratings),'implementationSHA256':digest(stamp),
+      'humanJudgmentsSHA256':hashlib.sha256(human_data).hexdigest(),
       'scoreProtocol':next(iter(protocols),None),
       'comparativeLimitation':'Source-anchor win rates can saturate and cannot establish absolute editorial approval.',
+      'humanPopulation':population,
       'judge':ratings['judge'],'trueskillVersion':trueskill.__version__})
     print(json.dumps({'spearman':correlation,'coverage':coverage,'sources':len(complete)}))
 

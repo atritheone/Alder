@@ -43,7 +43,7 @@ def decode_diagnosis(value,text):
     return value['corrected']
 
 
-def render_worker(source,trace_path):
+def render_worker(source,trace_path,*,rule_guided=False):
     """Render a standalone isolated worker; never edit the production source."""
     from common import output_path
     trace=output_path(trace_path)
@@ -65,7 +65,9 @@ def render_worker(source,trace_path):
                 counts['base']+=1;node.targets[0].id='base_grammar';return node
             if name=='prompt':
                 counts['prompt']+=1
-                prelude=ast.parse("diagnosing=request.get('task')=='revise' and request.get('revisionMode')!='rephrase' and not request.get('spellingRepair')\n"
+                condition="request.get('task')=='revise' and request.get('revisionMode')!='rephrase' and not request.get('spellingRepair')"
+                if rule_guided:condition+=" and not request.get('spellingIssues')"
+                prelude=ast.parse('diagnosing='+condition+'\n'+
                   "if diagnosing:\n    system+=DIAGNOSIS_INSTRUCTION\n    grammar=LlamaGrammar.from_json_schema(json.dumps(diagnosis_schema(text)),verbose=False)\n"
                   "else:\n    grammar=base_grammar\n").body
                 return [*prelude,node]

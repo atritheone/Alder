@@ -98,6 +98,17 @@ weights with remote-code loading disabled.
   logs that content. An absent verified closing token causes abstention; it never
   forces an unfinished phase into an answer. The runtime profile and source are
   pinned separately and still require fresh calibration.
+  `judge_http.py` keeps identity reads responsive during a long native call and
+  refuses concurrent inference instead of queuing behind an expired client.
+  Transport exit 75 pauses `judge.py` after recording the current abstention;
+  untouched pairs remain pending. Explicit context/request budgets are included
+  in server identity. Larger developer reasoning profiles still require a real
+  native closing token, never a forced final answer or private-content logging.
+- `tagger_hints.py`: a local-only, pinned CPU GECToR feasibility adapter with
+  exact source spans and no truncation or direct document editing. The initial
+  six-case probe exposed unsafe suggestions and about 0.88 GiB helper peak RSS;
+  configuration 16 was rejected before integration. Its hints cannot approve a
+  sentence, and the installed pack has no ONNX/tagger dependency.
 - `harmony_judge_server.py`: a separate native-Harmony adapter for a verified
   local gpt-oss judge, with bounded reasoning and constrained final JSON. Only
   final verdicts are returned; reasoning text is never logged. The HTTP identity
@@ -181,12 +192,19 @@ weights with remote-code loading disabled.
   remain active. Explicit rephrasing and spelling-repair requests bypass this
   gate. Keep raw source assessments in the external trace. This same-model
   self-check is a generator ablation, never an independent editorial approval.
+  `--variant hybrid-hints` selects ordinary rule-guided revision when usable
+  spelling/grammar/punctuation hints exist, and diagnosis otherwise. Style-only
+  flags do not select the first path. One worker/pass and all final audits remain.
 - `judge_server.py --template phi4-reasoning-v1 --publisher-prompt ...` uses the
   pinned first-party Phi reasoning system instruction, verified native controls
   and publisher-recommended reasoning sampling (.8/50/.95). A natural native
   closing token is required before constrained final JSON; no private generated
   content is decoded or logged. The bounded profile has its own frozen identity
   and cannot reuse the earlier nonreasoning checkpoint's calibration.
+  New stable-seed profiles reset native context/seed before every uncached request,
+  explicitly seed final completion and disable implicit min-p pruning. Old sampled
+  sessions retain their seed-progression/resume limitations. KV precision and flash
+  attention are identity-bound resource settings, not evidence of equal quality.
 - `reference_guidance.py`: reconstruct the two official CoNLL human corrections,
   verify source alignment and prepare a source-hashed map without ranking labels
   or candidate outputs. Optional `--pairs` and `--output-cohort` freeze a new
@@ -205,7 +223,17 @@ weights with remote-code loading disabled.
   and only human label metadata changes; it preserves the original score binding.
   `feasibility` checks necessary positive-count bounds without model inference;
   an impossible approval population cannot be repaired by changing old labels.
+- `import_edit_acceptability.py`: inspect the separate SEEDA edit-validity labels.
+  Require at least two independent annotators, preserve original True/False labels,
+  quarantine complete sources with malformed/unaligned corrections and exclude
+  declared format-inspected documents. This distinguishes acceptable edits from
+  a fully correct sentence. Its initial calibration population permits at most
+  92 oracle approvals at 95% precision, below the existing coverage requirement;
+  no evaluator was fitted or qualified from it.
 - `replay.py`: replay recorded model responses through current service guards.
+  Bind context, locale and vocabulary through the recorded request-configuration
+  hash. Unbound requests invalidate the manifest even if the service reports a
+  failed job without raising an exception to the runner.
   Unrecorded requests fail. Reports identify recorded-model integration replay;
   it must never be reported as fresh model inference. `--case-ids` freezes an
   explicit subset in the replay fingerprint; missing or unknown cases fail.
@@ -224,7 +252,9 @@ weights with remote-code loading disabled.
   result paths, the isolated metric Python and verified IMPARA/SURE asset paths.
   It verifies complete source-bound populations and metric assets, records the
   environment, then runs literal/resource audits, optional ERRANT and blinded
-  grammar preferences. Completed unchanged steps are reused. Tampered output or
+  grammar preferences. Reference assessments also emit matched, conversation/
+  document-paired uncertainty intervals after all reports finish, independent of
+  candidate-map order. Completed unchanged steps are reused. Tampered output or
   changed inputs require a new directory. It emits JSON and HTML and always
   retains the incumbent: these diagnostics cannot substitute for qualification.
 - `qualify.py`: combine hashed artifacts for the frozen gates. Missing evidence,
@@ -261,6 +291,147 @@ The loopback client disables environment proxies and HTTP redirects.
 
 ## Reproducibility and limitations
 
+`peer_ranking.py` builds a fixed, source-hash-ordered cycle of published editors
+on the existing ranking population. It verifies source identities, original
+context, output alignment and graph coverage. Evaluation requires saved public
+evidence in both orders, uses only complete matched sources, and binds the human
+ranking file and all inputs. It retains the original 100-source, 90%-coverage and
+.85 correlation gates. Run model ranking only after calibration and held-out
+pairwise qualification; an empty or partial matrix cannot qualify a grader.
+
+`edit_acceptance.py` is a separately scoped, fixed-grid SURE edit-validity
+calibration. It retains missing scores and requires a reproducible calibration-
+only fit before validation. Its label is unanimous acceptance of all proposed
+edits, not a completely corrected sentence. The original full-sentence approval
+protocol remains separate.
+
+`binary_edit_acceptance.py` tests the same edit-validity label with the pinned
+non-reasoning Mistral model. It measures two public-label logits without text
+generation, using fresh native logits rather than the unfilled Python score
+array in llama.cpp 0.3.35. The payload excludes ratings and system names, verifies
+original context windows/target positions, and never clips input. Calibration
+scores are separate from validation; validation model access requires the saved,
+recomputed policy and the identical classifier identity. A passed component is
+not a passed whole evaluator, product, or production scorer licence.
+
+`seq2seq_generate.py` and `seq2seq_worker.py` are a separate CoEdIT research
+baseline. They use the pinned local safetensors/tokenizer inventory, execute no
+checkpoint code, and never download during inference. The publisher GEC prefix
+uses deterministic float32 CPU generation, four threads and explicit untruncated
+input/output limits. The normal service still validates source fidelity and
+audits spelling. This baseline has no context, locale or creative-profile
+conditioning and rejects explicit rephrasing. Its noncommercial weights remain
+excluded from Alder's unrestricted shipping pack. The experiment runner permits
+development only, with no validation, sealed-test or installation path.
+
+`grmr_generate.py` and `grmr_worker.py` provide the final task-specific research
+screen. They retain the reviewed GRMR production exclusion and use its published
+text/corrected delimiters with verified local Q4 weights. Literal task delimiters
+in source inputs are rejected; context is never truncated. The documented fixed
+sampler/state and CPU profile are explicit, with no thinking channel or paragraph/
+locale conditioning. Service guards and complete spelling audits remain active.
+This candidate also has development-only access and cannot open sealed tests.
+
+The developer memory collector includes owned model/rules descendants, including
+Windows virtual-environment redirectors. The backend is counted separately once.
+A missing process snapshot or child peak leaves the conservative total
+unverified; launcher-only RSS must never establish model resource fit. These
+component/descendant lifetime peaks are still a development diagnostic rather
+than a physical 16 GiB reference-hardware measurement.
+
+`audit_inference.py` preserves lineage uncertainty rather than reconstructing a
+verified total from partial component figures. Legacy/partial observed sums remain
+diagnostic. A no-work resume does not erase earlier verified row-level peaks.
+
+`cloud_judge.py` is an optional public-data developer evaluator. It requires a
+source/profile-bound input permit and explicit finite spending approval before
+inference, counts inputs first and reserves a conservative complete-request cost.
+Unknown charges stay reserved and bounded model failures are cached abstentions,
+preventing paid order-swap retries. Credentials are read only in memory; private
+output items are ignored. This never enables cloud correction in Alder. Provider
+weights/dated snapshots are unavailable and are not represented as weight hashes.
+Different API models from one family do not establish independent families.
+
+`development-semantic-regressions.json` is a separate, unqueried development queue
+of observed research failures. It does not alter the frozen semantic challenge
+or supply independent human ratings.
+
+`evaluate_semantics.py` reconstructs saved public judgments in both orders before
+using them. Missing and abstained cases remain in the denominator; a known
+harmful preference fails even when the aggregate detection rate exceeds 95%.
+The report distinguishes verified public evidence from legacy numeric decisions.
+This controlled component alone never qualifies a complete evaluator or product.
+
+`calibrate.py` likewise reconstructs saved public evidence before a pairwise gate
+can pass. Legacy numeric-only labels retain diagnostic agreement but cannot
+qualify. The optional native `--evidence-first` profile emits brief public defect
+findings before the verdict, binds exact candidate quotes and has a distinct
+schema, token bound and implementation identity. It needs fresh readiness and
+calibration; prior winner-first results never qualify it.
+
+`judge_server.py --grammar-aware` selects a separately identified research rubric
+that distinguishes grammatical repair from changes to established facts. It
+evaluates negation scope and context rather than treating every changed number
+inflection or negative word as a semantic failure. The original rubric remains
+unchanged. This profile requires fresh readiness/calibration and cannot reuse
+earlier verdicts or relax the semantic, agreement or coverage requirements.
+The native Harmony adapter supports the same separate selection. A prepared
+hosted Sol profile can bind that rubric too, but needs its own input permit,
+model identity and fresh spending approval; a previous Luna allowance is not
+transferable. The production correction path remains local.
+
+`gemma_generate.py`/`gemma_worker.py` adapt only the native serialization for the
+registered first-party Gemma 4 E4B QAT candidate. They pin its architecture and
+publisher template, explicitly disable thinking, and reject an open private
+generation channel. Default native adapters retain their previous arguments.
+Production instructions, complete-service validators, spelling audit and CPU
+profile remain shared. The resource probe must fit 7 GiB before a matched
+development screen; model-file size alone cannot establish that fit. The separate
+26B Gemma judge is developer-only, and same-family judging alone cannot promote
+the E4B candidate.
+
+`semantic_futility.py` lets a watcher stop controlled semantic trials after a
+complete two-order pair when rejection is already certain: one verified
+preference for a known harmful mutation, or too many non-correct outcomes to
+reach 95% even with perfect remaining judgments. It verifies pair hashes and
+both saved public responses, preserves the full denominator and rejects human
+preference data or undersized control populations. It cannot qualify a partial
+or complete trial. Use the existing stop-file mechanism with separately frozen
+watcher code; do not change the calibrated server or inference identity.
+
+`validation_futility.py` is a separate rejection-only policy for a locked human
+validation fold. It verifies both public responses and exact pair identities,
+then uses optimistic full-population bounds for the unchanged 80% agreement,
+10% abstention and 5% order thresholds. It forbids calibration/controlled-mutation
+inputs. Declare the policy before inspecting interim validation agreement;
+never use it to pass a partial trial, replace confidence bounds or tune a model
+on held-out verdicts. The native inference source stays frozen separately.
+
+The optional pinned `judge_server.py --thinking-sampler qwen-precise-v1` uses a
+separately identified sampled native-thinking profile. It requires the reviewed
+Qwen weights and an explicit thinking allowance, and cannot be combined with
+non-thinking mode or an unrelated template. Defaults retain greedy behaviour.
+This adapts the publisher's precise-coding sampler to editorial comparison;
+fresh readiness/calibration is mandatory and longer publisher benchmarks are
+not implied. Ordered readiness prefixes can resume without regenerating earlier
+pairs; all declared controls must still pass before human calibration.
+
+`contextualize_pairs.py` adds a declared three-sentence original-essay window to
+published SEEDA comparisons. It checks the pinned clean source repository,
+official/raw/displayed sentence alignment, pair IDs and both published system
+outputs. Physical essay boundaries are retained even when duplicate sources
+belong to a union cluster. Labels, candidate texts and folds remain unchanged;
+corrections and edit-validity annotations never enter context. It rejects prior
+rich context rather than overwriting it. The new presentation requires fresh
+calibration, and source-only ratings remain separate evidence.
+
+`harmony_native.py` reaches a GPT-OSS final header with a bounded token-state
+machine. It never decodes the private body or forces a final channel. The Harmony
+judge resets request state/seed, retains native prefix IDs for the public final
+completion, supports content-canonical caching and uses the responsive single-
+inference loopback server. Only fixed failure codes, counts and public verdicts
+are logged. Changed native protocols require fresh readiness and calibration.
+
 The external research workspace contains pinned asset manifests, dependency
 freezes, output hashes and both successful and unsuccessful experiments. Do not
 remove adverse outcomes when revising a corpus or evaluator. Protocol-exposed
@@ -280,3 +451,52 @@ Protocol v2 permits a prospective 7 GiB resource ceiling (v1 remains 6 GiB),
 conditional on passing the quality gates. It does not alter the pinned model,
 the shipping admission estimate, the latency target or the physical 16 GiB
 reference-hardware requirement.
+
+The composite evaluator artifact must include `harmfulPreferences: 0` and
+`publicEvidenceVerified: true`. A high aggregate detection rate cannot excuse
+one preference for a known harmful edit; legacy numeric-only verdicts remain
+diagnostic. Missing evidence fields cannot pass the final gate.
+
+`qualify_evaluator.py --manifest <external-json> --output <external-json>`
+assembles local evaluator evidence without inference. The manifest identifies
+`productCorpus`, `productSource` (verified frozen archive), `modelReview`,
+`cohort`, `displayMap`, `controls`, `semanticPairs`, `peerPairs`, `rankingMatrix`,
+`rawMap` and the clean pinned `seeda` checkout. Each `judges` entry identifies
+its inference `source` archive and stage objects `readiness`, `calibration`,
+`validation`, `semantics`, `ranking`, each with `config` and `ratings` paths.
+Missing later stages remain unqualified. The assembler reconstructs readiness,
+human-agreement, semantic and peer-ranking reports from saved public judgments;
+it verifies source/config/profile bindings across stages. Reviewed weight
+identities establish families, conservatively collapsing sizes, dense/MoE and
+reasoning variants of Qwen, Gemma, Mistral, Phi and Llama. Reference-assisted
+profiles cannot qualify unreferenced judging. A passed evaluator artifact still
+does not qualify or ship a generator. Provider-hosted profiles require a separate
+identity-policy implementation; they cannot masquerade as local weight pins.
+
+`ranking_futility.py` provides a rejection-only coverage bound for the frozen
+peer matrix. It reconstructs both public decisions and counts sources with an
+observed abstention once. With every unqueried comparison assumed successful,
+it can stop only when 100 complete sources or 90% coverage is already impossible.
+It neither estimates partial Spearman correlation nor qualifies a judge. Run
+watchers separately from the calibrated inference archive and retain all adverse
+and missing results.
+
+`human_rankings.py` excludes sources without published human judgments from both
+sides of a matched ranking calculation; they reduce coverage and prevent an
+aligned-population pass. Model completion alone cannot count as human-matched
+completion. `ranking_population.py` freezes every human-ranked source in the
+existing validation documents, with no rank/outcome/length/output selection.
+It retains original eligible pairs exactly and verifies the complete source-only
+policy when assembling evidence. The initial 100-source diagnostic remains
+separate; it contained unrated sources and allowed no abstentions under the
+100-complete-source minimum. The repaired cohort has 190 sources/2,850 pairs.
+
+`reuse_ratings.py` can resume unchanged public judgments from the exact frozen
+judge implementation/configuration into that repaired cohort. It verifies old
+and new input identities and both public responses, retains the known abstention,
+and refuses invalidated, running or changed evidence. Per-record provenance and
+an external continuation proof survive resume; the assembler rechecks them.
+This is neither fresh inference nor permission to reuse judgments after changing
+the model, prompt, context, numerical profile or decoder. The end-to-end test
+confirms that only genuinely new pairs are queried and an old abstention is not
+retried.
