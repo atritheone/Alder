@@ -2091,6 +2091,19 @@ export default function App() {
       bookEditor.current?.insert(text);
     });
   const isBook = !["txt", "docx"].includes(project.settings.documentKind);
+  const inChapter = writingFocus && view === "Write" && !writePreview;
+  const commandTitles: Record<string, string> = {
+    "Notes…": "Footnotes and endnotes…",
+    "Sources…": "Citations and bibliography…",
+  };
+  const documentCommands = (...labels: string[]): MenuEntry[] => labels.map(label => ({
+    label: commandTitles[label] ?? label,
+    action: () => {
+      const visible = writingFocus ? inChapter : detailOpen && detail === "Clip";
+      if (!visible || !targetEditor()?.runMenuCommand(label))
+        setHint("Place the cursor in formatted text where you want to use this command.");
+    },
+  }));
   const menuItems: Record<string, MenuEntry[]> = {
     File: [
       { label: "New project…", action: newProject },
@@ -2121,6 +2134,7 @@ export default function App() {
       },
       { label: "Import document…", action: () => openPanel("import") },
       { label: "Export…", action: () => openPanel("export") },
+      ...(inChapter ? documentCommands("Mail merge…") : []),
       { label: "Print…", action: printDocument },
     ],
     Edit: [
@@ -2142,7 +2156,7 @@ export default function App() {
       {
         label: "Format",
         submenu: [
-          { label: "Paragraph…", action: () => targetEditor()?.paragraph() },
+          ...documentCommands("Paragraph…", "Text colour…", "Copy formatting", "Paste formatting"),
           ...[
             ["strong", "Bold"],
             ["em", "Italic"],
@@ -2161,6 +2175,24 @@ export default function App() {
       },
       { label: "Project dictionary…", action: () => openPanel("dictionary") },
       { label: "Settings…", action: () => openSettings() },
+    ],
+    Insert: [
+      ...documentCommands("Insert table…", "Insert image…", "Insert link…", "Insert text box…",
+        "Insert shape…", "Insert symbol…", "Insert equation…", "Insert form field…", "Insert field…"),
+      { label: "References", submenu: [
+        ...documentCommands("Bookmarks…", "Insert cross-reference…", "Index entries…"),
+        ...(inChapter ? documentCommands("Notes…", "Sources…", "Insert table of contents…") : []),
+      ] },
+    ],
+    Layout: [
+      { label: "Page setup…", action: () => openSettings("Page Layout") },
+      ...documentCommands("Paragraph…", "Insert page break"),
+      ...(inChapter ? documentCommands("Insert column break", "Insert section break…",
+        "Section properties…", "Headers and footers…") : []),
+    ],
+    Review: [
+      ...documentCommands("Comments…", "Review changes…", "Check accessibility…"),
+      ...(inChapter ? documentCommands("Compare documents…", "Combine reviewed copies…") : []),
     ],
     Create: [
       {

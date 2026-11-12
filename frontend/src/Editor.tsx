@@ -930,6 +930,7 @@ export function namedStyleTransaction(
   return tr;
 }
 export type EditorHandle = {
+  runMenuCommand: (label: string) => boolean;
   isLayoutReady: () => boolean;
   getPagePublication: (chapters?: readonly ChapterBlocks[]) => PagePublication;
   getIdentity: () => string;
@@ -1368,7 +1369,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     { label: "Convert table to text", command: tableToText() },
     { label: "Delete table", command: deleteTable },
   ];
-  const formatActions = () => {
+  const formatActions = (): { context?: boolean; label: string; disabled?: boolean; run: () => unknown }[] => {
     const v = editableView();
     if (!v || latest.current.rawMode) return [];
     const commands = formattingCommands(v.state);
@@ -1376,7 +1377,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       ...(captionObject(v.state)
         ? [
             {
-              label: "Insert caption…",
+              context: true, label: "Insert caption…",
               run: () => {
                 const target = captionObject(v.state)!;
                 setCaptionDialog({
@@ -1388,14 +1389,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             },
           ]
         : []),
-      ...(v.state.selection instanceof NodeSelection && v.state.selection.node.type.name === "shape" ? [{label:"Shape properties…",run:()=>showShape((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
-      ...(v.state.selection instanceof NodeSelection && v.state.selection.node.type.name === "equation" ? [{label:"Equation properties…",run:()=>showEquation((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
-      ...(v.state.selection instanceof NodeSelection && ["form_field","form_block"].includes(v.state.selection.node.type.name) ? [{label:"Form field properties…",run:()=>showFormField((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
-      ...(v.state.selection instanceof NodeSelection && v.state.selection.node.type.name === "text_box" ? [{label:"Text box properties…",run:()=>showTextBox((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
+      ...(v.state.selection instanceof NodeSelection && v.state.selection.node.type.name === "shape" ? [{context: true, label:"Shape properties…",run:()=>showShape((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
+      ...(v.state.selection instanceof NodeSelection && v.state.selection.node.type.name === "equation" ? [{context: true, label:"Equation properties…",run:()=>showEquation((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
+      ...(v.state.selection instanceof NodeSelection && ["form_field","form_block"].includes(v.state.selection.node.type.name) ? [{context: true, label:"Form field properties…",run:()=>showFormField((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
+      ...(v.state.selection instanceof NodeSelection && v.state.selection.node.type.name === "text_box" ? [{context: true, label:"Text box properties…",run:()=>showTextBox((v.state.selection as NodeSelection).node.attrs.blockId)}] : []),
       ...(selectedImage(v.state)
         ? [
             {
-              label: "Image properties…",
+              context: true, label: "Image properties…",
               run: () =>
                 setImageDialog({
                   ...selectedImage(v.state)!.node.attrs,
@@ -1406,7 +1407,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             },
           ]
         : []),
-      { label: "Paragraph…", run: showParagraph },
+      { context: true, label: "Paragraph…", run: showParagraph },
       { label: "Comments…", run: () => showComments() },
       { label: "Review changes…", run: showReview },
       {label:'Check accessibility…',run:()=>window.dispatchEvent(new CustomEvent('alder-accessibility-check',{detail:{identity:latest.current.identity,document:v.state.doc.toJSON()}}))},
@@ -1442,11 +1443,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       ...(latest.current.pageLayout ? [{label: "Combine reviewed copies…", run: () => window.dispatchEvent(new CustomEvent("alder-compare-documents", {detail:{identity:latest.current.identity,mode:'combine'}}))}] : []),
       ...(selectedList(v.state)
         ? [
-            ...([-1,1] as const).map(direction=>({label:direction<0?'Move items up':'Move items down',disabled:!moveListItems(direction)(v.state),run:()=>command(moveListItems(direction))})),
-            ...([-1,1] as const).map(direction=>({label:direction<0?'Insert item before':'Insert item after',run:()=>command(insertListItem(direction))})),
-            {label:'Delete items',disabled:!deleteListItems(v.state),run:()=>command(deleteListItems)},
+            ...([-1,1] as const).map(direction=>({context: true, label:direction<0?'Move items up':'Move items down',disabled:!moveListItems(direction)(v.state),run:()=>command(moveListItems(direction))})),
+            ...([-1,1] as const).map(direction=>({context: true, label:direction<0?'Insert item before':'Insert item after',run:()=>command(insertListItem(direction))})),
+            {context: true, label:'Delete items',disabled:!deleteListItems(v.state),run:()=>command(deleteListItems)},
             {
-              label: "List…",
+              context: true, label: "List…",
               run: () => {
                 const current = selectedList(v.state);
                 const outline = selectedOutlineList(v.state);
@@ -1661,7 +1662,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       ...(deleteTable(v.state)
         ? [
             {
-              label: "Table properties…",
+              context: true, label: "Table properties…",
               run: () => {
                 const initial = selectedTableProperties(v.state);
                 if (initial)
@@ -1673,7 +1674,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               },
             },
             {
-              label: "Fit table to page",
+              context: true, label: "Fit table to page",
               run: () => {
                 const context = tableContext(v.state);
                 const node = context && v.nodeDOM(context.tableStart - 1);
@@ -1693,7 +1694,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               },
             },
             {
-              label: "Fit columns to content",
+              context: true, label: "Fit columns to content",
               run: () => {
                 const widths = contentColumnWidths(v);
                 if (widths) command(sizeTableColumns(widths));
@@ -1704,7 +1705,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               },
             },
             {
-              label: "Distribute columns evenly",
+              context: true, label: "Distribute columns evenly",
               run: () => {
                 const context = tableContext(v.state);
                 if (!context) return;
@@ -1723,7 +1724,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               },
             },
             ...tableCommands.map((item) => ({
-              label: item.label,
+              context: true, label: item.label,
               disabled: !item.command(v.state),
               run: () => command(item.command),
             })),
@@ -1814,6 +1815,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   useImperativeHandle(
     ref,
     () => ({
+      runMenuCommand(label) {
+        const action = formatActions().find(item => item.label === label ||
+          (label === "Insert table of contents…" && item.label === "Table of contents…"));
+        if (!action || action.disabled) return false;
+        action.run();
+        return true;
+      },
       isLayoutReady() {
         const v = view.current, layout = latest.current.pageLayout;
         return !!v && !!layout && !hyphenationStatus(v).pending && !hyphenationStatus(v).error &&
@@ -2964,6 +2972,27 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             return false;
           },
           contextmenu(v, event) {
+            const target = event.target instanceof Element ? event.target : null;
+            const hit = v.posAtCoords({ left: event.clientX, top: event.clientY });
+            if (hit && (event.clientX || event.clientY)) {
+              const selection = v.state.selection;
+              const node = hit.inside >= 0 ? v.state.doc.nodeAt(hit.inside) : null;
+              if (node?.isAtom && !node.isText && NodeSelection.isSelectable(node)) {
+                v.dispatch(v.state.tr.setSelection(NodeSelection.create(v.state.doc, hit.inside)));
+              } else if (!selection.ranges.some(({ $from, $to }) => hit.pos >= $from.pos && hit.pos <= $to.pos)) {
+                v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(hit.pos))));
+              }
+            }
+            v.focus();
+            const contextActions = formatActions().filter(item =>
+              item.context || (item.label === "Comments…" && !v.state.selection.empty) ||
+              (item.label === "Sources…" && target?.closest("[data-document-citation]")) ||
+              (item.label === "Insert link…" && target?.closest("a[href]")) ||
+              item.label === "Table of contents…"
+            );
+            const note = target?.closest<HTMLElement>("[data-note-id]");
+            if (note && latest.current.pageLayout && !latest.current.rawMode)
+              contextActions.push({ label: "Edit note…", run: () => showNotes(note.dataset.noteId) });
             refreshEditorDecorations(v);
             openContextMenu(
               event,
@@ -3018,7 +3047,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                     v.focus();
                   },
                 },
-                ...formatActions(),
+                ...contextActions,
               ],
               { label: "Text actions" },
             );
