@@ -2,19 +2,21 @@ import { useEffect, useState } from "react";
 
 export function useStructurePreference(scope: "write" | "sandbox") {
   const key = `alder.structure.${scope}`;
+  const read = () => {
+    const saved =
+      localStorage.getItem(key) ?? localStorage.getItem("alder.structure");
+    return saved === null ? scope === "write" : saved !== "false";
+  };
   const [visible, setVisible] = useState(() => {
     // Preserve the former shared choice when each independent setting is first
     // created. Later changes to either editor affect only its own preference.
-    const saved = localStorage.getItem(key);
-    if (saved !== null) return saved !== "false";
-    const initial = localStorage.getItem("alder.structure") !== "false";
+    const initial = read();
     localStorage.setItem(key, String(initial));
     return initial;
   });
   useEffect(() => {
     const changed = (event: StorageEvent) => {
-      if (event.key === key || event.key === null)
-        setVisible(localStorage.getItem(key) !== "false");
+      if (event.key === key || event.key === null) setVisible(read());
     };
     window.addEventListener("storage", changed);
     return () => window.removeEventListener("storage", changed);

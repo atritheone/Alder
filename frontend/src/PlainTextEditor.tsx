@@ -577,7 +577,15 @@ export default forwardRef<EditorHandle, Props>(
         issueField,
         bracketMatching(),
         codeFolding(),
-        foldGutter(),
+        foldGutter({
+          markerDOM(open) {
+            const marker = document.createElement("span");
+            marker.className = "txt-fold-control";
+            marker.dataset.foldMarker = open ? "⌄" : "›";
+            marker.title = open ? "Fold line" : "Unfold line";
+            return marker;
+          },
+        }),
         dirtyLineField,
         dirtyLineGutter,
         EditorView.inputHandler.of((v, from, to, text) => {

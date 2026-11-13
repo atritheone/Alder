@@ -79,6 +79,25 @@
   color: #b86b13;
   min-width: 4px;
 }
+.txt-host .cm-foldGutter {
+  overflow: visible;
+}
+.txt-host .cm-foldGutter .txt-fold-control {
+  display: inline-block;
+  position: relative;
+  padding: 0 1px;
+}
+/* Keep the original empty gutter width; paint either arrow inside that slot. */
+.txt-fold-control::before {
+  content: "›";
+  visibility: hidden;
+}
+.txt-fold-control::after {
+  content: attr(data-fold-marker);
+  position: absolute;
+  inset-inline-end: 1px;
+  inset-block-start: 0;
+}
 .txt-status {
   display: flex;
   justify-content: space-between;

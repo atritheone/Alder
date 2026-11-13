@@ -8,6 +8,10 @@ The Write toolbar provides font/size, Undo, Redo, Find, line numbers, word wrap,
 visible whitespace and **Text tools**. Advanced tools stay in the overflow or
 the **Text** menu. Rich controls appear for formats that retain their features.
 
+Formatting marks default off in Sandbox and on in DOCX and book Write. Each
+editor keeps its own saved choice. Fold arrows use a stable gutter slot so they
+do not displace change markers or line numbers.
+
 ## Frequent actions
 
 | Action | Default shortcut |
