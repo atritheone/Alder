@@ -35,7 +35,7 @@
 }
 .txt-host .cm-editor {
   height: 100%;
-  --txt-gutter-width: max(58px, calc(40px + 6ch));
+  --txt-gutter-width: calc(37px + var(--txt-line-number-digits, 2) * 1ch);
 }
 .txt-host .cm-scroller {
   overflow: auto;
@@ -107,6 +107,11 @@
   order: 2;
   flex: 1 0 0;
   min-width: 0;
+}
+.txt-host .cm-lineNumbers .cm-gutterElement {
+  min-width: 0;
+  padding: 0 3px 0 1px;
+  text-align: left;
 }
 .txt-change-marker {
   display: block;

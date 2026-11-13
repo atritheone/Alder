@@ -4,7 +4,12 @@ import {
   RangeSet,
   type Text,
 } from "@codemirror/state";
-import { gutter, GutterMarker, ViewPlugin } from "@codemirror/view";
+import {
+  gutter,
+  GutterMarker,
+  ViewPlugin,
+  type ViewUpdate,
+} from "@codemirror/view";
 import {
   StreamLanguage,
   syntaxHighlighting,
@@ -50,19 +55,35 @@ export const indentationFolding = foldService.of((state, start) => {
   return end > first.to ? { from: first.to, to: end } : null;
 });
 export const diskSaved = StateEffect.define<Text>();
-/** CodeMirror estimates document height; the visible sheet must use its real box. */
+/** Match the real sheet height and reserve only the line-number digits needed. */
 export const sheetGutterHeight = ViewPlugin.define((view) => {
-  if (typeof ResizeObserver === "undefined") return {};
-  const observer = new ResizeObserver(([entry]) => {
-    const height =
-      entry.borderBoxSize?.[0]?.blockSize ?? view.contentDOM.offsetHeight;
-    view.dom.style.setProperty("--txt-sheet-height", `${height}px`);
-  });
-  observer.observe(view.contentDOM);
+  const setDigits = () =>
+    view.dom.style.setProperty(
+      "--txt-line-number-digits",
+      String(Math.max(2, String(view.state.doc.lines).length)),
+    );
+  setDigits();
+  const observer =
+    typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(([entry]) => {
+          const height =
+            entry.borderBoxSize?.[0]?.blockSize ?? view.contentDOM.offsetHeight;
+          view.dom.style.setProperty("--txt-sheet-height", `${height}px`);
+        });
+  observer?.observe(view.contentDOM);
   return {
+    update(update: ViewUpdate) {
+      if (
+        Math.max(2, String(update.startState.doc.lines).length) !==
+        Math.max(2, String(update.state.doc.lines).length)
+      )
+        setDigits();
+    },
     destroy() {
-      observer.disconnect();
+      observer?.disconnect();
       view.dom.style.removeProperty("--txt-sheet-height");
+      view.dom.style.removeProperty("--txt-line-number-digits");
     },
   };
 });

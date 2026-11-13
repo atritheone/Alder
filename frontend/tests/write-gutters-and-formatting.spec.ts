@@ -44,6 +44,7 @@ test("fold arrows keep all gutter columns fixed with change bars beside the docu
         arrowRight: fold.right,
         numbersLeft: numbers.left,
         numbersRight: numbers.right,
+        numberLeft: range.getBoundingClientRect().left,
         numberRight: range.getBoundingClientRect().right,
         textAreaLeft: content.left,
       };
@@ -56,6 +57,19 @@ test("fold arrows keep all gutter columns fixed with change bars beside the docu
       page.locator(".txt-host .txt-fold-control:visible"),
     ).toHaveCount(0);
     const before = await position();
+    const digitWidth = await page
+      .locator(".txt-host .cm-lineNumbers")
+      .evaluate((el) => {
+        const style = getComputedStyle(el),
+          canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d")!;
+        context.font = `${style.fontSize} ${style.fontFamily}`;
+        return context.measureText("0").width;
+      });
+    expect(before.numberLeft - before.arrowRight).toBeLessThanOrEqual(2);
+    expect(before.textAreaLeft - before.gutterLeft).toBeLessThanOrEqual(
+      37 + 2 * digitWidth + 0.5,
+    );
     expect(before.arrowRight).toBeLessThanOrEqual(before.numbersLeft);
     expect(before.numbersRight).toBeLessThanOrEqual(before.markerLeft);
     expect(

@@ -137,6 +137,18 @@
       "Short and long documents share the same gutter/page bottom.",
       "Actual Electron screenshot inspected with example text, bookmarks, folding, colored word matches and completion."
     ],
-    "screenshot": "alder-txt-write-final.png"
+    "screenshot": "alder-txt-write-final.png",
+    "compactUpdate": {
+      "date": "2026-11-14",
+      "checks": [
+        "Line numbers sit immediately beside the arrow column.",
+        "Gutter reserves current line-count digits, with two digits minimum for stable 9-to-10 transition.",
+        "Focused gutter positioning and short/long sheet-height regression passed in Cambria and Consolas.",
+        "TypeScript and frontend build passed; native screenshot inspected."
+      ],
+      "exampleWidthBeforeCssPx": 82.52,
+      "exampleWidthAfterCssPx": 51.17,
+      "screenshot": "alder-txt-write-compact-gutter.png"
+    }
   }
 }

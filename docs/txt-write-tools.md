@@ -12,6 +12,8 @@ Formatting marks default off in Sandbox and on in DOCX and book Write. Each
 editor keeps its own saved choice. Fold arrows use a stable gutter slot so they
 do not displace change markers or line numbers. The contrasting grey gutter puts
 fold arrows left of the line numbers and change bars beside the text area.
+The number column sits directly beside the arrows and widens only when more
+line-number digits are needed.
 
 ## Frequent actions
 
