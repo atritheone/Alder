@@ -1,5 +1,11 @@
 # Bounded existing-model grammar repair
 
+**Reopened 13 November 2026.** The decision below records only the first,
+narrow four-rule experiment. Calling that the complete existing-model plan was
+premature. The user authorized the broader work described in
+[`grammar-targeted-repair-plan.md`](grammar-targeted-repair-plan.md). Its results
+and completion decision supersede this historical checkpoint.
+
 Execution started 13 November 2026. Model: the installed, unchanged
 Qwen3.5-4B Q4_K_M (`00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4`).
 

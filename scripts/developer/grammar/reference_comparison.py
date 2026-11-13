@@ -16,6 +16,8 @@ def scores(counts):
 def compare(baseline,candidate,iterations=4000):
     if baseline['corpusSHA256']!=candidate['corpusSHA256'] or baseline['split']!=candidate['split']:
         raise ValueError('Reference reports have different corpus identities or partitions.')
+    if baseline.get('referenceAggregation','official-multi')!=candidate.get('referenceAggregation','official-multi'):
+        raise ValueError('Reference aggregation policies differ.')
     def index(report):
         rows={row['id']:row for row in report['casesScored']}
         if len(rows)!=len(report['casesScored']):raise ValueError('Duplicate reference case.')

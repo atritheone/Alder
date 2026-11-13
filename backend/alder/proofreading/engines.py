@@ -252,6 +252,11 @@ class ModelEngine:
             if config.get('grammarRepair'):
                 payload.update(grammarRepair=True,originalText=config['originalText'],
                     languageIssues=config.get('languageIssues',[])[:12],pluralityTerms=config.get('pluralityTerms',[])[:32])
+            if config.get('focusedRepair'):
+                payload.update(focusedRepair=True,originalText=config['originalText'],
+                    rejectedDraft=config.get('rejectedDraft',''),guardReason=config.get('guardReason',''),
+                    protectedSourceTerms=[word for word in config.get('protectedSourceTerms',[])
+                                          if word.casefold() in text.casefold()][:100])
             try:
                 self.process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
                 self.process.stdin.flush()

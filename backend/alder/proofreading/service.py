@@ -15,13 +15,16 @@ from ..models import ValidationError
 from .contracts import (DIALECTS, blocks, configuration, diagnostic,
                         fingerprint, model_correction, shift, slice16, u16, language_segments)
 from .engines import ModelEngine, Resources, RuleEngine
-from .revisions import passages as revision_passages, revision, complete_spelling, unchanged_internal_names
-from .invariants import source_identifiers,restore_money_notation,narrowed_plural_terms
+from .revisions import passages as revision_passages, revision
+from .invariants import source_identifiers
+from .focused_repair import finish_recovery,finish_legacy
 
 TERMINAL = {"completed", "partial", "failed", "cancelled"}
 
 
 class ProofreadingService:
+    _source_repair_enabled = False  # Failed the frozen 2026-11-13 quality gate; developer study only.
+
     def __init__(self, resources, data_dir, speech_busy=None):
         self.resources = Resources(resources)
         self.rules = RuleEngine(self.resources)
@@ -283,7 +286,8 @@ class ProofreadingService:
                     if config.get('task')=='revise':
                         block_config={**block_config,'acceptedWords':sorted(set(block_config['acceptedWords'])|source_identifiers(block['text']))}
                     interrupted = lambda: self.closed.is_set() or self.speech_busy() or (config.get('task') != 'revise' and self._cancelled(job))
-                    corrected = self.model.check(block["text"], block_config, interrupted)
+                    corrected = (self._generate_revision(block['text'],block_config,interrupted,lambda:self._cancelled(job))
+                                 if config.get('task')=='revise' else self.model.check(block['text'],block_config,interrupted))
                     if config.get('task') == 'revise' and not self._cancelled(job):
                         corrected=self._finish_revision(block['text'],corrected,block_config,
                             lambda:self._cancelled(job) or self.speech_busy(),warnings)
@@ -294,8 +298,8 @@ class ProofreadingService:
                     break
                 if self._cancelled(job):
                     return
-                validator = revision if config.get('task') == 'revise' else model_correction
-                item = validator(block["text"], corrected, block_config["acceptedWords"])
+                item = (self._revision_annotation(block['text'],corrected,block_config) if config.get('task')=='revise'
+                        else model_correction(block['text'],corrected,block_config['acceptedWords']))
                 if item and item["ruleId"] not in config["ignoredRuleIds"]:
                     if config.get('task') == 'revise':
                         item['preservesGenerated'] = block.get('protected',False)
@@ -317,27 +321,38 @@ class ProofreadingService:
             if self._cancelled(job):
                 self._update(job, status="cancelled", message="Check cancelled.")
 
+    def _generate_revision(self,source,config,interrupted,cancelled):
+        return self.model.check(source,config,interrupted)
+
+    def _revision_annotation(self,source,corrected,config):
+        return revision(source,corrected,config['acceptedWords'],
+                        lexical_repairs=self._uses_source_repair(config))
+
+    def _uses_source_repair(self,config):
+        return (self._source_repair_enabled and config.get('revisionProfile')!='creative'
+                and config.get('revisionMode')!='rephrase'
+                and self.resources.capabilities().get('rules',{}).get('available',False))
+
     def _finish_revision(self, source, corrected, config, cancelled, warnings):
-        """Incumbent policy; developer studies may override this bounded seam."""
-        corrected=restore_money_notation(source,corrected)
-        plural_terms=narrowed_plural_terms(source,corrected)
-        if plural_terms:
-            corrected=self.model.check(source,{**config,
-                'acceptedWords':sorted(set(config['acceptedWords'])|plural_terms),
-                'repairReason':'plurality','pluralityTerms':sorted(plural_terms)},cancelled)
-            corrected=restore_money_notation(source,corrected)
-        if self.resources.capabilities().get('rules', {}).get('available'):
-            audit_config={**config,'acceptedWords':sorted(set(config['acceptedWords']) |
-                          unchanged_internal_names(source,corrected))}
-            corrected=complete_spelling(corrected,audit_config,self.rules.check,self.model.check,
-                                        cancelled,allow_repair=not plural_terms)
-            if corrected is None:
-                warning='A sentence proposal was withheld because its spelling could not be verified. Word-level corrections remain available.'
-                if warning not in warnings:warnings.append(warning)
-        else:
+        if not self._uses_source_repair(config):
+            return self._finish_legacy_revision(source,corrected,config,cancelled,warnings)
+        result=finish_recovery(source,corrected,config,self.rules.check,self.model.check,cancelled)
+        if result.text is None and result.reason.startswith(('residual-','invalid-')):
+            warning='A sentence proposal was withheld because grammar or spelling could not be verified. Word-level corrections remain available.'
+            if warning not in warnings:warnings.append(warning)
+        return result.text
+
+    def _finish_legacy_revision(self, source, corrected, config, cancelled, warnings):
+        """Preserve creative/rephrase and missing-rules behaviour."""
+        result=finish_legacy(source,corrected,config,self.rules.check,self.model.check,cancelled,
+            rules_available=bool(self.resources.capabilities().get('rules',{}).get('available')))
+        if result.reason=='residual-spelling':
+            warning='A sentence proposal was withheld because its spelling could not be verified. Word-level corrections remain available.'
+            if warning not in warnings:warnings.append(warning)
+        elif result.reason=='rules-unavailable':
             warning='Sentence spelling verification is unavailable: the local rules pack is missing.'
             if warning not in warnings:warnings.append(warning)
-        return corrected
+        return result.text
 
     def get(self, identifier):
         with self.lock:

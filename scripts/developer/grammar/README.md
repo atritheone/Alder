@@ -515,3 +515,75 @@ errors, withheld outputs count as the original, and reference overlap never
 establishes editorial precision. A missing independent validation population
 cannot be relabelled as a pass. See `docs/grammar-existing-model-progress.md` for
 the fixed experiment budget, exposure audit and eventual scoped decision.
+
+## Targeted existing-model continuation
+
+The later `focused-repair` pipeline retries rejected or incomplete drafts from
+the original source, preserving explicitly listed source terms. `reviewed-repair`
+also reviews changed first drafts. Both are opt-in study adapters; neither is
+an additional inference model. Narrow lexical guard exceptions are paired with
+adversarial tests; creative and explicit rephrase keep the incumbent finaliser.
+See `docs/grammar-targeted-repair-plan.md` and its progress report for selection,
+validation rights, exposure and the eventual production decision.
+
+`make_repair_controls.py --output <external-json>` freezes 78 authored controls
+in 26 construction families. These are controlled regression evidence, not human
+quality ratings. Keep dialect variants grouped. Generate final validation only
+after selecting/fingerprinting a candidate on development material.
+
+After complete matched inference, run `reference.py` separately for each output
+using the retained ERRANT environment. Then run `paired_repair_report.py` with
+`--corpus`, `--baseline`, `--candidate`, `--baseline-reference`,
+`--candidate-reference` and `--output`. The report checks full population,
+source/result/reference bindings, identical model/runtime and the shared two-call
+budget. It reconstructs grouped reference differences, new literal-control
+failures, clean changes, service failures, memory and complete-service latency.
+Missing results, altered reference identities or changed models cannot produce
+positive diagnostic evidence. Its 10% reference-error reduction target is not
+editorial certification, a commercial dataset licence or Grammarly parity.
+No cloud judge or paid API is required for this repeatable regression comparison.
+
+For application integration, `replay.py --recorded-source <frozen-source>` also
+verifies the worker/prompt and model/runtime identities, then compares the old
+and current engines' actual serialized model requests before returning each
+recorded response. Locale/context/vocabulary and repair phase must match the
+recorded configuration. Changed payloads require fresh inference; a replay does
+not qualify a new prompt. Compare all delivered text, statuses and warnings with
+the original run and require every recorded call to have been consumed.
+
+
+The `conservative-recovery` adapter preserves the incumbent's successful
+plural/spelling sequence and spends an unused retry only after source validation
+would reject its delivery. It is the final candidate in the targeted study.
+`located-repair` and `grammar-first` are rejected diagnostic profiles; a higher
+reference-overlap score did not make their delivered grammar more complete.
+They do not constitute supported end-user modes. See the progress report for the
+recorded adverse examples, stopped runs and final gate decision.
+
+For a fixed-denominator comparison with multiple human references, use
+`reference.py --reference-aggregation all-independent` on both sides. This scores
+each supplied reference separately, summing counts **within the source group**;
+it does not multiply the number of independent source observations. Do not mix
+aggregation policies. Official ERRANT multi-reference selection is retained as a
+secondary diagnostic; its output-dependent best-reference choices can change the
+number of reference edits. `paired_repair_report.py` refuses to claim a remaining
+error reduction when baseline and candidate TP+FN totals differ.
+
+Replaying a different deterministic validator over old native responses is a
+source-bound development diagnostic only. A newly accepted first response may
+legitimately leave an old repair call unused. Record this separately from exact
+application integration: final selected native inference versus application replay
+must match every delivery, warning/status and consume all recorded requests.
+Do not present replay time as native inference performance or post-hoc analysis
+as a fresh held-out comparison.
+
+
+Final 13 November decision: the conservative candidate failed its second reserved
+sample (2.33% fewer unmatched reference edits, with slightly lower precision and
+F0.5). Application source recovery and the paired lexical exceptions remain
+disabled; use the explicit study adapter to reproduce them. The application keeps
+its existing generation/repair policy with two conservative meaning guards for
+scalar opposites and collective-to-individual changes. These safeguards do not
+constitute promotion of the failed grammar candidate. Aggregate evidence lives in
+`docs/verification/grammar-targeted-repair.json`; raw public research records stay
+in the external study directory, never in the application or user-data folder.

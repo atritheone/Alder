@@ -17,7 +17,7 @@ from alder.proofreading.revisions import spelling_issues
 
 def source_snapshot():
     paths=list((ROOT/'backend/alder').rglob('*.py'))+list((ROOT/'backend/alder').rglob('*.json'))
-    paths += [Path(__file__).parent/name for name in ('generate.py','common.py','memory.py','repair_study.py')]
+    paths += [Path(__file__).parent/name for name in ('generate.py','common.py','memory.py','repair_study.py','repair_experiments.py')]
     return {str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
 
 
@@ -48,7 +48,7 @@ def main():
     parser.add_argument('--limit', type=int)
     parser.add_argument('--case-ids',nargs='+',help='Explicit targeted regressions; selection is fingerprinted')
     parser.add_argument('--timeout', type=float, default=300)
-    parser.add_argument('--pipeline',choices=['baseline','source-hints','grammar-audit'],default='baseline')
+    parser.add_argument('--pipeline',choices=['baseline','source-hints','grammar-audit','focused-repair','reviewed-repair','conservative-recovery','located-repair','grammar-first'],default='baseline')
     parser.add_argument('--model-manifest',type=Path,help='Explicit separately verified developer candidate; never an installed pin change')
     parser.add_argument('--stop-file',type=Path,help='External cancellation signal; completed records remain resumable')
     parser.add_argument('--sealed-test-permit',type=Path)
@@ -70,6 +70,18 @@ def main():
     if args.pipeline=='grammar-audit':
         from repair_study import GrammarRepairService
         service_type=GrammarRepairService
+    elif args.pipeline in ('focused-repair','reviewed-repair'):
+        from repair_study import FocusedRepairService,ReviewedRepairService
+        service_type=FocusedRepairService if args.pipeline=='focused-repair' else ReviewedRepairService
+    elif args.pipeline=='conservative-recovery':
+        from repair_study import RecoveryService
+        service_type=RecoveryService
+    elif args.pipeline=='located-repair':
+        from repair_study import LocatedRepairService
+        service_type=LocatedRepairService
+    elif args.pipeline=='grammar-first':
+        from repair_study import GrammarFirstService
+        service_type=GrammarFirstService
     service = service_type(Path(args.resources), target.parent / 'service-data')
     monitor=Monitor(service);monitor.start()
     if args.model_manifest:
@@ -94,7 +106,7 @@ def main():
                    if len(a['edits'])==1]} for item in findings[:12]]}
         try:
             value=original_check(text,config,cancelled)
-            trace.append({'source':text,'proposal':value,'phase':'grammar-repair' if config.get('grammarRepair') else 'spelling-repair' if config.get('spellingRepair') else 'generation',
+            trace.append({'source':text,'proposal':value,'phase':'grammar-first-pass' if config.get('grammarFirstPass') else 'clarity-pass' if config.get('clarityFallback') else 'error-location-pass' if config.get('errorLocationPass') else 'focused-repair' if config.get('focusedRepair') else 'grammar-repair' if config.get('grammarRepair') else 'spelling-repair' if config.get('spellingRepair') else 'generation',
                           'repairReason':config.get('repairReason'),'configurationSHA256':digest(config),
                           'seconds':time.monotonic()-started})
             return value

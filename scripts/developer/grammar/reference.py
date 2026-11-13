@@ -33,6 +33,12 @@ def population(data, results, split):
     return examples,missing,sorted(set(expected)-{case['id'] for case,_,_ in examples})
 
 
+def reference_groups(references,policy):
+    if policy=='official-multi':return [references]
+    if policy=='all-independent':return [[reference] for reference in references]
+    raise ValueError('Unknown reference aggregation policy.')
+
+
 def main():
     stamp=execution_stamp(__file__)
     parser=argparse.ArgumentParser(description=__doc__)
@@ -40,6 +46,8 @@ def main():
     parser.add_argument('--results',required=True)
     parser.add_argument('--split',choices=['development','validation','test'],default='development')
     parser.add_argument('--output',required=True)
+    parser.add_argument('--reference-aggregation',choices=['official-multi','all-independent'],default='official-multi',
+                        help='All-independent scores every human reference separately, retaining one source/group denominator.')
     args=parser.parse_args()
     data=corpus(args.corpus);results=records(args.results)
     examples,missing,unreferenced=population(data,results,args.split)
@@ -66,11 +74,14 @@ def main():
         hyp,ref=m2(case['source'],[proposal]),m2(case['source'],refs)
         hypotheses.append(hyp);references.append(ref)
         h=official.process_edits(official.simplify_edits(hyp),options)
-        r=official.process_edits(official.simplify_edits(ref),options)
-        count,cat=official.evaluate_edits(h,r,counts,index,case['source'],options)
-        counts.update(count);categories=official.merge_dict(categories,cat)
+        case_counts=Counter(tp=0,fp=0,fn=0)
+        for group in reference_groups(refs,args.reference_aggregation):
+            block=ref if args.reference_aggregation=='official-multi' else m2(case['source'],group)
+            r=official.process_edits(official.simplify_edits(block),options)
+            count,cat=official.evaluate_edits(h,r,counts,index,case['source'],options)
+            counts.update(count);case_counts.update(count);categories=official.merge_dict(categories,cat)
         per_case.append({'id':case['id'],'group':case['group'],'track':case['track'],
-          'dialect':case['dialect'],'counts':count,'changed':proposal!=case['source']})
+          'dialect':case['dialect'],'counts':dict(case_counts),'changed':proposal!=case['source']})
     def score(values):
         tp,fp,fn=values
         p,r,f=official.computeFScore(tp,fp,fn,.5)
@@ -94,7 +105,11 @@ def main():
       'resultsSHA256':digest(results),'implementationSHA256':digest(stamp),
       'dependencies':{'errant':importlib.metadata.version('errant'),
         'spacy':importlib.metadata.version('spacy'),'en_core_web_sm':importlib.metadata.version('en_core_web_sm')},
-      'referencePolicy':'Official ERRANT cumulative multi-reference choice; no absent paraphrase can be certified incorrect from overlap alone'})
+      'referenceAggregation':args.reference_aggregation,
+      'referenceAssessments':sum(len(reference_groups(refs,args.reference_aggregation)) for _,_,refs in examples),
+      'referencePolicy':('Official ERRANT cumulative multi-reference choice' if args.reference_aggregation=='official-multi'
+         else 'Every human reference scored separately and summed within source; references are not independent source observations')+
+         '; no absent paraphrase can be certified incorrect from overlap alone'})
     print(__import__('json').dumps({'cases':len(examples),'missing':len(missing),'overall':score([counts[k] for k in ('tp','fp','fn')])}))
 
 

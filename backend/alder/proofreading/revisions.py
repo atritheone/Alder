@@ -176,7 +176,7 @@ def sentences(text):
         yield {"text": text[left:right], "start": u16(text, left), "end": u16(text, right)}
 
 
-def revision_rejection(text, corrected, accepted):
+def revision_rejection(text, corrected, accepted, *, lexical_repairs=False):
     """Explain the existing guard decision without retaining manuscript text."""
     if not isinstance(corrected, str) or corrected == text or not corrected.strip():
         return 'empty-or-unchanged'
@@ -211,7 +211,13 @@ def revision_rejection(text, corrected, accepted):
     if measured_units(text) != measured_units(corrected):
         return 'measured-units'
     modality = r"\b(?:not|never|no|nobody|nothing|nowhere|neither|none|must|may|might|shall|should|could|cannot|willnot|wouldnot)\b"
-    if Counter(re.findall(modality, negative_forms(text), re.I)) != Counter(re.findall(modality, negative_forms(corrected), re.I)):
+    from .lexical_repairs import changes_known_direction
+    if changes_known_direction(text,corrected):return 'scalar-direction'
+    source_modality,target_modality=negative_forms(text),negative_forms(corrected)
+    if lexical_repairs:
+        from .lexical_repairs import modality_source
+        source_modality=modality_source(source_modality,target_modality)
+    if Counter(re.findall(modality, source_modality, re.I)) != Counter(re.findall(modality, target_modality, re.I)):
         return 'modality-or-negation'
     for word in accepted:
         pattern = r'(?<!\w)' + re.escape(word) + r'(?!\w)'
@@ -219,6 +225,9 @@ def revision_rejection(text, corrected, accepted):
             return 'accepted-terms'
     # Protect likely proper names, without treating sentence-initial words as names.
     names = protected_names(text, corrected)
+    if lexical_repairs:
+        from .lexical_repairs import repaired_names
+        names-=repaired_names(text,corrected)
     for name in names:
         if len(re.findall(r'\b' + re.escape(name) + r'\b', text)) != len(re.findall(r'\b' + re.escape(name) + r'\b', corrected)):
             return 'protected-name'
@@ -234,9 +243,9 @@ def revision_rejection(text, corrected, accepted):
     return None
 
 
-def revision(text, corrected, accepted):
+def revision(text, corrected, accepted, *, lexical_repairs=False):
     """Offer a whole-sentence edit using conservative, non-semantic-proof guards."""
-    if revision_rejection(text, corrected, accepted) is not None:
+    if revision_rejection(text, corrected, accepted,lexical_repairs=lexical_repairs) is not None:
         return None
     item = diagnostic(text, 0, u16(text), 'clarity', 'model:sentence-revision',
                       'Consider this sentence structure and clarity revision.', [corrected], 'model')

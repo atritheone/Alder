@@ -1,0 +1,302 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-13",
+  "status": "bounded-existing-model-study-complete-no-quality-promotion",
+  "baseCommit": "baddac710cba1831af433dd3e82dee09e8db42ba",
+  "modelSHA256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+  "selectedCandidateSourceSHA256": "0288be683927d2ab7fe1f2a97d9e697163af508e1a4464564aef8adab931e38d",
+  "finalProductionSourceSHA256": "0ce705a693e0346b77f56d36bcfc3d963fe86549e510ad27155910858296947b",
+  "decision": {
+    "promoteRecovery": false,
+    "enablePairedLexicalExceptions": false,
+    "retainIncumbentGeneration": true,
+    "shippingSafetyFixes": [
+      "Withhold explicit more/less scalar-opposite reversals",
+      "Withhold collective-group references narrowed into a new individual"
+    ],
+    "reason": "Reserved primary benefit 2.33% is below 10%; reference precision/F0.5 point estimates decline. No post-validation prompt tuning."
+  },
+  "automatedEvaluation": {
+    "scorer": "ERRANT 3.0.2 with spaCy 3.8.18 / en_core_web_sm 3.8.0",
+    "primaryReferenceAggregation": "Every provided human reference scored separately; summed within source group",
+    "sourceGroups": 150,
+    "referenceAssessments": 600,
+    "fixedReferenceEdits": 1911,
+    "grammarEditorialCertification": false,
+    "paidAPICalls": 0,
+    "requiresNewUserRatingsForRegression": false
+  },
+  "finalValidation": {
+    "cases": 150,
+    "corpusSHA256": "166376b6e0b280ddc03b453d47c28bbb48e679b4b19b447bf46b1c49b12b7142",
+    "baseline": {
+      "tp": 664,
+      "fp": 1060,
+      "fn": 1247,
+      "precision": 0.3852,
+      "recall": 0.3475,
+      "f0.5": 0.377
+    },
+    "candidate": {
+      "tp": 693,
+      "fp": 1131,
+      "fn": 1218,
+      "precision": 0.3799,
+      "recall": 0.3626,
+      "f0.5": 0.3763
+    },
+    "remainingReferenceEditReduction": 0.023255813953488372,
+    "targetMet": false,
+    "delta95SourceGroupBootstrap": {
+      "precision": [
+        -0.02585910652920964,
+        0.008487171464330423
+      ],
+      "recall": [
+        0.0028392958546280544,
+        0.030909090909090886
+      ],
+      "f0.5": [
+        -0.01421248392107427,
+        0.0110726128791368
+      ],
+      "remainingReferenceErrors": [
+        -60,
+        -5
+      ]
+    },
+    "newOperationalFailures": [],
+    "newQualityWithholds": [
+      "jfleg-dev-452"
+    ],
+    "secondaryOfficialMulti": {
+      "baseline": {
+        "tp": 248,
+        "fp": 183,
+        "fn": 195,
+        "precision": 0.5754,
+        "recall": 0.5598,
+        "f0.5": 0.5722
+      },
+      "candidate": {
+        "tp": 261,
+        "fp": 195,
+        "fn": 206,
+        "precision": 0.5724,
+        "recall": 0.5589,
+        "f0.5": 0.5696
+      },
+      "remainingErrorReductionValid": false
+    }
+  },
+  "regressionControls": {
+    "cases": 78,
+    "constructionFamilies": 26,
+    "exposedBeforeFinalSelection": true,
+    "baseline": {
+      "tp": 32,
+      "fp": 6,
+      "fn": 7,
+      "precision": 0.8421,
+      "recall": 0.8205,
+      "f0.5": 0.8377
+    },
+    "candidate": {
+      "tp": 35,
+      "fp": 6,
+      "fn": 4,
+      "precision": 0.8537,
+      "recall": 0.8974,
+      "f0.5": 0.8621
+    },
+    "newLiteralFailures": [],
+    "newCleanChanges": [],
+    "newOperationalFailures": [],
+    "independentEditorialRatings": false
+  },
+  "resourceComparison": {
+    "baseline": {
+      "timing": {
+        "allCases": {
+          "p50Seconds": 4.25,
+          "p95Seconds": 9.078999999997905
+        },
+        "warmCases": 149,
+        "warmP50Seconds": 4.25,
+        "warmP95Seconds": 8.65600000001723,
+        "coldCases": 1,
+        "unclassifiedCases": 0,
+        "scope": "Development host, including service audits/repair; concurrent workloads are not controlled"
+      },
+      "memory": {
+        "componentPeakRSSBytes": {
+          "backend": 347230208,
+          "model": 4802875392,
+          "rules": 790208512
+        },
+        "sumComponentPeakRSSBytes": 5940314112,
+        "observedComponentPeakSumBytes": 5940314112,
+        "processTreeCoverage": true,
+        "incompleteComponents": [],
+        "physicalRAMBytes": 50369818624,
+        "scope": "Verified owned component/descendant lifetime peaks when lineage coverage is true; observed legacy/partial numbers remain diagnostic, not simultaneous RSS or reference-hardware qualification"
+      },
+      "modelRequests": 156,
+      "maximumRequestsPerCase": 2
+    },
+    "candidate": {
+      "timing": {
+        "allCases": {
+          "p50Seconds": 4.375,
+          "p95Seconds": 13.764999999984866
+        },
+        "warmCases": 149,
+        "warmP50Seconds": 4.375,
+        "warmP95Seconds": 13.578000000008615,
+        "coldCases": 1,
+        "unclassifiedCases": 0,
+        "scope": "Development host, including service audits/repair; concurrent workloads are not controlled"
+      },
+      "memory": {
+        "componentPeakRSSBytes": {
+          "backend": 387854336,
+          "model": 4815081472,
+          "rules": 802639872
+        },
+        "sumComponentPeakRSSBytes": 6005575680,
+        "observedComponentPeakSumBytes": 6005575680,
+        "processTreeCoverage": true,
+        "incompleteComponents": [],
+        "physicalRAMBytes": 50369818624,
+        "scope": "Verified owned component/descendant lifetime peaks when lineage coverage is true; observed legacy/partial numbers remain diagnostic, not simultaneous RSS or reference-hardware qualification"
+      },
+      "modelRequests": 175,
+      "maximumRequestsPerCase": 2
+    }
+  },
+  "candidateExactIntegration": [
+    {
+      "cases": 150,
+      "requestBound": true,
+      "deliveryDifferences": [],
+      "unusedCalls": [],
+      "scope": "Exact integration of the selected developer candidate, not promotion of its failed quality policy"
+    },
+    {
+      "cases": 78,
+      "requestBound": true,
+      "deliveryDifferences": [],
+      "unusedCalls": [],
+      "scope": "Exact integration of the selected developer candidate, not promotion of its failed quality policy"
+    }
+  ],
+  "productionPreservation": [
+    {
+      "population": "validation",
+      "cases": 150,
+      "modelPayloadsBound": true,
+      "firstNativeResponsesIdenticalToIncumbent": true,
+      "changedDeliveries": [],
+      "newLiteralFailures": [],
+      "recordedResponses": "Candidate native responses, with recovery-only requests intentionally unused by the retained incumbent policy",
+      "resultsSHA256": "669caef178fa384db25316decc4350b43ac0951cab6bdb9c30e176e6ab3c2c52"
+    },
+    {
+      "population": "controls",
+      "cases": 78,
+      "modelPayloadsBound": true,
+      "firstNativeResponsesIdenticalToIncumbent": true,
+      "changedDeliveries": [],
+      "newLiteralFailures": [],
+      "recordedResponses": "Candidate native responses, with recovery-only requests intentionally unused by the retained incumbent policy",
+      "resultsSHA256": "4b911ac049bc8e2c4e529b565ffe1937b64134ae4e86a5fde44a6b2175bd84d9"
+    },
+    {
+      "population": "development",
+      "cases": 200,
+      "modelPayloadsBound": true,
+      "firstNativeResponsesIdenticalToIncumbent": true,
+      "changedDeliveries": [
+        "eracond-5-74-5"
+      ],
+      "newLiteralFailures": [],
+      "recordedResponses": "Candidate native responses, with recovery-only requests intentionally unused by the retained incumbent policy",
+      "resultsSHA256": "f28eaf1f17f42fbe0ccfaaa25ed71d9a9d9c04e2202e8c19d96e1fe316ed38e2"
+    }
+  ],
+  "tests": {
+    "initialRelevantPassed": 279,
+    "additionalShippingChecksPassed": 4,
+    "totalDistinctPassed": 283,
+    "fullSuiteRun": false,
+    "knownWarnings": "Existing Starlette/httpx/AnyIO deprecations"
+  },
+  "rejectedExperiments": {
+    "focused-repair": "First fresh validation did not confirm material improvement; lost useful collective correction.",
+    "reviewed-repair": "Development main-clause/comma-splice regressions.",
+    "located-repair": "Second pass worse than its first pass in the diagnostic; full trial deferred.",
+    "grammar-first": "Higher reference precision but less complete delivered grammar on development examples.",
+    "completeness-prompt": "16-case readiness pilot regressed collective subject/finite verb."
+  },
+  "dataRights": {
+    "dataset": "JFLEG",
+    "repository": "https://github.com/keisks/jfleg",
+    "revision": "ee06ff806a208aba815ac45313f4e750a48330a5",
+    "licence": "CC-BY-NC-SA-4.0",
+    "use": "Local noncommercial research only; no training or redistribution with Alder",
+    "authorEssayIDsAvailable": false,
+    "pretrainingOverlapKnown": false,
+    "oldSealedTestOpened": false
+  },
+  "limits": [
+    "Reference overlap is not editorial correctness or Grammarly parity.",
+    "The bounded work is complete; the broader Grammarly-equivalence programme remains unqualified.",
+    "Physical 16 GiB, Mac and Word/Grammarly comparison are unverified.",
+    "Shared-host timing is uncontrolled; memory is conservative component lifetime peak sum, not simultaneous RSS.",
+    "Application installation and user data were not modified; no memory admission, weight or runtime change."
+  ],
+  "evidenceDirectoryHint": "%LOCALAPPDATA%/AlderTesting/existing-model-targeted-20261113",
+  "provenance": {
+    "selection": {
+      "jsonSHA256": "6587fa5a3fe66acc33fb7d14a483d462c9f26a7aa22c6864efd368c988855388",
+      "fileSHA256": "4bc2bdbade8563b45c4b7738dbfee6866bdb4333d6e0c9e5613bbc147966d44f"
+    },
+    "validationReport": {
+      "jsonSHA256": "dbe5aedf9ec4c0b796c3dd27f352a2315a51433de464cfd72a3501c52ae8c1b9",
+      "fileSHA256": "fdaa45b2aeea32bf8b26749eb2acf69f7a454ad5c4b1fad9f58f4140f57a1eb4"
+    },
+    "controlReport": {
+      "jsonSHA256": "c602ecb92af2306a6407d1a5a12bca3680db428085c5a359944cfdbee6f3c8e8",
+      "fileSHA256": "0c304fc316a94be8074c9701f16827e834b7a5a9d0dae8ada49a75d79bfa3381"
+    },
+    "candidateIntegration-validation": {
+      "jsonSHA256": "9dd17e85f7a190ab94ee5eacd9f441e4ca61ab4e205a790e0a9e6ec23d0a9f03",
+      "fileSHA256": "61524c21b4e74acc8a312f34180524ebe5c7e8c262940fc87106b0dd30867f0a"
+    },
+    "candidateIntegration-controls": {
+      "jsonSHA256": "79a817169473ef72a4d3d24a6b2ba32eb640798a3eb14748b35ac5254ccf2fcb",
+      "fileSHA256": "cbc19a16ce5d2caf61dbadec27ff9678406e6a0b1ae4499a8790b58c02606f53"
+    },
+    "productionIntegration-validation": {
+      "jsonSHA256": "7c0c3aafb56d7e1d91cdb6e15c2fee35b6628a429e06d96e12ffaacb02131ad7",
+      "fileSHA256": "e0188085f4f57705bbcac62868fea94ed0bdf44b0d7c49eb50f90578447c2327"
+    },
+    "productionIntegration-controls": {
+      "jsonSHA256": "e58b8f31513161a40539c5c37a21fbef88fa07e70d6620777e70d8b6af2a052c",
+      "fileSHA256": "6d67294941dad27821249de276704abcc28f52c2c06768873823cb29875590e9"
+    },
+    "productionIntegration-development": {
+      "jsonSHA256": "e7a96c0ba2b47c4773018f9604e9d72d48f239a9f759f8faa27c2b9bead81a1f",
+      "fileSHA256": "7c377cf0c79637e06589252874a55ea22cec24728d1e9bf0538cb473afb17383"
+    }
+  },
+  "postIntegrationTextNormalization": {
+    "scope": "Only a terminal empty-line removal in the developer-only experiment module after integration; AST equality verified. All unrelated files restored byte-for-byte.",
+    "changedFiles": [
+      "scripts/developer/grammar/repair_experiments.py"
+    ],
+    "integrationSourceSHA256": "63703ee9508bce61f988bc47a6b2fceda07c7296504025f701495589bd4ca0c9",
+    "beforeFileSHA256": "4b017c7d71709a0d52a26cc0160bd1e69cb852257caafbe9ad2717f9e52aeb22",
+    "afterFileSHA256": "b8331ca4cffc214f850bf20f2ae1a312fc5c0b1f601a3c23ae3922215c689488"
+  }
+}

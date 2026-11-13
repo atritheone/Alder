@@ -120,8 +120,25 @@ def narrowed_plural_terms(source,target):
     return narrowed
 
 
+def narrowed_collective_terms(source,target):
+    """Group references that became a new individual, separate from inflection."""
+    if not isinstance(target,str):return set()
+    narrowed=set()
+    # Definite substantivised adjectives denote groups even without an -s.
+    # Require a clause/adverb boundary; "the young person" and "the poor
+    # report" are adjective+noun phrases, not collective source references.
+    continuation=r'(?=\s+(?:are|were|is|was|have|has|had|can|could|should|may|might|do|did|will|would|must|still|often|always|never|also|already)\b|\s*[.!?;]|\s*$)'
+    for adjective in ('young','elderly','poor','rich','wealthy','unemployed','disabled','homeless'):
+        collective=r'\bthe\s+'+adjective+r'\b'+continuation
+        singular=r'\b'+adjective+r'\s+(?:person|individual|man|woman|child)\b'
+        if (len(re.findall(collective,source,re.I))>len(re.findall(collective,target,re.I))
+            and len(re.findall(singular,target,re.I))>len(re.findall(singular,source,re.I))):
+            narrowed.add('the '+adjective)
+    return narrowed
+
+
 def narrows_explicit_plural(source,target):
-    return bool(narrowed_plural_terms(source,target))
+    return bool(narrowed_plural_terms(source,target)|narrowed_collective_terms(source,target))
 
 
 def changes_known_negation_scope(source,target):
