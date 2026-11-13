@@ -17,7 +17,7 @@ from alder.proofreading.revisions import spelling_issues
 
 def source_snapshot():
     paths=list((ROOT/'backend/alder').rglob('*.py'))+list((ROOT/'backend/alder').rglob('*.json'))
-    paths += [Path(__file__).parent/name for name in ('generate.py','common.py','memory.py')]
+    paths += [Path(__file__).parent/name for name in ('generate.py','common.py','memory.py','repair_study.py')]
     return {str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
 
 
@@ -48,7 +48,7 @@ def main():
     parser.add_argument('--limit', type=int)
     parser.add_argument('--case-ids',nargs='+',help='Explicit targeted regressions; selection is fingerprinted')
     parser.add_argument('--timeout', type=float, default=300)
-    parser.add_argument('--pipeline',choices=['baseline','source-hints'],default='baseline')
+    parser.add_argument('--pipeline',choices=['baseline','source-hints','grammar-audit'],default='baseline')
     parser.add_argument('--model-manifest',type=Path,help='Explicit separately verified developer candidate; never an installed pin change')
     parser.add_argument('--stop-file',type=Path,help='External cancellation signal; completed records remain resumable')
     parser.add_argument('--sealed-test-permit',type=Path)
@@ -66,7 +66,11 @@ def main():
     target = output_path(args.output)
     if args.stop_file and args.stop_file.resolve().is_relative_to(ROOT):
         raise ValueError('Cancellation state must be outside the checkout.')
-    service = ProofreadingService(Path(args.resources), target.parent / 'service-data')
+    service_type=ProofreadingService
+    if args.pipeline=='grammar-audit':
+        from repair_study import GrammarRepairService
+        service_type=GrammarRepairService
+    service = service_type(Path(args.resources), target.parent / 'service-data')
     monitor=Monitor(service);monitor.start()
     if args.model_manifest:
         candidate=read(args.model_manifest)['model']
@@ -90,7 +94,7 @@ def main():
                    if len(a['edits'])==1]} for item in findings[:12]]}
         try:
             value=original_check(text,config,cancelled)
-            trace.append({'source':text,'proposal':value,'phase':'spelling-repair' if config.get('spellingRepair') else 'generation',
+            trace.append({'source':text,'proposal':value,'phase':'grammar-repair' if config.get('grammarRepair') else 'spelling-repair' if config.get('spellingRepair') else 'generation',
                           'repairReason':config.get('repairReason'),'configurationSHA256':digest(config),
                           'seconds':time.monotonic()-started})
             return value
@@ -136,6 +140,7 @@ def main():
             cold={'model':service.model.process is None,'rules':service.rules.process is None}
             active_trace[0]=[]
             if hasattr(service.model,'evaluation_trace'):service.model.evaluation_trace=[]
+            if hasattr(service,'revision_trace'):service.revision_trace=[]
             case_trace=active_trace[0]
             context = case.get('context', case['source'])
             if context.count(case['source']) != 1:
@@ -169,6 +174,7 @@ def main():
                       'serviceStatus': job['status'], 'warnings': job['warnings'],
                       'seconds': time.monotonic()-begin,'modelTrace':case_trace,
                       'pipelineTrace':getattr(service.model,'evaluation_trace',[]),
+                      'revisionAudit':getattr(service,'revision_trace',[]),
                       'coldStart':cold,
                       'memory':monitor.result(),
                       'outcome':'displayed' if job['annotations'] else 'suppressed' if any(r.get('proposal')!=r['source'] for r in [*case_trace,*getattr(service.model,'evaluation_trace',[])] if 'proposal' in r) else 'unchanged'}

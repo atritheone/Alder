@@ -176,31 +176,27 @@ def sentences(text):
         yield {"text": text[left:right], "start": u16(text, left), "end": u16(text, right)}
 
 
-def revision(text, corrected, accepted):
-    """Allow structural changes, while preserving explicit protected facts.
-
-    These checks are guardrails, not a proof of semantic equivalence. Every
-    revision is a reviewable proposal, never an automatic manuscript mutation.
-    """
+def revision_rejection(text, corrected, accepted):
+    """Explain the existing guard decision without retaining manuscript text."""
     if not isinstance(corrected, str) or corrected == text or not corrected.strip():
-        return None
+        return 'empty-or-unchanged'
     typography = str.maketrans({'“':'"', '”':'"', '‘':"'", '’':"'"})
     if ' '.join(text.translate(typography).split()) == ' '.join(corrected.translate(typography).split()):
-        return None
+        return 'typography-only'
     if len(corrected) > 2400 or any(c in corrected for c in '\r\n\t'):
-        return None
+        return 'invalid-shape'
     if len(corrected) > max(120, len(text) * 2):
-        return None
+        return 'excessive-expansion'
     if control_literals(text)!=control_literals(corrected):
-        return None
+        return 'control-literals'
     if introduces_internal_names(text,corrected):
-        return None
+        return 'introduced-name'
     # Ordered values prevent the old unordered-count guard accepting swapped amounts.
     facts = r'https?://\S+|[-+−]?[$£€¥]?[-+−]?\d+(?:[.,:/-]\d+)*(?:\s*%)?'
     if re.findall(facts, text) != re.findall(facts, corrected):
-        return None
+        return 'ordered-values'
     if currency_symbols(text)!=currency_symbols(corrected):
-        return None
+        return 'currency'
     # Numeric equality alone cannot preserve measurements or currencies.
     number_words=r'(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)'
     measured_number=rf'(?:(?:minus|negative)\s+)?(?:\d+(?:[.,]\d+)*|{number_words}(?:[\s-]+(?:and\s+)?{number_words})*)'
@@ -213,27 +209,34 @@ def revision(text, corrected, accepted):
         return [(' '.join(amount.casefold().replace('-',' ').split()),aliases.get(unit.casefold(),unit.casefold().removesuffix('s')))
                 for amount,unit in re.findall(units,value,re.I)]
     if measured_units(text) != measured_units(corrected):
-        return None
+        return 'measured-units'
     modality = r"\b(?:not|never|no|nobody|nothing|nowhere|neither|none|must|may|might|shall|should|could|cannot|willnot|wouldnot)\b"
     if Counter(re.findall(modality, negative_forms(text), re.I)) != Counter(re.findall(modality, negative_forms(corrected), re.I)):
-        return None
+        return 'modality-or-negation'
     for word in accepted:
         pattern = r'(?<!\w)' + re.escape(word) + r'(?!\w)'
         if len(re.findall(pattern, text, re.I)) != len(re.findall(pattern, corrected, re.I)):
-            return None
+            return 'accepted-terms'
     # Protect likely proper names, without treating sentence-initial words as names.
     names = protected_names(text, corrected)
     for name in names:
         if len(re.findall(r'\b' + re.escape(name) + r'\b', text)) != len(re.findall(r'\b' + re.escape(name) + r'\b', corrected)):
-            return None
+            return 'protected-name'
     # Role reversal can preserve every name and number count. Keep named
     # participants in order; some valid passive rewrites are withheld by design.
     words = r'\b[^\W\d_]+\b'
     if [word for word in re.findall(words,text) if word in names] != [word for word in re.findall(words,corrected) if word in names]:
-        return None
+        return 'name-order'
     if reverses_named_roles(text,corrected,names):
-        return None
+        return 'named-roles'
     if narrows_explicit_plural(text,corrected) or changes_known_negation_scope(text,corrected) or changes_known_past_to_present(text,corrected):
+        return 'plurality-scope-or-event-time'
+    return None
+
+
+def revision(text, corrected, accepted):
+    """Offer a whole-sentence edit using conservative, non-semantic-proof guards."""
+    if revision_rejection(text, corrected, accepted) is not None:
         return None
     item = diagnostic(text, 0, u16(text), 'clarity', 'model:sentence-revision',
                       'Consider this sentence structure and clarity revision.', [corrected], 'model')

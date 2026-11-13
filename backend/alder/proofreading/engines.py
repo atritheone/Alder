@@ -249,6 +249,9 @@ class ModelEngine:
                 payload.update(spellingRepair=bool(config.get('spellingRepair')), spellingIssues=config.get('spellingIssues', []))
             if config.get('repairReason')=='plurality':
                 payload.update(repairReason='plurality',pluralityTerms=config.get('pluralityTerms',[])[:32])
+            if config.get('grammarRepair'):
+                payload.update(grammarRepair=True,originalText=config['originalText'],
+                    languageIssues=config.get('languageIssues',[])[:12],pluralityTerms=config.get('pluralityTerms',[])[:32])
             try:
                 self.process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
                 self.process.stdin.flush()

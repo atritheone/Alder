@@ -500,3 +500,18 @@ This is neither fresh inference nor permission to reuse judgments after changing
 the model, prompt, context, numerical profile or decoder. The end-to-end test
 confirms that only genuinely new pairs are queried and an old abstention is not
 retried.
+# Bounded existing-model repair study
+
+`generate.py --pipeline grammar-audit` selects the developer-only
+`GrammarRepairService`, using `alder.proofreading.repair` after the existing
+first generation. It makes at most one additional call shared by spelling,
+supported grammar and plural restoration. The default application service keeps
+its incumbent finaliser. Source/draft/final diagnostics are bound to their own
+UTF-16 spans; final facts and accepted terms are checked against the original.
+
+`repair_report.py --root <external-study-directory>` summarises complete matched
+results and reference comparisons. Missing cases and a third model call are
+errors, withheld outputs count as the original, and reference overlap never
+establishes editorial precision. A missing independent validation population
+cannot be relabelled as a pass. See `docs/grammar-existing-model-progress.md` for
+the fixed experiment budget, exposure audit and eventual scoped decision.

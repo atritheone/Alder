@@ -285,27 +285,8 @@ class ProofreadingService:
                     interrupted = lambda: self.closed.is_set() or self.speech_busy() or (config.get('task') != 'revise' and self._cancelled(job))
                     corrected = self.model.check(block["text"], block_config, interrupted)
                     if config.get('task') == 'revise' and not self._cancelled(job):
-                        corrected=restore_money_notation(block['text'],corrected)
-                        plural_terms=narrowed_plural_terms(block['text'],corrected)
-                        if plural_terms:
-                            # Retry from the original message, not the narrowed
-                            # draft. The existing accepted-terms prompt constrains
-                            # this one repair to retain the explicit plural forms.
-                            corrected=self.model.check(block['text'],{**block_config,
-                                'acceptedWords':sorted(set(block_config['acceptedWords'])|plural_terms),
-                                'repairReason':'plurality','pluralityTerms':sorted(plural_terms)},lambda:self._cancelled(job) or self.speech_busy())
-                            corrected=restore_money_notation(block['text'],corrected)
-                        if self.resources.capabilities().get('rules', {}).get('available'):
-                            audit_config = {**block_config, 'acceptedWords': sorted(set(block_config['acceptedWords']) |
-                                            unchanged_internal_names(block['text'], corrected))}
-                            corrected = complete_spelling(corrected, audit_config, self.rules.check, self.model.check,
-                                                         lambda: self._cancelled(job) or self.speech_busy(),allow_repair=not plural_terms)
-                            if corrected is None:
-                                warning = 'A sentence proposal was withheld because its spelling could not be verified. Word-level corrections remain available.'
-                                if warning not in warnings: warnings.append(warning)
-                        else:
-                            warning = 'Sentence spelling verification is unavailable: the local rules pack is missing.'
-                            if warning not in warnings: warnings.append(warning)
+                        corrected=self._finish_revision(block['text'],corrected,block_config,
+                            lambda:self._cancelled(job) or self.speech_busy(),warnings)
                 except InterruptedError:
                     if self._cancelled(job):
                         return
@@ -335,6 +316,28 @@ class ProofreadingService:
         finally:
             if self._cancelled(job):
                 self._update(job, status="cancelled", message="Check cancelled.")
+
+    def _finish_revision(self, source, corrected, config, cancelled, warnings):
+        """Incumbent policy; developer studies may override this bounded seam."""
+        corrected=restore_money_notation(source,corrected)
+        plural_terms=narrowed_plural_terms(source,corrected)
+        if plural_terms:
+            corrected=self.model.check(source,{**config,
+                'acceptedWords':sorted(set(config['acceptedWords'])|plural_terms),
+                'repairReason':'plurality','pluralityTerms':sorted(plural_terms)},cancelled)
+            corrected=restore_money_notation(source,corrected)
+        if self.resources.capabilities().get('rules', {}).get('available'):
+            audit_config={**config,'acceptedWords':sorted(set(config['acceptedWords']) |
+                          unchanged_internal_names(source,corrected))}
+            corrected=complete_spelling(corrected,audit_config,self.rules.check,self.model.check,
+                                        cancelled,allow_repair=not plural_terms)
+            if corrected is None:
+                warning='A sentence proposal was withheld because its spelling could not be verified. Word-level corrections remain available.'
+                if warning not in warnings:warnings.append(warning)
+        else:
+            warning='Sentence spelling verification is unavailable: the local rules pack is missing.'
+            if warning not in warnings:warnings.append(warning)
+        return corrected
 
     def get(self, identifier):
         with self.lock:

@@ -70,10 +70,24 @@ def main():
                                "original message. Keep every preservePluralForms noun exactly in its plural form; "
                                "correct agreement by changing the verbs instead. Also correct spelling and punctuation "
                                "throughout. Do not remove or singularise the listed nouns.")
+                if request.get('grammarRepair'):
+                    system += (" This is one focused repair of a proposed revision. originalText is the immutable "
+                               "original message; text is the draft. Resolve possibleLanguageIssues and spelling "
+                               "issues in context while retaining the useful sentence construction. Hints can be "
+                               "wrong; never blindly apply their replacements. Preserve all facts from originalText, "
+                               "including its event time, quantities, participants and negation. Restore every "
+                               "preservePluralForms noun to its original plural form. Make no unrelated stylistic changes.")
             content={"text":text,"context":request.get("context", "")[:4800],
                      "acceptedTerms":request.get("acceptedWords", []),
                      "possibleSpellingIssues":request.get("spellingIssues", [])}
             if request.get('repairReason')=='plurality':content['preservePluralForms']=request.get('pluralityTerms',[])
+            if request.get('grammarRepair'):
+                original=request.get('originalText')
+                if not isinstance(original,str) or len(original)>2400:raise ValueError('Invalid original text')
+                content.update(originalText=original,possibleLanguageIssues=request.get('languageIssues',[]),
+                               preservePluralForms=request.get('pluralityTerms',[]))
+                # The full original and draft take priority over optional context.
+                content['context']=content['context'][:600]
             prompt = ("<|im_start|>system\n" + system + "<|im_end|>\n<|im_start|>user\n" +
                       document_json(content) +
                       "<|im_end|>\n<|im_start|>assistant\n<think>\n</think>\n")
