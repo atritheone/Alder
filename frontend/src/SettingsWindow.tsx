@@ -1,4 +1,5 @@
 import { useReadReferences } from "./useReadReferences";
+import TextEditorSettings from "./TextEditorSettings";
 import {
   useEffect,
   useLayoutEffect,
@@ -29,6 +30,7 @@ import { stationeryPrintHint } from './stationery';
 const categories = [
   "Appearance",
   "Writing",
+  "Text editor",
   "Page Layout",
   "Publication",
   "Speech",
@@ -346,6 +348,7 @@ export default function SettingsWindow(p: Props) {
           aria-labelledby={`settings-tab-${categories.indexOf(p.category)}`}
           tabIndex={0}
         >
+          {p.category === "Text editor" && <TextEditorSettings />}
           {p.category === "Appearance" && (
             <>
               <Section title="Interface">

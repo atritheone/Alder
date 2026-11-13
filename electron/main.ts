@@ -1,4 +1,5 @@
 import { WindowsMenu } from "./windows-menu";
+import { TextWorkspaces } from "./textWorkspaces";
 import { openPrintProof } from "./printProof";
 import { renderPublicationPdf } from "./publication";
 import {
@@ -462,6 +463,14 @@ function registerIPC() {
       );
     return text;
   });
+  ipcMain.handle("alder:clipboard-write-text", async (event, text) => {
+    trusted(event);
+    if (typeof text !== "string" || text.length > 2_000_000)
+      throw new Error(
+        "Clipboard text exceeds the two-million-character limit.",
+      );
+    await clipboard.writeText(text);
+  });
   ipcMain.on("alder:flush-response", (event, id, ok, message) => {
     if (event.sender === window?.webContents) {
       flushRequests.get(id)?.({ ok: Boolean(ok), message });
@@ -563,6 +572,9 @@ function registerIPC() {
     if (
       destination !== "/api/projects/open-file" &&
       !/\/(import|assets|voices)$/.test(destination) &&
+      !/^\/api\/projects\/[A-Za-z0-9_.-]+\/txt-reopen\?encoding=(?:utf-8|utf-16-le|utf-16-be|cp1252)$/.test(
+        destination,
+      ) &&
       !/^\/api\/projects\/[A-Za-z0-9_.-]+\/assets\?register=false$/.test(
         destination,
       )
@@ -616,6 +628,86 @@ function registerIPC() {
   const documentFiles = new DocumentFiles(
     path.join(app.getPath("userData"), "document-files.json"),
   );
+  const textWorkspaces = new TextWorkspaces(
+    path.join(app.getPath("userData"), "text-workspaces.json"),
+    path.join(dataDirectory(), "backups", "text-replacements"),
+    (bytes, sourceDigest, edits) =>
+      request("POST", "/api/text-files/prepare-replacement", {
+        sourceBytes: bytes.toString("base64"),
+        sourceDigest,
+        edits,
+      }),
+  );
+  ipcMain.handle("alder:text-workspaces", async (event) => {
+    trusted(event);
+    return textWorkspaces.list();
+  });
+  ipcMain.handle("alder:choose-text-workspace", async (event) => {
+    trusted(event);
+    const chosen = await dialog.showOpenDialog(window!, {
+      title: "Choose text folder workspace",
+      properties: ["openDirectory"],
+    });
+    return chosen.canceled || !chosen.filePaths[0]
+      ? null
+      : textWorkspaces.register(chosen.filePaths[0]);
+  });
+  ipcMain.handle(
+    "alder:scan-text-workspace",
+    async (event, id, include, exclude) => {
+      trusted(event);
+      return textWorkspaces.scan(
+        String(id),
+        String(include || "*.txt"),
+        String(exclude || ".git/**;node_modules/**;.venv/**"),
+      );
+    },
+  );
+  ipcMain.handle("alder:cancel-text-workspace", async (event, id) => {
+    trusted(event);
+    textWorkspaces.cancel(String(id));
+  });
+  ipcMain.handle("alder:read-workspace-text", async (event, id, relative) => {
+    trusted(event);
+    return textWorkspaces.read(String(id), String(relative));
+  });
+  ipcMain.handle("alder:open-workspace-text", async (event, id, relative) => {
+    trusted(event);
+    return textWorkspaces.fileForOpen(String(id), String(relative));
+  });
+  ipcMain.handle(
+    "alder:bind-workspace-text",
+    async (event, id, relative, targetId, digest) => {
+      trusted(event);
+      const filename = await textWorkspaces.pathForBinding(
+        String(id),
+        String(relative),
+        String(digest),
+      );
+      await documentFiles.bind(
+        String(targetId),
+        filename,
+        "txt",
+        true,
+        String(digest),
+      );
+    },
+  );
+  ipcMain.handle(
+    "alder:prepare-folder-replacement",
+    async (event, id, plans) => {
+      trusted(event);
+      return textWorkspaces.prepare(String(id), plans);
+    },
+  );
+  ipcMain.handle("alder:commit-folder-replacement", async (event, token) => {
+    trusted(event);
+    return textWorkspaces.commit(String(token));
+  });
+  ipcMain.handle("alder:restore-folder-replacement", async (event, token) => {
+    trusted(event);
+    return textWorkspaces.restore(String(token));
+  });
   ipcMain.handle("alder:clipboard-content", async (event) => {
     trusted(event);
     const contents = { text: "", html: "" };
@@ -636,6 +728,74 @@ function registerIPC() {
     return contents;
   });
   let savingDocument = false;
+  ipcMain.handle("alder:document-file-info", async (event, id) => {
+    trusted(event);
+    return documentFiles.info(String(id));
+  });
+  ipcMain.handle("alder:complete-text-path", async (event, id, prefix) => {
+    trusted(event);
+    if (
+      typeof prefix !== "string" ||
+      prefix.length > 4096 ||
+      prefix.includes("\0")
+    )
+      throw new Error("Invalid path prefix.");
+    const bound = await documentFiles.pathFor(String(id)),
+      base = bound ? path.dirname(bound) : null;
+    if (!path.isAbsolute(prefix) && !base) return [];
+    const separator = Math.max(
+        prefix.lastIndexOf("/"),
+        prefix.lastIndexOf("\\"),
+      ),
+      parentPrefix = prefix.slice(0, separator + 1),
+      partial = prefix.slice(separator + 1);
+    const directory = path.isAbsolute(prefix)
+      ? /[\\/]$/.test(prefix)
+        ? path.resolve(prefix)
+        : path.dirname(prefix)
+      : path.resolve(base!, parentPrefix || ".");
+    try {
+      return (await fs.promises.readdir(directory, { withFileTypes: true }))
+        .filter((entry) =>
+          process.platform === "win32"
+            ? entry.name.toLowerCase().startsWith(partial.toLowerCase())
+            : entry.name.startsWith(partial),
+        )
+        .sort(
+          (a, b) =>
+            Number(b.isDirectory()) - Number(a.isDirectory()) ||
+            a.name.localeCompare(b.name),
+        )
+        .slice(0, 200)
+        .map((entry) => ({
+          label:
+            parentPrefix + entry.name + (entry.isDirectory() ? path.sep : ""),
+          directory: entry.isDirectory(),
+        }));
+    } catch {
+      return [];
+    }
+  });
+  ipcMain.handle("alder:read-document-file", async (event, id) => {
+    trusted(event);
+    return documentFiles.readTextFile(String(id));
+  });
+  ipcMain.handle(
+    "alder:bind-reopened-document",
+    async (event, sourceId, targetId, digest) => {
+      trusted(event);
+      await documentFiles.bindReopened(
+        String(sourceId),
+        String(targetId),
+        String(digest),
+      );
+    },
+  );
+  ipcMain.handle("alder:reveal-document-file", async (event, id) => {
+    trusted(event);
+    const info = await documentFiles.info(String(id));
+    if (info) shell.showItemInFolder(info.path);
+  });
   ipcMain.handle(
     "alder:bind-document-file",
     async (e, id, filename, format, direct) => {

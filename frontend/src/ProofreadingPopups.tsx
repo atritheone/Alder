@@ -99,7 +99,9 @@ export default function ProofreadingPopups(
         return;
       }
       const result = controller.current.result;
-      const editor = element.closest<HTMLElement>(".ProseMirror");
+      const editor = element.closest<HTMLElement>(
+        ".ProseMirror, .txt-host .cm-content",
+      );
       const ids: string[] = [];
       for (
         let node: HTMLElement | null = element;

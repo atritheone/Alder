@@ -76,11 +76,21 @@ export class DocumentFiles {
       Buffer.from(JSON.stringify(bindings)),
     );
   }
-  async bind(id: string, filename: string, format: string, direct: boolean) {
+  async bind(
+    id: string,
+    filename: string,
+    format: string,
+    direct: boolean,
+    expectedDigest?: string,
+  ) {
     if (!/^[A-Za-z0-9][\w.-]{0,127}$/.test(id) || !path.isAbsolute(filename))
       throw new Error("Invalid document identity.");
     const write = this.writes.then(async () => {
       const bytes = await fs.readFile(filename);
+      if (expectedDigest && digest(bytes) !== expectedDigest)
+        throw new Error(
+          "This file changed while it was being reopened. The imported copy was preserved.",
+        );
       const bindings = Object.assign(Object.create(null), await this.read(), {
         [id]: { path: filename, format, digest: digest(bytes), direct },
       });
@@ -125,6 +135,69 @@ export class DocumentFiles {
   }
   async formatFor(id: string, fallback: string) {
     return (await this.read())[id]?.format || fallback;
+  }
+  async pathFor(id: string) {
+    return (await this.read())[id]?.path || null;
+  }
+  async info(id: string) {
+    const binding = (await this.read())[id];
+    if (!binding) return null;
+    try {
+      const stat = await fs.stat(binding.path);
+      if (!stat.isFile())
+        return { ...binding, missing: true, changed: true, size: 0 };
+      if (stat.size > 30_000_000)
+        return { ...binding, missing: false, changed: null, size: stat.size };
+      const currentDigest = digest(await fs.readFile(binding.path));
+      return {
+        ...binding,
+        missing: false,
+        changed: currentDigest !== binding.digest,
+        currentDigest,
+        size: stat.size,
+      };
+    } catch (error) {
+      if (
+        ["ENOENT", "ENOTDIR"].includes(
+          (error as NodeJS.ErrnoException).code || "",
+        )
+      )
+        return { ...binding, missing: true, changed: true, size: 0 };
+      throw new Error(
+        "This file could not be checked. Your recovery workspace is preserved.",
+      );
+    }
+  }
+  async readTextFile(id: string) {
+    const binding = (await this.read())[id];
+    if (!binding || binding.format !== "txt")
+      throw new Error("This document has no bound TXT file.");
+    const stat = await fs.stat(binding.path);
+    if (!stat.isFile() || stat.size > 30_000_000)
+      throw new Error("TXT reopening currently supports files up to 30 MB.");
+    const bytes = await fs.readFile(binding.path);
+    if (bytes.length > 30_000_000)
+      throw new Error("The TXT file grew beyond the reopening limit.");
+    return {
+      path: binding.path,
+      name: path.basename(binding.path),
+      digest: digest(bytes),
+      bytes: Array.from(bytes),
+    };
+  }
+  async bindReopened(
+    sourceId: string,
+    targetId: string,
+    expectedDigest: string,
+  ) {
+    const source = (await this.read())[sourceId];
+    if (
+      !source ||
+      source.format !== "txt" ||
+      !/^[a-f0-9]{64}$/.test(expectedDigest)
+    )
+      throw new Error("Invalid TXT reopening identity.");
+    await this.bind(targetId, source.path, "txt", true, expectedDigest);
   }
   async assertUnchanged(id: string, destination: string, mode: SaveMode) {
     const binding = (await this.read())[id];

@@ -2270,7 +2270,11 @@ def build_export(project: dict, format: str, output_dir: Path, options: dict | N
             if note_items:
                 _warn(warnings,'This text format keeps note bodies after the document; editable note anchors and page placement are not retained.')
                 output+='\n\n'+'\n\n'.join(('Footnote ' if note['attrs']['kind']=='footnote' else 'Endnote ')+note['attrs'].get('_noteLabel','1')+': '+plain_text(note['attrs']['body']) for note in note_items)
-            path.write_text(output, "utf-8", newline="")
+            if format == 'txt' and project.get('settings', {}).get('textFile'):
+                from .plain_text_file import encode_file
+                path.write_bytes(encode_file(output, project['settings']['textFile']))
+            else:
+                path.write_text(output, "utf-8", newline="")
             def has_rich_content(node):
                 if _kind(node) not in ("doc", "paragraph", "text", "hard_break") or node.get("marks"):
                     return True
@@ -3297,6 +3301,9 @@ def import_document(path: Path) -> dict:
             text = raw.decode("cp1252", errors="replace")
             _warn(warnings, "Input was not UTF-8; it was decoded as Windows-1252. Check accented characters.")
         if extension == ".txt":
+            from .plain_text_file import decode_file
+            text, metadata = decode_file(raw)
+            imported_settings = {'textFile': metadata}
             document = text_document(text)
         else:
             if extension in (".md", ".markdown"):

@@ -1,5 +1,6 @@
 import type { EditorState } from "prosemirror-state";
 import { history } from "prosemirror-history";
+import { forgetTextSessions } from "./plainTextSessions";
 
 const portablePlugins = [history()];
 export const portableEditorState = (state: EditorState) =>
@@ -36,6 +37,7 @@ export function registerEditorSession(
 /** Closing a document releases cached model/history references. Its mounted
  * view may unmount after React commits the new tab; do not cache it again then. */
 export function forgetEditorSessions(projectId: string) {
+  forgetTextSessions(projectId);
   for (const identity of sessions.keys())
     if (identity.startsWith(projectId + ":")) sessions.delete(identity);
   for (const entry of active.values())

@@ -1,10 +1,12 @@
 import { formatInteger } from "./numberDisplay";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useId } from "react";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { findText, type TextMatch } from "./findText";
 import type { BookSearchGroup } from "./bookFind";
 import type { PatternMatch, PatternResult } from "./patternSearch";
 import "./word-processing.css";
+import { decodeSearchEscapes } from "./searchEscapes";
+import { lineStarts, searchLine, readSearchHistory } from "./searchLines";
 
 export default function FindPanel({
   text,
@@ -17,6 +19,8 @@ export default function FindPanel({
   sourceId,
   sources,
   onReplaceBook,
+  scopeLabels,
+  initialWholeScope = false,
 }: {
   text: string;
   initial: string;
@@ -29,21 +33,49 @@ export default function FindPanel({
     replacement: string,
     expectedText: string,
     sourceId: string,
-  ) => void;
+  ) => void | Promise<void>;
   onReplaceBook?: (
     groups: BookSearchGroup[],
     replacement: string,
   ) => Promise<void>;
   onClose: () => void;
   onError: (message: string) => void;
+  scopeLabels?: { single: string; all: string };
+  initialWholeScope?: boolean;
 }) {
-  const [query, setQuery] = useState(initial),
+  const [query, setQuery] = useState(
+      () => initial || readSearchHistory()[0] || "",
+    ),
     [replacement, setReplacement] = useState("");
-  const [caseSensitive, setCaseSensitive] = useState(false),
-    [wholeWord, setWholeWord] = useState(false),
+  const [caseSensitive, setCaseSensitive] = useState(
+      () => localStorage.getItem("alder.find.case") === "true",
+    ),
+    [wholeWord, setWholeWord] = useState(
+      () => localStorage.getItem("alder.find.word") === "true",
+    ),
     [selectionOnly, setSelectionOnly] = useState(false);
   const [index, setIndex] = useState(-1);
-  const [wholeBook, setWholeBook] = useState(false);
+  const [extended, setExtended] = useState(
+    () => localStorage.getItem("alder.find.extended") === "true",
+  );
+  const [history, setHistory] = useState(readSearchHistory);
+  const historyId = useId();
+  useEffect(() => {
+    localStorage.setItem("alder.find.case", String(caseSensitive));
+    localStorage.setItem("alder.find.word", String(wholeWord));
+    localStorage.setItem("alder.find.extended", String(extended));
+  }, [caseSensitive, wholeWord, extended]);
+  const rememberSearch = () => {
+    if (!query || query.length > 16384) return;
+    const next = [query, ...history.filter((q) => q !== query)].slice(0, 20);
+    setHistory(next);
+    try {
+      localStorage.setItem("alder.find.history", JSON.stringify(next));
+    } catch {
+      /* Search remains usable when preference storage is full. */
+    }
+  };
+  const [wholeBook, setWholeBook] = useState(initialWholeScope);
   const [busy, setBusy] = useState(false);
   const [pattern, setPattern] = useState(false);
   const [patternState, setPatternState] = useState<{
@@ -67,6 +99,16 @@ export default function FindPanel({
   )
     stableSources.current = sources;
   const searchSources = stableSources.current;
+  const resultLines = useMemo(
+    () =>
+      new Map(
+        (searchSources || [{ id: sourceId, text }]).map((source) => [
+          source.id,
+          { text: source.text, starts: lineStarts(source.text) },
+        ]),
+      ),
+    [searchSources, sourceId, text],
+  );
   const [scope, setScope] = useState(selection);
   const [scopeSource] = useState(sourceId);
   const previousText = useRef(text);
@@ -117,15 +159,24 @@ export default function FindPanel({
     previousText.current = text;
     if (!wholeBook) setIndex(-1);
   }, [text, wholeBook, sourceId, scopeSource]);
+  const decodedQuery =
+    extended && !pattern ? decodeSearchEscapes(query) : { text: query };
+  const decodedReplacement =
+    extended && !pattern
+      ? decodeSearchEscapes(replacement)
+      : { text: replacement };
+  const effectiveQuery = decodedQuery.text,
+    effectiveReplacement = decodedReplacement.text;
+  const escapeError = decodedQuery.error || decodedReplacement.error;
   const literalMatches = useMemo(
     () =>
-      (pattern
+      (pattern || decodedQuery.error
         ? []
         : wholeBook && searchSources
           ? searchSources
           : [{ id: sourceId, title: "", text }]
       ).flatMap((source) =>
-        findText(source.text, query, {
+        findText(source.text, effectiveQuery, {
           caseSensitive,
           wholeWord,
           ...(!wholeBook && selectionOnly ? scope : {}),
@@ -138,7 +189,8 @@ export default function FindPanel({
       ),
     [
       text,
-      query,
+      effectiveQuery,
+      decodedQuery.error,
       caseSensitive,
       wholeWord,
       selectionOnly,
@@ -242,6 +294,7 @@ export default function FindPanel({
     pattern && patternState.key === patternKey ? patternState.error : "";
   const navigate = (direction: number) => {
     if (!matches.length || busy) return;
+    rememberSearch();
     const next =
       index < 0
         ? direction < 0
@@ -253,11 +306,14 @@ export default function FindPanel({
   };
   const replace = async (all: boolean) => {
     try {
+      if (escapeError) throw new Error(escapeError);
+      rememberSearch();
       const selected = matches[index];
       if (!all && !selected) {
         navigate(1);
         return;
       }
+      setBusy(true);
       if (all && wholeBook && onReplaceBook) {
         setBusy(true);
         const groups = (sources || [])
@@ -273,11 +329,11 @@ export default function FindPanel({
               })),
           }))
           .filter((group) => group.matches.length);
-        await onReplaceBook(groups, replacement);
+        await onReplaceBook(groups, effectiveReplacement);
       } else
-        onReplace(
+        await onReplace(
           all ? matches : [selected],
-          replacement,
+          effectiveReplacement,
           selected?.sourceText ?? text,
           selected?.sourceId ?? sourceId,
         );
@@ -302,6 +358,7 @@ export default function FindPanel({
           autoFocus
           aria-label="Find text"
           type="search"
+          list={historyId}
           disabled={busy}
           value={query}
           onChange={(e) => {
@@ -316,6 +373,11 @@ export default function FindPanel({
             if (e.key === "Escape") onClose();
           }}
         />
+        <datalist id={historyId}>
+          {history.map((value) => (
+            <option key={value} value={value} />
+          ))}
+        </datalist>
       </label>
       {sources && sources.length > 1 && (
         <label>
@@ -330,8 +392,10 @@ export default function FindPanel({
               setIndex(-1);
             }}
           >
-            <option value="chapter">This chapter</option>
-            <option value="book">Whole book</option>
+            <option value="chapter">
+              {scopeLabels?.single || "This chapter"}
+            </option>
+            <option value="book">{scopeLabels?.all || "Whole book"}</option>
           </select>
         </label>
       )}
@@ -412,6 +476,19 @@ export default function FindPanel({
         <label className="find-option">
           <input
             type="checkbox"
+            checked={extended}
+            disabled={busy || pattern}
+            onChange={(e) => {
+              setExtended(e.target.checked);
+              setIndex(-1);
+            }}
+          />{" "}
+          Extended characters (\\n, \\t, \\xNN)
+        </label>
+        {escapeError && <p role="alert">{escapeError}</p>}
+        <label className="find-option">
+          <input
+            type="checkbox"
             checked={pattern}
             disabled={busy}
             onChange={(event) => {
@@ -428,6 +505,38 @@ export default function FindPanel({
           </small>
         )}
         {patternError && <p role="alert">{patternError}</p>}
+        {!!matches.length && (
+          <details>
+            <summary>Search results ({formatInteger(matches.length)})</summary>
+            <ol>
+              {matches.slice(0, 200).map((match, i) => {
+                const source = resultLines.get(match.sourceId),
+                  line = source
+                    ? searchLine(source.text, source.starts, match.start)
+                    : { number: 1, excerpt: "" };
+                return (
+                  <li key={i}>
+                    <button
+                      onClick={() => {
+                        setIndex(i);
+                        onSelect(match, match.sourceId);
+                      }}
+                    >
+                      {match.title ? `${match.title}: ` : ""}Line{" "}
+                      {formatInteger(line.number)}: {line.excerpt}
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+            {matches.length > 200 && (
+              <small>
+                Showing the first 200 results. Next and previous navigate all
+                matches.
+              </small>
+            )}
+          </details>
+        )}
         {!!matches.length && (
           <div
             className="find-replacement-preview"

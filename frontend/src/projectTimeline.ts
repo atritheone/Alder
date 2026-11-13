@@ -1,5 +1,6 @@
 import type { EditorState } from "prosemirror-state";
 import type { Project } from "./types";
+import type { EditorState as TextEditorState } from "@codemirror/state";
 
 type Path = (string | number)[];
 type Patch = {
@@ -9,19 +10,24 @@ type Patch = {
   hadBefore: boolean;
   hadAfter: boolean;
 };
-export type EditorEdit = {
+type EditorEditBase = {
   projectId: string;
   identity: string;
-  before: EditorState;
-  after: EditorState;
   joined: boolean;
 };
+export type EditorEdit = EditorEditBase &
+  (
+    | { engine?: "rich"; before: EditorState; after: EditorState }
+    | { engine: "plain"; before: TextEditorState; after: TextEditorState }
+  );
 export type HistoryEntry = {
   patches: Patch[];
   editor?: EditorEdit;
   bytes: number;
   beforeSessions?: Map<string, EditorState>;
   afterSessions?: Map<string, EditorState>;
+  beforeTextSessions?: Map<string, TextEditorState>;
+  afterTextSessions?: Map<string, TextEditorState>;
 };
 const same = (a: unknown, b: unknown): boolean => {
   if (Object.is(a, b)) return true;
@@ -193,6 +199,7 @@ export class ProjectTimeline {
     after: Project,
     editor?: EditorEdit,
     sessions?: Map<string, EditorState>,
+    textSessions?: Map<string, TextEditorState>,
   ) {
     const patches = changes(before, after);
     if (!patches.length) return;
@@ -200,7 +207,8 @@ export class ProjectTimeline {
     if (
       editor?.joined &&
       !this.boundary &&
-      last?.editor?.identity === editor.identity
+      last?.editor?.identity === editor.identity &&
+      last.editor.engine === editor.engine
     ) {
       for (const patch of patches) {
         // Other fields (plain text, timestamps) can change between edits to
@@ -222,13 +230,17 @@ export class ProjectTimeline {
         }
         if (!merged) last.patches.push(patch);
       }
-      last.editor = { ...editor, before: last.editor.before };
+      if (editor.engine === "plain" && last.editor.engine === "plain")
+        last.editor = { ...editor, before: last.editor.before };
+      else if (editor.engine !== "plain" && last.editor.engine !== "plain")
+        last.editor = { ...editor, before: last.editor.before };
       last.bytes = bytes(last.patches);
     } else
       this.past.push({
         patches,
         editor,
         beforeSessions: editor ? undefined : sessions,
+        beforeTextSessions: editor ? undefined : textSessions,
         bytes: bytes(patches),
       });
     this.future.length = 0;
@@ -244,12 +256,15 @@ export class ProjectTimeline {
     project: Project,
     direction: "undo" | "redo",
     sessions?: Map<string, EditorState>,
+    textSessions?: Map<string, TextEditorState>,
   ) {
     const from = direction === "undo" ? this.past : this.future,
       to = direction === "undo" ? this.future : this.past;
     const entry = from.at(-1);
     if (!entry) return null;
     if (direction === "undo" && !entry.editor) entry.afterSessions = sessions;
+    if (direction === "undo" && !entry.editor)
+      entry.afterTextSessions = textSessions;
     let next = project;
     for (const patch of direction === "undo"
       ? [...entry.patches].reverse()
@@ -261,6 +276,10 @@ export class ProjectTimeline {
     return {
       project: next,
       editor: entry.editor,
+      textSessions:
+        direction === "undo"
+          ? entry.beforeTextSessions
+          : entry.afterTextSessions,
       sessions:
         direction === "undo" ? entry.beforeSessions : entry.afterSessions,
       direction,

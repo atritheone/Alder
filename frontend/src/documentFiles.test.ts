@@ -22,6 +22,23 @@ async function setup() {
   return { file, records, dir, store: new DocumentFiles(records) };
 }
 describe("document file identities", () => {
+  it("reports external replacement/deletion and binds reopened copies only to the exact read bytes", async () => {
+    const { store, file } = await setup();
+    await store.bind("source", file, "txt", true);
+    expect(await store.info("unknown")).toBeNull();
+    expect((await store.info("source"))?.changed).toBe(false);
+    const snapshot = await store.readTextFile("source");
+    await fs.writeFile(file, "external");
+    expect((await store.info("source"))?.changed).toBe(true);
+    await expect(
+      store.bindReopened("source", "new", snapshot.digest),
+    ).rejects.toThrow("changed");
+    const fresh = await store.readTextFile("source");
+    await store.bindReopened("source", "new", fresh.digest);
+    expect((await store.info("new"))?.changed).toBe(false);
+    await fs.unlink(file);
+    expect((await store.info("source"))?.missing).toBe(true);
+  });
   it("preserves the previous bytes and removes staging files when a flush fails", async () => {
     const { file, dir } = await setup();
     const open = fs.open.bind(fs);

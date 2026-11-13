@@ -98,6 +98,8 @@ import {parseBlockMove} from './trackedBlockMoves';
 import {parseBlockChange} from './trackedBlockChanges';
 import ParagraphDialog from "./ParagraphDialog";
 import FontSizeField from "./FontSizeField";
+import WriteToolbar from "./WriteToolbar";
+import { formatActionSupported } from "./documentCapabilities";
 import TextColourDialog from "./TextColourDialog";
 import { blockIdentities } from "./blockIdentities";
 import { clipboardSlice, clipboardText, type PasteMode } from "./pasteText";
@@ -1003,6 +1005,17 @@ export type EditorHandle = {
   getSelection: () => string;
 };
 type Props = {
+  fileType?: import("./documentCapabilities").EditorFileType;
+  onTextStatus?: (value: string) => void;
+  onFind?: () => void;
+  textFile?: {
+    encoding?: string;
+    bom?: boolean;
+    eol?: string;
+    convertEol?: boolean;
+    [key: string]: unknown;
+  };
+  onTextFile?: (value: NonNullable<Props["textFile"]>) => void;
   language?: string;
   review?: ReviewPreferences;
   onReviewPreferences?: (preferences: ReviewPreferences) => void;
@@ -1730,7 +1743,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             })),
           ]
         : []),
-    ];
+    ].filter(action => formatActionSupported(latest.current.fileType || "alder", action.label));
   };
   const paste = async (mode: PasteMode) => {
     const v = editableView();
@@ -3953,13 +3966,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           {parseError || namedStyles.error || rangeWarning}
         </div>
       )}
-      <div
-        className="format-toolbar"
-        role="toolbar"
-        aria-label="Text formatting"
-        aria-disabled={!!parseError}
-        inert={!!parseError}
-      >
+      <WriteToolbar disabled={!!parseError} fileType={props.fileType}>
         {!props.rawMode && (
           <>
             <select
@@ -4303,7 +4310,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           <Redo2 />
         </button>
         {props.toolbarContent}
-      </div>
+      </WriteToolbar>
       {ruler && !props.rawMode && (
         <ParagraphRuler
           view={() => view.current}

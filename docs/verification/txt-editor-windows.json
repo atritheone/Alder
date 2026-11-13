@@ -1,0 +1,128 @@
+{
+  "version": "0.13.0",
+  "date": "2026-11-14",
+  "platform": "win32-x64",
+  "scope": "Targeted development checks; user installation unchanged",
+  "build": "TypeScript, Vite, Electron and native Windows menu passed",
+  "browser": {
+    "appearance": "passed",
+    "lineAlignment": "passed: wrapping, scrolling, Cambria/Consolas, 50/80/125/200 percent",
+    "editing": "passed: completion, occurrences, macro undo, open-file replacement undo, shortcuts, split history and session selection/bookmark restoration",
+    "internationalInput": "passed: composition, combining accents, emoji, Arabic, Hebrew, exact export and undo/redo"
+  },
+  "native": {
+    "files": "passed: binding, CRLF/final-newline save, undo/redo after save, filesystem completion, external changes, comparison, safe reload and monitoring",
+    "proofreading": "passed: real spelling hover/correction and undo",
+    "encoding": "passed: explicit BOM-less UTF-16 reopen in another workspace",
+    "folder": "passed before later UI-only adjustments: preview/write, BOM/legacy encoding/CRLF, backup restore retains newer work, catastrophic-regex timeout"
+  },
+  "reading": {
+    "status": "passed",
+    "checks": [
+      "TXT audio highlight uses correct offsets after emoji; pause/stop retain text",
+      "TXT PDF publication remains available through existing layout"
+    ],
+    "errors": []
+  },
+  "memory": {
+    "status": "passed",
+    "samples": [
+      {
+        "cycle": 0,
+        "heapMiB": 37.275264739990234,
+        "documents": 1,
+        "nodes": 64,
+        "jsEventListeners": 358
+      },
+      {
+        "cycle": 1,
+        "heapMiB": 60.478824615478516,
+        "documents": 1,
+        "nodes": 64,
+        "jsEventListeners": 358
+      }
+    ],
+    "errors": []
+  },
+  "performance": {
+    "status": "passed",
+    "machine": {
+      "platform": "win32",
+      "cpu": "AMD Ryzen 9 9950X3D 16-Core Processor          "
+    },
+    "samples": [
+      {
+        "mib": 1,
+        "longLine": false,
+        "openStatus": "opened",
+        "openMilliseconds": 2976.1713999999993,
+        "editMilliseconds": [
+          83.96149999999943,
+          66.72400000000016,
+          66.78119999999944,
+          66.42370000000119,
+          66.76819999999861
+        ],
+        "heapMiB": 25.599700927734375,
+        "dom": {
+          "documents": 1,
+          "nodes": 4083,
+          "jsEventListeners": 613
+        }
+      },
+      {
+        "mib": 10,
+        "longLine": false,
+        "openStatus": "refused",
+        "openError": "Alder needs attention\n\nProject exceeds the 40 MB structured-text limit.",
+        "openMilliseconds": 11194.855899999999,
+        "heapMiB": 25.602169036865234,
+        "dom": {
+          "documents": 1,
+          "nodes": 4119,
+          "jsEventListeners": 616
+        }
+      },
+      {
+        "mib": 30,
+        "longLine": false,
+        "openStatus": "refused",
+        "openError": "Alder needs attention\n\nProject exceeds the 40 MB structured-text limit.",
+        "openMilliseconds": 10427.7847,
+        "heapMiB": 25.669429779052734,
+        "dom": {
+          "documents": 1,
+          "nodes": 4119,
+          "jsEventListeners": 616
+        }
+      },
+      {
+        "mib": 1,
+        "longLine": true,
+        "openStatus": "opened",
+        "openMilliseconds": 550.2897000000012,
+        "editMilliseconds": [
+          61.563099999999395,
+          66.79639999999927,
+          66.66859999999724,
+          66.83009999999922,
+          66.50050000000192
+        ],
+        "heapMiB": 32.83007049560547,
+        "dom": {
+          "documents": 1,
+          "nodes": 3980,
+          "jsEventListeners": 617
+        }
+      }
+    ],
+    "errors": []
+  },
+  "limits": [
+    "Existing 40 MB structured-workspace guard safely refused representative 10/30 MiB sources.",
+    "No independent Linux/macOS or screen-reader listening qualification.",
+    "Closed-tab history intentionally retains bounded snapshots.",
+    "Deterministic reader audio validates integration, not speech model quality."
+  ],
+  "testPolicy": "After the user requested targeted tests, no further entire suites were run."
+}

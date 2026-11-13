@@ -11,6 +11,13 @@ import {
 } from "./projectTimeline";
 import { registerProjectHistory } from "./projectHistoryBridge";
 import {
+  captureTextSessions,
+  restoreTextSessions,
+  rememberTextSession,
+  activeTextReadOnly,
+} from "./plainTextSessions";
+import { readTextSessionManifest } from "./plainTextSessionManifest";
+import {
   captureEditorSessions,
   rememberEditorSession,
   restoreEditorSessions,
@@ -24,6 +31,9 @@ export function useProject() {
     [],
   );
   const opened = useRef(new Map<string, Project>());
+  const recentlyClosed = useRef<Project[]>([]);
+  const [restoreDone, setRestoreDone] = useState(false);
+  const restoreManifest = useRef(readTextSessionManifest());
   // Only untouched documents created in this session can be replaced automatically.
   const pristine = useRef(new Set<string>());
   const retain = useCallback((id: string) => {
@@ -177,6 +187,8 @@ export function useProject() {
         await flush();
         const ids = [...opened.current.keys()];
         if (!opened.current.has(id)) return;
+        recentlyClosed.current.push(opened.current.get(id)!);
+        if (recentlyClosed.current.length > 20) recentlyClosed.current.shift();
         if (current.current?.id === id) {
           window.dispatchEvent(new Event("alder-save-document-position"));
           const index = ids.indexOf(id);
@@ -199,11 +211,23 @@ export function useProject() {
   );
   const findSource = useCallback(
     (source: string) =>
-      [...opened.current.values()].find(
-        (p) => localStorage.getItem("alder.documentSource." + p.id) === source,
-      ),
+      [...opened.current.values()]
+        .reverse()
+        .find(
+          (p) => localStorage.getItem("alder.documentSource." + p.id) === source,
+        ),
     [],
   );
+  const reopenClosed = useCallback(async () => {
+    const previous = recentlyClosed.current.pop();
+    if (!previous) return;
+    try {
+      await load(previous);
+    } catch (error) {
+      recentlyClosed.current.push(previous);
+      throw error;
+    }
+  }, [load]);
   const change = useCallback(
     (mutate: (draft: Project) => void) => {
       if (!current.current) return;
@@ -221,6 +245,7 @@ export function useProject() {
         next,
         editor,
         editor ? undefined : captureEditorSessions(next.id),
+        editor ? undefined : captureTextSessions(next.id),
       );
       let retained = [...timelines.current.values()].reduce(
         (n, t) => n + t.retainedBytes,
@@ -262,14 +287,25 @@ export function useProject() {
     async (action: "undo" | "redo") => {
       const source = current.current;
       if (!source) return;
+      if (activeTextReadOnly(source.id))
+        throw new Error(
+          "Disable read-only mode to undo or redo document changes.",
+        );
       const result = timelineFor(source.id).step(
         source,
         action,
         captureEditorSessions(source.id),
+        captureTextSessions(source.id),
       );
       if (!result) return;
       if (result.sessions) restoreEditorSessions(result.sessions);
-      if (result.editor)
+      if (result.textSessions) restoreTextSessions(result.textSessions);
+      if (result.editor?.engine === "plain")
+        rememberTextSession(
+          result.editor.identity,
+          action === "undo" ? result.editor.before : result.editor.after,
+        );
+      else if (result.editor)
         rememberEditorSession(
           result.editor.identity,
           action === "undo" ? result.editor.before : result.editor.after,
@@ -308,6 +344,62 @@ export function useProject() {
       },
     });
   }, [project?.id, history, timelineFor]);
+  useEffect(() => {
+    let cancelled = false;
+    const initialSerial = serial.current;
+    const restore = async () => {
+      if (localStorage.getItem("alder.txt.restoreSession") === "false") {
+        setRestoreDone(true);
+        return;
+      }
+      const manifest = restoreManifest.current;
+      const results = await Promise.allSettled(
+        manifest.ids.map((id) => api<Project>(`/api/projects/${id}`)),
+      );
+      if (cancelled) return;
+      if (serial.current === initialSerial && !current.current) {
+        const available: Project[] = [];
+        for (const result of results)
+          if (
+            result.status === "fulfilled" &&
+            result.value.settings.documentKind === "txt"
+          )
+            available.push(migrateBook(result.value));
+        for (const restored of available) remember(restored);
+        const active =
+          available.find((p) => p.id === manifest.active) || available.at(-1);
+        if (active) install(active);
+      }
+      setRestoreDone(true);
+    };
+    void restore().catch(() => {
+      if (!cancelled) setRestoreDone(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [install, remember]);
+  useEffect(() => {
+    if (!restoreDone) return;
+    const ids = documents
+      .filter((d) => opened.current.get(d.id)?.settings.documentKind === "txt")
+      .map((d) => d.id)
+      .slice(-32);
+    try {
+      localStorage.setItem(
+        "alder.txt.session",
+        JSON.stringify({
+          ids,
+          active:
+            project && ids.includes(project.id)
+              ? project.id
+              : ids.at(-1) || null,
+        }),
+      );
+    } catch {
+      /* Workspaces are still saved independently of session preferences. */
+    }
+  }, [restoreDone, documents, project?.id]);
   return {
     project,
     retain,
@@ -322,5 +414,7 @@ export function useProject() {
     error,
     setError,
     history,
+    openDocumentSnapshots: () => [...opened.current.values()],
+    reopenClosed,
   };
 }

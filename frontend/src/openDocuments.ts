@@ -38,16 +38,19 @@ async function stagedDocument(file: File, options: OpeningOptions, progress: (st
   }
 }
 
-export async function rememberDocumentFile(id: string, path: string) {
+export async function documentFileSource(path: string) {
   const bytes = new TextEncoder().encode(
     window.alder?.platform === "win32" ? path.toLowerCase() : path,
   );
   const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+}
+export async function rememberDocumentFile(id: string, path: string) {
   localStorage.setItem(
     "alder.documentSource." + id,
-    Array.from(new Uint8Array(digest), (byte) =>
-      byte.toString(16).padStart(2, "0"),
-    ).join(""),
+    await documentFileSource(path),
   );
 }
 

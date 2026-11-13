@@ -1,6 +1,50 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { version } from "../package.json";
 contextBridge.exposeInMainWorld("alder", {
+  textWorkspaces: () => ipcRenderer.invoke("alder:text-workspaces"),
+  chooseTextWorkspace: () => ipcRenderer.invoke("alder:choose-text-workspace"),
+  scanTextWorkspace: (id: string, include: string, exclude: string) =>
+    ipcRenderer.invoke("alder:scan-text-workspace", id, include, exclude),
+  cancelTextWorkspace: (id: string) =>
+    ipcRenderer.invoke("alder:cancel-text-workspace", id),
+  readWorkspaceText: (id: string, relative: string) =>
+    ipcRenderer.invoke("alder:read-workspace-text", id, relative),
+  openWorkspaceText: (id: string, relative: string) =>
+    ipcRenderer.invoke("alder:open-workspace-text", id, relative),
+  bindWorkspaceText: (
+    id: string,
+    relative: string,
+    targetId: string,
+    digest: string,
+  ) =>
+    ipcRenderer.invoke(
+      "alder:bind-workspace-text",
+      id,
+      relative,
+      targetId,
+      digest,
+    ),
+  prepareFolderReplacement: (id: string, plans: unknown) =>
+    ipcRenderer.invoke("alder:prepare-folder-replacement", id, plans),
+  commitFolderReplacement: (token: string) =>
+    ipcRenderer.invoke("alder:commit-folder-replacement", token),
+  restoreFolderReplacement: (token: string) =>
+    ipcRenderer.invoke("alder:restore-folder-replacement", token),
+  documentFileInfo: (id: string) =>
+    ipcRenderer.invoke("alder:document-file-info", id),
+  completeTextPath: (id: string, prefix: string) =>
+    ipcRenderer.invoke("alder:complete-text-path", id, prefix),
+  readDocumentFile: (id: string) =>
+    ipcRenderer.invoke("alder:read-document-file", id),
+  bindReopenedDocument: (sourceId: string, targetId: string, digest: string) =>
+    ipcRenderer.invoke(
+      "alder:bind-reopened-document",
+      sourceId,
+      targetId,
+      digest,
+    ),
+  revealDocumentFile: (id: string) =>
+    ipcRenderer.invoke("alder:reveal-document-file", id),
   printProof: (resource: string, name: string) =>
     ipcRenderer.invoke("alder:print-proof", resource, name),
   filePath: (file: File) => webUtils.getPathForFile(file),
@@ -28,6 +72,8 @@ contextBridge.exposeInMainWorld("alder", {
   editCommand: (command: string) =>
     ipcRenderer.invoke("alder:edit-command", command),
   readClipboard: () => ipcRenderer.invoke("alder:clipboard-text"),
+  writeClipboard: (text: string) =>
+    ipcRenderer.invoke("alder:clipboard-write-text", text),
   readClipboardContent: () => ipcRenderer.invoke("alder:clipboard-content"),
   request: (method: string, path: string, body?: unknown) =>
     ipcRenderer.invoke("alder:request", method, path, body),

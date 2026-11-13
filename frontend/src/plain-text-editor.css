@@ -1,0 +1,363 @@
+.txt-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  background: var(--surface, #fff);
+  color: var(--text, #202020);
+}
+.txt-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #aaa;
+  font-size: 12px;
+}
+.txt-tools label {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.txt-tools input[type="number"] {
+  width: 48px;
+}
+.txt-tools select,
+.txt-tools button {
+  font: inherit;
+  max-width: 220px;
+}
+.txt-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.txt-host .cm-editor {
+  height: 100%;
+}
+.txt-host .cm-scroller {
+  overflow: auto;
+  font-family: Consolas, monospace;
+}
+.txt-host .cm-content {
+  padding: 10px 0;
+}
+.txt-host .cm-line {
+  padding-left: 10px;
+}
+.txt-host .cm-gutters {
+  background: #f3f3f3;
+  color: #666;
+  border-right: 1px solid #ddd;
+}
+.txt-host .cm-selectionMatch {
+  background: #ffe5a2;
+  outline: 1px solid #d4a53b;
+}
+.txt-host .txt-reading {
+  background: #bde6ff;
+}
+.txt-host .txt-mark-0 {
+  background: #ffec99;
+}
+.txt-host .txt-mark-1 {
+  background: #b2f2bb;
+}
+.txt-host .txt-mark-2 {
+  background: #a5d8ff;
+}
+.txt-host .txt-mark-3 {
+  background: #fcc2d7;
+}
+.txt-bookmark-gutter {
+  min-width: 16px;
+  cursor: pointer;
+  color: #2275bb;
+}
+.txt-change-gutter {
+  color: #b86b13;
+  min-width: 4px;
+}
+.txt-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #aaa;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.txt-issues {
+  max-height: 180px;
+  overflow: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.txt-automation {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-top: 1px solid #ccc;
+  max-height: 220px;
+  overflow: auto;
+}
+.txt-automation summary {
+  cursor: pointer;
+}
+.txt-automation textarea {
+  min-width: 220px;
+  flex: 1;
+}
+.txt-file-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid #aaa;
+}
+.txt-compare-dialog {
+  width: 92vw;
+  height: 85vh;
+  max-width: none;
+  padding: 12px;
+}
+.txt-compare-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.txt-compare-dialog header,
+.txt-compare-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px;
+}
+.txt-compare-labels span {
+  width: 50%;
+  font-weight: bold;
+}
+.txt-compare-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.txt-compare-host .cm-mergeView {
+  height: 100%;
+}
+.txt-compare-host .cm-scroller {
+  overflow: auto;
+}
+.txt-compare-host .cm-mergeViewEditor,
+.txt-compare-host .cm-editor {
+  height: 100%;
+}
+.txt-open-find-dialog {
+  width: min(650px, 90vw);
+  max-height: 85vh;
+  padding: 0;
+}
+.txt-open-find-dialog .word-find-panel {
+  position: static;
+  width: 100%;
+  max-height: 80vh;
+  overflow: auto;
+}
+.txt-monitor-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.txt-monitor-host .cm-editor {
+  height: 100%;
+}
+.txt-monitor-host .cm-scroller {
+  overflow: auto;
+}
+.txt-command-dialog {
+  width: min(640px, 90vw);
+  max-height: 85vh;
+}
+.txt-command-dialog header,
+.txt-command-dialog li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.txt-command-dialog ul {
+  list-style: none;
+  padding: 0;
+  max-height: 50vh;
+  overflow: auto;
+}
+.txt-command-dialog li {
+  padding: 4px;
+}
+.txt-command-dialog input[type="search"] {
+  width: 100%;
+  margin: 12px 0;
+}
+.txt-editor-views {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.txt-editor-views > .txt-host {
+  min-width: 0;
+}
+.txt-secondary-host {
+  border-left: 2px solid #aaa;
+}
+.txt-folder-workspace {
+  padding: 3px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid #aaa;
+  max-height: 42vh;
+  overflow: auto;
+}
+.txt-folder-workspace summary {
+  cursor: pointer;
+}
+.txt-folder-results {
+  max-height: 220px;
+  overflow: auto;
+}
+.txt-folder-results button {
+  text-align: left;
+  white-space: pre-wrap;
+}
+.txt-folder-preview {
+  padding: 8px;
+  border: 1px solid #aaa;
+}
+.txt-host .annotation {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: #c33;
+  text-underline-offset: 3px;
+}
+.txt-host .annotation-grammar {
+  text-decoration-color: #3267b0;
+}
+.txt-editor {
+  position: relative;
+  background: #e7e7e7;
+}
+.txt-tools-popover {
+  position: absolute;
+  z-index: 30;
+  top: 30px;
+  right: 5px;
+  width: min(850px, calc(100% - 10px));
+  max-height: 65vh;
+  overflow: auto;
+  border: 1px solid #999;
+  background: #dedede;
+  box-shadow: 0 3px 10px #0003;
+}
+.txt-tools-popover[hidden] {
+  display: none;
+}
+.txt-tools-popover > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 11px;
+  border-bottom: 1px solid #aaa;
+}
+.txt-tools-popover .txt-status {
+  flex-wrap: wrap;
+}
+.txt-paged .cm-scroller {
+  padding: 22px;
+  background: #f4f4f4;
+}
+.txt-paged .cm-gutters {
+  box-sizing: border-box;
+  flex: 0 0 58px;
+  min-width: 58px;
+  margin-left: max(0px, calc((100% - var(--txt-paper-width)) / 2));
+  background: #fefefe;
+  border-right: 0;
+  min-height: var(--txt-paper-height);
+  box-shadow: -2px 2px 7px #4e4e4e22;
+  align-self: stretch;
+  color: #858585;
+}
+.txt-paged .cm-content {
+  box-sizing: border-box;
+  flex: none;
+  width: calc(var(--txt-paper-width) - 58px);
+  min-width: calc(var(--txt-paper-width) - 58px);
+  min-height: var(--txt-paper-height);
+  margin: 0 auto 0 0;
+  padding: var(--txt-paper-top) var(--txt-paper-right) var(--txt-paper-bottom)
+    max(0px, calc(var(--txt-paper-left) - 58px));
+  background: #fefefe;
+  box-shadow: 3px 2px 7px #4e4e4e33;
+  color: #2a2a2a;
+}
+.txt-paged .cm-line {
+  padding: 0;
+}
+.txt-paged .cm-activeLine {
+  background: #edf0f044;
+}
+.txt-paged .cm-activeLineGutter {
+  background: transparent;
+  color: #444;
+}
+.txt-paged .cm-scroller {
+  font-family: inherit;
+}
+.txt-paged .cm-gutterElement {
+  flex-shrink: 0;
+}
+.txt-paged .cm-line {
+  padding-bottom: var(--txt-paragraph-gap);
+}
+.txt-editor-views {
+  position: relative;
+}
+.txt-overview {
+  position: absolute;
+  right: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 14px;
+  background: #ddd9;
+  z-index: 2;
+}
+.txt-overview-navigation {
+  position: absolute;
+  inset: 0;
+  width: 14px;
+  height: 100%;
+  margin: 0;
+  writing-mode: vertical-lr;
+  opacity: 0.2;
+  cursor: pointer;
+}
+.txt-overview button,
+.txt-overview-current {
+  position: absolute;
+  right: 1px;
+  width: 11px;
+  height: 3px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.txt-overview-current {
+  background: #333;
+  pointer-events: none;
+}
+.txt-overview-bookmark {
+  background: #2275bb;
+}
+.txt-overview-issue {
+  background: #c33;
+}

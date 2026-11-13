@@ -26,6 +26,9 @@ import {
   Volume2,
 } from "lucide-react";
 import Editor, { type EditorHandle } from "./Editor";
+import PlainTextEditor from "./PlainTextEditor";
+import { isPlainDocument } from "./plainTextTools";
+import { editorFileType } from "./documentCapabilities";
 import PageArrangement from "./PageArrangement";
 import PublicationPreview from "./PublicationPreview";
 import { newChapter } from "./book";
@@ -54,6 +57,7 @@ import type { ReadingPosition } from "./readingCursor";
 import {resolveBookReview} from './bookReview';
 
 type Props = {
+  onFind?: () => void;
   flush: () => Promise<void>;
   externalPlayback?: boolean;
   onPlaybackChange?: (playing: boolean) => void;
@@ -83,15 +87,28 @@ type Props = {
 export default function BookWorkspace(p: Props) {
   const isBook = !["txt", "docx"].includes(p.project.settings.documentKind);
   const chapters = p.project.book?.chapters || [];
+  const [speechPlaying, setSpeechPlaying] = useState(false);
+  const plainTextWriting =
+    p.project.settings.documentKind === "txt" &&
+    p.view === "Write" &&
+    !p.previewActive;
+  const [plainStatus, setPlainStatus] = useState("Line 1 · Col 1");
   const wordIndexes = useMemo(
-    () => chapters.map((chapter) => indexWords(chapter.text)),
-    [chapters],
+    () =>
+      chapters.map((chapter) =>
+        plainTextWriting && !speechPlaying && !p.externalPlayback
+          ? []
+          : indexWords(chapter.text),
+      ),
+    [chapters, plainTextWriting, speechPlaying, p.externalPlayback],
   );
-  const wordCounts = wordIndexes.map((index) => index.length);
+  const wordCounts = plainTextWriting
+    ? chapters.map((chapter) => words(chapter.text))
+    : wordIndexes.map((index) => index.length);
   const totalWords = wordCounts.reduce((total, count) => total + count, 0);
   const totalSentences = useMemo(
     () => chapters.reduce((sum, item) => sum + countSentences(item.text), 0),
-    [chapters],
+    [chapters, plainTextWriting],
   );
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];
   const pendingReviewNavigation=useRef<{id:string;from:number;to:number}|null>(null);
@@ -139,6 +156,13 @@ export default function BookWorkspace(p: Props) {
     setRawOpenError("");
   }, [chapter?.id]);
   const showRaw = rawActive && p.view === "Write" && !p.previewActive;
+  const plainWrite =
+    p.project.settings.documentKind === "txt" &&
+    p.view === "Write" &&
+    !p.previewActive &&
+    !!chapter &&
+    isPlainDocument(chapter.document);
+  const WritingEditor = plainWrite ? PlainTextEditor : Editor;
   const [selected, setSelected] = useState<{
     chapterId: string;
     text: string;
@@ -221,7 +245,7 @@ export default function BookWorkspace(p: Props) {
     const saved = pendingPosition.current;
     if (
       !saved ||
-      !pages.length ||
+      (!pages.length && !plainWrite) ||
       zoom !== saved.zoom ||
       chapter?.id !== chapters[Math.min(saved.chapter, chapters.length - 1)]?.id
     )
@@ -232,9 +256,8 @@ export default function BookWorkspace(p: Props) {
       positionReady.current = true;
     });
     return () => cancelAnimationFrame(frame);
-  }, [pages, chapter?.id, zoom]);
+  }, [pages, chapter?.id, zoom, plainWrite]);
   useEffect(queuePosition, [zoom]);
-  const [speechPlaying, setSpeechPlaying] = useState(false);
   useEffect(() => {
     p.onPlaybackChange?.(speechPlaying);
   }, [speechPlaying, p.onPlaybackChange]);
@@ -262,9 +285,14 @@ export default function BookWorkspace(p: Props) {
   };
   const status = readingStatus(readingPosition, statusContext);
   const showingRemaining = status.remaining;
-  statusForPosition.current = next => readingStatusKey(next, statusContext,
-    next?.chapterId === chapter?.id && speechPlaying && !showRaw
-      ? p.editorRef.current?.pageAtTextOffset(next.offset, next.note) ?? null : null);
+  statusForPosition.current = (next) =>
+    readingStatusKey(
+      next,
+      statusContext,
+      next?.chapterId === chapter?.id && speechPlaying && !showRaw
+        ? (p.editorRef.current?.pageAtTextOffset(next.offset, next.note) ?? null)
+        : null,
+    );
   paintedReadingStatus.current = statusForPosition.current(readingPosition);
   const [readerKeyboardOpen, setReaderKeyboardOpen] = useState(false);
   const [readingRange, setReadingRange] = useState<{
@@ -598,7 +626,16 @@ export default function BookWorkspace(p: Props) {
                 : "book-editor"
             }
           >
-            <Editor
+            <WritingEditor
+              fileType={editorFileType(p.project)}
+              onTextStatus={setPlainStatus}
+              onFind={p.onFind}
+              textFile={p.project.settings.textFile}
+              onTextFile={(value) =>
+                p.change((project) => {
+                  project.settings.textFile = value;
+                })
+              }
               language={p.project.language}
               reviewBook={!showRaw&&chapters.length>1?{chapterId:chapter.id,sources:chapters.map(c=>({id:c.id,title:c.title,document:c.document})),onResolve:(sources,ids,decision)=>p.change(draft=>resolveBookReview(draft,sources,ids,decision)),onGo:(id,from,to)=>{if(id===chapter.id)p.editorRef.current?.selectReviewRange(from,to);else{pendingReviewNavigation.current={id,from,to};p.onChapter(id);}}}:undefined}
               ref={p.editorRef}
@@ -715,6 +752,7 @@ export default function BookWorkspace(p: Props) {
               aria-label="Chapter Pages"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (plainWrite) return;
                 const value = parseInteger(pageNumber);
                 if (
                   Number.isInteger(value) &&
@@ -730,12 +768,15 @@ export default function BookWorkspace(p: Props) {
                 }
               }}
             >
-              {selection ? (
+              {plainWrite ? (
+                <span role="status">{plainStatus}</span>
+              ) : selection ? (
                 <span
                   className="selection-page-count"
                   title="Pages covered by the selection"
                 >
-                  {formatInteger(selectedPages!)} {selectedPages === 1 ? "Page" : "Pages"}
+                  {formatInteger(selectedPages!)}{" "}
+                  {selectedPages === 1 ? "Page" : "Pages"}
                 </span>
               ) : (
                 <>

@@ -397,6 +397,38 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     @app.get("/api/publishing/capabilities")
     def publishing_capabilities():
         return publication().capabilities()
+    @app.post('/api/projects/{project_id}/plain-copy')
+    def create_plain_copy(project_id: str):
+        from .plain_text_workspaces import plain_copy
+        return plain_copy(store, project_id)
+    @app.get('/api/projects/{project_id}/txt-file-fingerprint')
+    def txt_file_fingerprint(project_id: str):
+        import hashlib
+        import tempfile
+        from .publishing import build_export
+        project = store.get(project_id)
+        if project.get('settings', {}).get('documentKind') != 'txt':
+            raise HTTPException(422, 'Choose a TXT document.')
+        with tempfile.TemporaryDirectory(prefix='alder-txt-fingerprint-') as directory:
+            try:
+                result = build_export(project, 'txt', Path(directory))
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            return {'revision': project['revision'], 'digest': hashlib.sha256(Path(result['path']).read_bytes()).hexdigest()}
+    @app.post('/api/projects/{project_id}/txt-reopen')
+    async def reopen_text_encoding(project_id: str, encoding: str, file: UploadFile = File(...)):
+        from .plain_text_workspaces import reopen_text
+        try:
+            return await run_in_threadpool(reopen_text, store, project_id, await uploaded(file), encoding)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    @app.post('/api/text-files/prepare-replacement')
+    async def prepare_text_file_replacement(request: Request):
+        from .plain_text_edits import prepare_replacement
+        try:
+            return await run_in_threadpool(prepare_replacement, await body(request))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.post("/api/analyze")
     async def analyze(request: Request):

@@ -95,6 +95,12 @@ import {
 import { useProject } from "./useProject";
 import Browser, { deviceCatalog } from "./Browser";
 import BookWorkspace from "./BookWorkspace";
+import TextFileTools from "./TextFileTools";
+import { isPlainDocument } from "./plainTextTools";
+import OpenTextFindDialog from "./OpenTextFindDialog";
+import TextFolderWorkspace from "./TextFolderWorkspace";
+import type { BookSearchGroup } from "./bookFind";
+import type { TextMatch } from "./findText";
 import { bookText, newChapter } from "./book";
 import Editor, { schema as editorSchema, type EditorHandle } from "./Editor";
 import DefinitionStudio from "./DefinitionStudio";
@@ -292,8 +298,12 @@ export default function App() {
     error,
     setError,
     history,
+    openDocumentSnapshots,
+    reopenClosed,
   } = useProject();
   const workspaceOpen = Boolean(project);
+  const openSnapshotsRef = useRef(openDocumentSnapshots);
+  openSnapshotsRef.current = openDocumentSnapshots;
   useEffect(() => {
     void window.alder?.setWindowLayout(workspaceOpen ? "workspace" : "start");
   }, [workspaceOpen]);
@@ -329,6 +339,72 @@ export default function App() {
     "wav",
   );
   const [completion, setCompletion] = useState<string[]>([]);
+  const [openTextFind, setOpenTextFind] = useState(false);
+  const [showTextFiles, setShowTextFiles] = useState(false),
+    [showTextFolder, setShowTextFolder] = useState(false);
+  useEffect(() => {
+    const panel = (event: Event) => {
+      const value = (event as CustomEvent<{ projectId: string; panel: string }>)
+        .detail;
+      if (value.projectId !== project?.id) return;
+      if (value.panel === "file") setShowTextFiles(true);
+      if (value.panel === "folder") setShowTextFolder(true);
+    };
+    window.addEventListener("alder-txt-panel", panel);
+    return () => window.removeEventListener("alder-txt-panel", panel);
+  }, [project?.id]);
+  const [textFileStatuses, setTextFileStatuses] = useState<
+    Record<string, { dirty: boolean; path?: string }>
+  >({});
+  useEffect(() => {
+    const written = (event: Event) => {
+      const value = (
+          event as CustomEvent<{
+            projectId: string;
+            text: string;
+            path?: string;
+          }>
+        ).detail,
+        snapshot = openSnapshotsRef
+          .current()
+          .find((p) => p.id === value.projectId);
+      if (
+        snapshot?.settings.documentKind === "txt" &&
+        snapshot.book?.chapters[0]?.text === value.text
+      )
+        setTextFileStatuses((previous) => ({
+          ...previous,
+          [value.projectId]: {
+            dirty: false,
+            path: value.path || previous[value.projectId]?.path,
+          },
+        }));
+    };
+    window.addEventListener("alder-document-written", written);
+    return () => window.removeEventListener("alder-document-written", written);
+  }, []);
+  useEffect(() => {
+    const status = (event: Event) => {
+      const value = (
+        event as CustomEvent<{
+          projectId: string;
+          dirty: boolean;
+          path?: string;
+        }>
+      ).detail;
+      setTextFileStatuses((previous) =>
+        previous[value.projectId]?.dirty === value.dirty &&
+        previous[value.projectId]?.path === value.path
+          ? previous
+          : {
+              ...previous,
+              [value.projectId]: { dirty: value.dirty, path: value.path },
+            },
+      );
+    };
+    window.addEventListener("alder-txt-file-status", status);
+    return () => window.removeEventListener("alder-txt-file-status", status);
+  }, []);
   const [writePreview, setWritePreview] = useState(false);
   useEffect(() => setWritePreview(false), [project?.id]);
   const [view, setView] = useState(() =>
@@ -625,7 +701,7 @@ export default function App() {
   const contentsRequest = useRef(0);
   const [sourcesDialog,setSourcesDialog]=useState<{origin:EditorHandle;identity:string;initial?:DocNode;projectId:string}|null>(null);
   const [accessibilityDialog,setAccessibilityDialog]=useState<{origin:EditorHandle;identity:string;projectId:string;issues:AccessibilityIssue[];scope:string}|null>(null);
-  const sourcesRequest=useRef(0);
+  const sourcesRequest = useRef(0);
   const sourcesAbort=useRef<AbortController|null>(null);
   useEffect(()=>{sourcesRequest.current++;sourcesAbort.current?.abort();setSourcesDialog(null);},[project?.id]);
   const [contentsDialog, setContentsDialog] = useState<{
@@ -1218,6 +1294,15 @@ export default function App() {
       );
       if (saved) {
         retain(project.id);
+        if (mode !== "copy" && project.settings.documentKind === "txt")
+          window.dispatchEvent(
+            new CustomEvent("alder-document-written", {
+              detail: {
+                projectId: project.id,
+                text: project.book?.chapters[0]?.text || "",
+              },
+            }),
+          );
         if (mode !== "copy") await rememberDocumentFile(project.id, saved);
         setHint(`Saved ${saved}`);
       }
@@ -1235,6 +1320,15 @@ export default function App() {
       );
       if (!saved) return;
       retain(project.id);
+      if (mode !== "copy" && project.settings.documentKind === "txt")
+        window.dispatchEvent(
+          new CustomEvent("alder-document-written", {
+            detail: {
+              projectId: project.id,
+              text: project.book?.chapters[0]?.text || "",
+            },
+          }),
+        );
       setHint(`Saved ${project.name}.${format}`);
       return;
     }
@@ -1596,6 +1690,7 @@ export default function App() {
   }, [project]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if ((e.ctrlKey || e.metaKey) && e.key === ",") {
         e.preventDefault();
         openSettings();
@@ -1852,9 +1947,15 @@ export default function App() {
   };
   const openingStatus = openingProgress && (
     <div className="open-progress document-opening-progress" role="status">
-      <span>{openingProgress.stage} {openingProgress.name}{openingProgress.total > 1 ? ` (${formatInteger(openingProgress.index)} of ${formatInteger(openingProgress.total)})` : ''}…</span>
+      <span>
+        {openingProgress.stage} {openingProgress.name}
+        {openingProgress.total > 1 ? ` (${formatInteger(openingProgress.index)} of ${formatInteger(openingProgress.total)})` : ''}
+        …
+      </span>
       <progress aria-label="Opening document" />
-      <button disabled={!openingProgress.cancellable} onClick={cancelOpening}>Cancel</button>
+      <button disabled={!openingProgress.cancellable} onClick={cancelOpening}>
+        Cancel
+      </button>
     </div>
   );
   const settingsWindow = settingsOpen && (
@@ -2090,6 +2191,108 @@ export default function App() {
       );
       bookEditor.current?.insert(text);
     });
+  const textEditorFor = async (id: string) => {
+    await activate(id);
+    setWritingFocus(true);
+    setView("Write");
+    setWritePreview(false);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      if (bookEditor.current?.getIdentity().startsWith(id + ":"))
+        return bookEditor.current;
+    }
+    throw new Error("The selected document is no longer active. Search again.");
+  };
+  const replaceOpenText = async (
+    matches: TextMatch[],
+    replacement: string,
+    expected: string,
+    id: string,
+  ) => {
+    const editor = await textEditorFor(id);
+    editor.replaceMatches(matches, replacement, expected);
+    await flush();
+  };
+  const replaceAllOpenText = async (
+    groups: BookSearchGroup[],
+    replacement: string,
+  ) => {
+    const snapshots = openDocumentSnapshots();
+    for (const group of groups)
+      if (
+        snapshots
+          .find((p) => p.id === group.id)
+          ?.book?.chapters.map((c) => c.text)
+          .join("\n") !== group.text
+      )
+        throw new Error(
+          "An open document changed. Search again before replacing.",
+        );
+    let applied = 0;
+    try {
+      for (const group of groups) {
+        await replaceOpenText(group.matches, replacement, group.text, group.id);
+        applied++;
+      }
+    } catch (error) {
+      throw new Error(
+        `Replaced matches in ${applied} document(s); remaining files were not completed. Each changed document can be undone separately. ${(error as Error).message}`,
+      );
+    }
+    setHint(
+      `Replaced matches in ${applied} TXT document(s). Undo restores each document separately.`,
+    );
+  };
+  const saveAllTextDocuments = () =>
+    void run(async () => {
+      await flush();
+      let savedCount = 0;
+      for (const document of openDocumentSnapshots().filter(
+        (p) => p.settings.documentKind === "txt",
+      )) {
+        const format = document.settings.preferredFormat || "txt";
+        let saved: string | boolean | null;
+        if (window.alder?.saveDocument)
+          saved = await window.alder.saveDocument(
+            document.id,
+            format,
+            document.name,
+            "save",
+          );
+        else {
+          const result = await api(
+            `/api/projects/${document.id}/export`,
+            "POST",
+            { format },
+          );
+          saved = await download(
+            result.downloadUrl,
+            `${document.name}.${format}`,
+          );
+        }
+        if (!saved) {
+          setHint(
+            `Saved ${savedCount} TXT document(s); Save All was cancelled.`,
+          );
+          return;
+        }
+        retain(document.id);
+        if (typeof saved === "string")
+          await rememberDocumentFile(document.id, saved);
+        window.dispatchEvent(
+          new CustomEvent("alder-document-written", {
+            detail: {
+              projectId: document.id,
+              text: document.book?.chapters[0]?.text || "",
+            },
+          }),
+        );
+        savedCount++;
+      }
+      setHint(`Saved ${savedCount} TXT document(s).`);
+    });
   const isBook = !["txt", "docx"].includes(project.settings.documentKind);
   const inChapter = writingFocus && view === "Write" && !writePreview;
   const commandTitles: Record<string, string> = {
@@ -2124,6 +2327,8 @@ export default function App() {
         action: () => void run(() => saveProject("copy")),
       },
       { label: "Close document", action: () => void close(project.id) },
+      { label: "Reopen closed tab", action: () => void run(reopenClosed) },
+      { label: "Save all TXT documents", action: saveAllTextDocuments },
       {
         label: "Saved versions…",
         action: () =>
@@ -2148,6 +2353,10 @@ export default function App() {
         action: () => void run(() => history("redo")),
       },
       { label: "Find and replace…", action: findReplace },
+      {
+        label: "Search open TXT documents…",
+        action: () => setOpenTextFind(true),
+      },
       {
         label: "Update fields",
         action: () =>
@@ -2267,6 +2476,55 @@ export default function App() {
       { label: "Project Assets…", action: () => openPanel("assets") },
     ],
   };
+  if (project.settings.documentKind === "txt") {
+    const textCommand = (command: string) => () => {
+      setView("Write");
+      setWritingFocus(true);
+      setWritePreview(false);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() =>
+          window.dispatchEvent(
+            new CustomEvent("alder-txt-command", {
+              detail: { projectId: project.id, command },
+            }),
+          ),
+        ),
+      );
+    };
+    menuItems.Text = [
+      { label: "Commands and shortcuts…", action: textCommand("commands") },
+      {
+        label: "File tools",
+        action: () => setShowTextFiles((value) => !value),
+      },
+      {
+        label: "Folder workspace",
+        action: () => setShowTextFolder((value) => !value),
+      },
+      { label: "Go to line and column…", action: textCommand("goto") },
+      { label: "Complete word", action: textCommand("complete") },
+      {
+        label: "Complete filesystem path",
+        action: textCommand("complete-path"),
+      },
+      { label: "Word wrap", action: textCommand("wrap") },
+      { label: "Line numbers", action: textCommand("numbers") },
+      { label: "Visible whitespace", action: textCommand("whitespace") },
+      { label: "Toggle line bookmark", action: textCommand("bookmark") },
+      { label: "Next line bookmark", action: textCommand("bookmark-next") },
+      {
+        label: "Previous line bookmark",
+        action: textCommand("bookmark-previous"),
+      },
+      { label: "Duplicate line", action: textCommand("duplicate") },
+      { label: "Select next occurrence", action: textCommand("select-next") },
+      {
+        label: "Select all occurrences",
+        action: textCommand("select-all-occurrences"),
+      },
+      { label: "Read-only mode", action: textCommand("readonly") },
+    ];
+  }
   return (
     <div
       className="alder-app theme-neutral"
@@ -2335,11 +2593,84 @@ export default function App() {
         </div>
       )}
       <DocumentTabs
-        documents={documents}
+        documents={documents.map((d) => ({
+          ...d,
+          modified: textFileStatuses[d.id]?.dirty,
+          path: textFileStatuses[d.id]?.path,
+        }))}
         activeId={project.id}
         onSelect={activate}
         onClose={close}
       />
+      <TextFileTools
+        key={project.id}
+        project={project}
+        visible={showTextFiles}
+        flush={flush}
+        onOpen={(p) => load(p)}
+        onSaveAs={() => void run(() => saveProject("saveAs"))}
+      />
+      {project.settings.documentKind === "txt" && showTextFolder && (
+        <TextFolderWorkspace
+          onOpen={async (p, range) => {
+            await load(p);
+            if (range) {
+              const editor = await textEditorFor(p.id);
+              if (
+                editor.getText().slice(range.start, range.end) ===
+                range.originalText
+              )
+                editor.selectRange(range.start, range.end);
+              else
+                setHint(
+                  "Opened the existing workspace. Its text differs from the disk search result.",
+                );
+            }
+          }}
+          findSource={findSource}
+        />
+      )}
+      {project.settings.documentKind === "txt" &&
+        project.book?.chapters.some((c) => !isPlainDocument(c.document)) && (
+          <div className="txt-file-tools">
+            <span>
+              This TXT workspace contains rich content. The original retains its
+              formatting, objects and notes.
+            </span>
+            <button
+              onClick={() =>
+                void run(async () => {
+                  await flush();
+                  const copy = await api<Project>(
+                    `/api/projects/${project.id}/plain-copy`,
+                    "POST",
+                  );
+                  await load(copy);
+                  setHint(
+                    "Created a plain copy of the main text. The original rich workspace is retained.",
+                  );
+                })
+              }
+            >
+              Create plain copy of main text
+            </button>
+          </div>
+        )}
+      {openTextFind && (
+        <OpenTextFindDialog
+          documents={openDocumentSnapshots()}
+          activeId={project.id}
+          onSelect={(match, id) => {
+            void run(async () => {
+              (await textEditorFor(id)).selectRange(match.start, match.end);
+            });
+          }}
+          onReplace={replaceOpenText}
+          onReplaceAll={replaceAllOpenText}
+          onError={setError}
+          onClose={() => setOpenTextFind(false)}
+        />
+      )}
       <div className="workspaces">
         <div className="workspace-topline">
           <div className="project-label">
@@ -2479,6 +2810,7 @@ export default function App() {
             </>
           )}
           <BookWorkspace
+            onFind={findReplace}
             showStructure={structure}
             onToggleStructure={toggleStructure}
             externalPlayback={playing || voiceTestPlaying || sandboxPlaying}
@@ -2786,7 +3118,8 @@ export default function App() {
                         Words<output>{formatInteger(draftCounts.words)}</output>
                       </label>
                       <label>
-                        Sentences<output>{formatInteger(draftCounts.sentences)}</output>
+                        Sentences
+                        <output>{formatInteger(draftCounts.sentences)}</output>
                       </label>
                     </div>
                     <label>
@@ -3664,8 +3997,8 @@ export default function App() {
         />
       )}
       {dropping && (
-        <div className="file-drop-overlay">Drop files to open in Alder</div>
-      )}
+          <div className="file-drop-overlay">Drop files to open in Alder</div>
+        )}
       {completion.length > 0 && (
         <div className="completion-popup">
           <header>
@@ -3795,15 +4128,19 @@ export default function App() {
           }}
         />
       )}
-      {sourcesDialog&&project&&sourcesDialog.projectId===project.id&&<SourcesDialog initial={sourcesDialog.initial?.attrs?.items} style={project.settings.citationStyle||'apa'} styles={project.styles} documentSources={(project.book?.chapters||[]).flatMap(chapter=>documentCitationSources(chapter.document))} onClose={()=>{sourcesRequest.current++;sourcesAbort.current?.abort();const {origin,identity}=sourcesDialog;setSourcesDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}} onInsert={(items,style)=>sourcesAction('insert',style,items)} onBibliography={(title,entryStyle,style)=>sourcesAction('bibliography',style,[],title,entryStyle)} onUpdate={(sources,style)=>sourcesAction('update',style,[],undefined,undefined,sources)}/>}
-      {accessibilityDialog&&project?.id===accessibilityDialog.projectId&&<AccessibilityDialog issues={accessibilityDialog.issues} scope={accessibilityDialog.scope} onClose={()=>{const {origin,identity}=accessibilityDialog;setAccessibilityDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}} onGo={issue=>{
+      {sourcesDialog&&project&&sourcesDialog.projectId===project.id && (
+        <SourcesDialog initial={sourcesDialog.initial?.attrs?.items} style={project.settings.citationStyle||'apa'} styles={project.styles} documentSources={(project.book?.chapters||[]).flatMap(chapter=>documentCitationSources(chapter.document))} onClose={()=>{sourcesRequest.current++;sourcesAbort.current?.abort();const {origin,identity}=sourcesDialog;setSourcesDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}} onInsert={(items,style)=>sourcesAction('insert',style,items)} onBibliography={(title,entryStyle,style)=>sourcesAction('bibliography',style,[],title,entryStyle)} onUpdate={(sources,style)=>sourcesAction('update',style,[],undefined,undefined,sources)}/>
+      )}
+      {accessibilityDialog&&project?.id===accessibilityDialog.projectId && (
+        <AccessibilityDialog issues={accessibilityDialog.issues} scope={accessibilityDialog.scope} onClose={()=>{const {origin,identity}=accessibilityDialog;setAccessibilityDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}} onGo={issue=>{
         const {origin,identity}=accessibilityDialog;
         setAccessibilityDialog(null);
         if(issue.story){openRunningMatter(issue.sectionId,issue.story,issue.variant);return;}
         const jump=(target:EditorHandle)=>target.accessibilityTarget(issue.blockId||issue.noteId||'',issue.noteId);
         if(issue.chapterId)withOutlineEditor(issue.chapterId,jump);
         else if(origin.getIdentity()===identity)jump(origin);
-      }}/>}
+      }}/>
+      )}
       {contentsDialog && project && (
         <ContentsDialog
           language={project.language}
@@ -3947,8 +4284,11 @@ export default function App() {
           }}
         />
       )}
-      {compareDialog&&project?.id===compareDialog.project.id&&<CompareDocumentsDialog project={compareDialog.project} mode={compareDialog.mode} onClose={()=>{setCompareDialog(null);requestAnimationFrame(()=>bookEditor.current?.focus());}} onOpen={async next=>{await load(next);setCompareDialog(null);}}/>}
-      {mailMergeDialog && project?.id===mailMergeDialog.project.id && <MailMergeDialog project={mailMergeDialog.project} schema={editorSchema}
+      {compareDialog&&project?.id===compareDialog.project.id && (
+        <CompareDocumentsDialog project={compareDialog.project} mode={compareDialog.mode} onClose={()=>{setCompareDialog(null);requestAnimationFrame(()=>bookEditor.current?.focus());}} onOpen={async next=>{await load(next);setCompareDialog(null);}}/>
+      )}
+      {mailMergeDialog && project?.id===mailMergeDialog.project.id && (
+        <MailMergeDialog project={mailMergeDialog.project} schema={editorSchema}
         onClose={()=>{const {origin,identity}=mailMergeDialog;setMailMergeDialog(null);requestAnimationFrame(()=>{if(origin.getIdentity()===identity)origin.focus();});}}
         onInsert={name=>{
           const {origin,identity,source}=mailMergeDialog;
@@ -3962,7 +4302,8 @@ export default function App() {
           return result.projects;
         }}
         onOpen={async id=>{const next=await api<Project>(`/api/projects/${id}`);await load(next);setMailMergeDialog(null);}}
-      />}
+      />
+      )}
       {fieldDialog && project && (
         <FieldDialog
           project={project}
@@ -4177,7 +4518,8 @@ export default function App() {
                       <p>
                         {formatInteger(project.sections.length)} sections ·{" "}
                         {formatInteger(project.book?.chapters.filter((c) => c.include).length || 0)}{" "}
-                        included chapters · {formatInteger(words(collatedText(project)))} words
+                        included chapters ·{" "}
+                        {formatInteger(words(collatedText(project)))} words
                       </p>
                     </div>
                   </div>
@@ -4296,14 +4638,22 @@ export default function App() {
                     <p className="build-progress" role="status">
                       <LoaderCircle className="spin" size={15} />
                       {exportProgress?.stage || busy}
-                      {exportProgress && <button disabled={!exportProgress.cancellable} onClick={cancelExport}>Cancel</button>}
+                      {exportProgress && (
+                        <button disabled={!exportProgress.cancellable} onClick={cancelExport}>
+                          Cancel
+                        </button>
+                      )}
                     </p>
                   )}
                   {exportResult?.projectId === project.id && (
                     <div className="export-result">
                       <Check size={18} />
                       <strong>{exportResult.filename}</strong>
-                      {exportResult.sourceRevision !== project.revision && <small>The document has changed since this export.</small>}
+                      {exportResult.sourceRevision !== project.revision && (
+                        <small>
+                          The document has changed since this export.
+                        </small>
+                      )}
                       <button
                         className="accent"
                         onClick={() =>
@@ -4345,7 +4695,10 @@ export default function App() {
                 <div className="about-panel">
                   <AlderLogo />
                   <h1>Alder</h1>
-                  <p>Organic Language Engine · {releaseVersion.replace(/\.0$/, "")}</p>
+                  <p>
+                    Organic Language Engine ·{" "}
+                    {releaseVersion.replace(/\.0$/, "")}
+                  </p>
                   <p>
                     Language as material. A workstation for writing,
                     experimenting, collating, and listening.

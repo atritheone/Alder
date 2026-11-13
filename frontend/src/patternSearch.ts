@@ -7,6 +7,7 @@ export type PatternMatch = TextMatch & {
   sourceText: string;
 };
 export type PatternRequest = {
+  maxMatches?: number;
   sources: PatternSource[];
   query: string;
   replacement: string;
@@ -69,6 +70,11 @@ export function searchPatterns(request: PatternRequest): PatternResult {
             return literal;
           },
         );
+        if (request.maxMatches != null && matches.length >= request.maxMatches)
+          return {
+            matches: [],
+            error: `Search exceeded ${request.maxMatches.toLocaleString()} matches. Refine the query before replacing.`,
+          };
         matches.push({ start, end, replacement, sourceId: source.id });
       }
     }

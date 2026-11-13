@@ -418,12 +418,84 @@ declare global {
         command: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll",
       ) => Promise<void>;
       readClipboard?: () => Promise<string>;
+      writeClipboard?: (text: string) => Promise<void>;
       readClipboardContent?: () => Promise<{ text: string; html: string }>;
       printProof?: (
         resource: string,
         name: string,
       ) => Promise<{ opened: boolean }>;
       filePath?: (file: File) => string;
+      textWorkspaces?: () => Promise<
+        import("./textWorkspaceTypes").TextWorkspace[]
+      >;
+      chooseTextWorkspace?: () => Promise<
+        import("./textWorkspaceTypes").TextWorkspace | null
+      >;
+      scanTextWorkspace?: (
+        id: string,
+        include: string,
+        exclude: string,
+      ) => Promise<import("./textWorkspaceTypes").WorkspaceScan>;
+      cancelTextWorkspace?: (id: string) => Promise<void>;
+      readWorkspaceText?: (
+        id: string,
+        relative: string,
+      ) => Promise<import("./textWorkspaceTypes").WorkspaceSource>;
+      openWorkspaceText?: (
+        id: string,
+        relative: string,
+      ) => Promise<{
+        path: string;
+        name: string;
+        bytes: number[];
+        digest: string;
+      }>;
+      bindWorkspaceText?: (
+        id: string,
+        relative: string,
+        targetId: string,
+        digest: string,
+      ) => Promise<void>;
+      prepareFolderReplacement?: (
+        id: string,
+        plans: import("./textWorkspaceTypes").WorkspaceReplacement[],
+      ) => Promise<import("./textWorkspaceTypes").WorkspacePreview>;
+      commitFolderReplacement?: (
+        token: string,
+      ) => Promise<import("./textWorkspaceTypes").WorkspaceCommit>;
+      restoreFolderReplacement?: (
+        token: string,
+      ) => Promise<import("./textWorkspaceTypes").WorkspaceRestore>;
+      documentFileInfo?: (
+        id: string,
+      ) => Promise<{
+        path: string;
+        format: string;
+        direct: boolean;
+        digest: string;
+        currentDigest?: string;
+        missing: boolean;
+        changed: boolean | null;
+        size: number;
+      } | null>;
+      completeTextPath?: (
+        id: string,
+        prefix: string,
+      ) => Promise<{ label: string; directory: boolean }[]>;
+      readDocumentFile?: (
+        id: string,
+      ) => Promise<{
+        path: string;
+        name: string;
+        digest: string;
+        bytes: number[];
+      }>;
+      bindReopenedDocument?: (
+        sourceId: string,
+        targetId: string,
+        digest: string,
+      ) => Promise<void>;
+      revealDocumentFile?: (id: string) => Promise<void>;
       bindDocumentFile?: (
         id: string,
         file: File,
