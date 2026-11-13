@@ -35,6 +35,7 @@
 }
 .txt-host .cm-editor {
   height: 100%;
+  --txt-gutter-width: max(58px, calc(40px + 6ch));
 }
 .txt-host .cm-scroller {
   overflow: auto;
@@ -70,33 +71,50 @@
 .txt-host .txt-mark-3 {
   background: #fcc2d7;
 }
-.txt-bookmark-gutter {
+.txt-host .txt-bookmark-gutter {
+  order: 0;
+  flex: 0 0 16px;
+  width: 16px;
   min-width: 16px;
+  max-width: 16px;
   cursor: pointer;
   color: #2275bb;
 }
-.txt-change-gutter {
+.txt-host .txt-change-gutter {
+  order: 3;
+  flex: 0 0 4px;
+  width: 4px;
+  max-width: 4px;
+  margin-inline-start: auto;
   color: #b86b13;
   min-width: 4px;
 }
 .txt-host .cm-foldGutter {
-  overflow: visible;
+  order: 1;
+  flex: 0 0 12px;
+  width: 12px;
+  min-width: 12px;
+  max-width: 12px;
 }
 .txt-host .cm-foldGutter .txt-fold-control {
-  display: inline-block;
+  display: block;
+  width: 8px;
+  height: 1lh;
+  margin-inline: 2px;
+  padding: 0;
+}
+.txt-host .cm-lineNumbers {
+  order: 2;
+  flex: 1 0 0;
+  min-width: 0;
+}
+.txt-change-marker {
+  display: block;
+  width: 100%;
+  height: 1em;
   position: relative;
-  padding: 0 1px;
-}
-/* Keep the original empty gutter width; paint either arrow inside that slot. */
-.txt-fold-control::before {
-  content: "›";
-  visibility: hidden;
-}
-.txt-fold-control::after {
-  content: attr(data-fold-marker);
-  position: absolute;
-  inset-inline-end: 1px;
-  inset-block-start: 0;
+  top: calc((1lh - 1em) / 2);
+  background: currentColor;
 }
 .txt-status {
   display: flex;
@@ -295,28 +313,44 @@
 }
 .txt-paged .cm-gutters {
   box-sizing: border-box;
-  flex: 0 0 58px;
-  min-width: 58px;
+  flex: 0 0 var(--txt-gutter-width);
+  min-width: var(--txt-gutter-width);
   margin-left: max(0px, calc((100% - var(--txt-paper-width)) / 2));
-  background: #fefefe;
-  border-right: 0;
-  min-height: var(--txt-paper-height);
-  box-shadow: -2px 2px 7px #4e4e4e22;
-  align-self: stretch;
+  background: #e7e7e7;
+  border-right: 1px solid #c6c6c6;
+  height: var(--txt-sheet-height, var(--txt-paper-height));
+  min-height: 0 !important;
+  box-shadow: none;
+  align-self: flex-start;
   color: #858585;
 }
 .txt-paged .cm-content {
   box-sizing: border-box;
   flex: none;
-  width: calc(var(--txt-paper-width) - 58px);
-  min-width: calc(var(--txt-paper-width) - 58px);
+  width: calc(var(--txt-paper-width) - var(--txt-gutter-width));
+  min-width: calc(var(--txt-paper-width) - var(--txt-gutter-width));
   min-height: var(--txt-paper-height);
   margin: 0 auto 0 0;
   padding: var(--txt-paper-top) var(--txt-paper-right) var(--txt-paper-bottom)
-    max(0px, calc(var(--txt-paper-left) - 58px));
-  background: #fefefe;
-  box-shadow: 3px 2px 7px #4e4e4e33;
+    max(4px, calc(var(--txt-paper-left) - var(--txt-gutter-width)));
+  position: relative;
+  background: transparent;
+  box-shadow: none;
   color: #2a2a2a;
+}
+/* Paint one full-height sheet behind both columns and behind selection layers. */
+.txt-paged .cm-content::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 calc(-1 * var(--txt-gutter-width));
+  z-index: -3;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    #e7e7e7 0 var(--txt-gutter-width),
+    #fefefe var(--txt-gutter-width)
+  );
+  box-shadow: 0 2px 7px #4e4e4e33;
 }
 .txt-paged .cm-line {
   padding: 0;

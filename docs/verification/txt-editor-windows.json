@@ -124,5 +124,19 @@
     "Closed-tab history intentionally retains bounded snapshots.",
     "Deterministic reader audio validates integration, not speech model quality."
   ],
-  "testPolicy": "After the user requested targeted tests, no further entire suites were run."
+  "testPolicy": "After the user requested targeted tests, no further entire suites were run.",
+  "gutterLayoutFollowUp": {
+    "date": "2026-11-14",
+    "reference": "Latest user Notepad++ screenshot",
+    "layout": "Contrasting grey gutter: bookmark area, fold arrows, line numbers, change bars, document.",
+    "checks": [
+      "Initial typing and marker appearance preserve column positions.",
+      "Fold arrows appear, fold/unfold and disappear without moving other columns.",
+      "9-to-10-line transition retains alignment in Cambria and Consolas.",
+      "Wrapped/scrolled line labels align across font/zoom settings.",
+      "Short and long documents share the same gutter/page bottom.",
+      "Actual Electron screenshot inspected with example text, bookmarks, folding, colored word matches and completion."
+    ],
+    "screenshot": "alder-txt-write-final.png"
+  }
 }

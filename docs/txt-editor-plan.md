@@ -10,8 +10,9 @@ a claim of full Notepad++ parity or cross-platform certification.
 - Keep TXT, DOCX and books visually similar at a glance.
 - Put TXT additions in the existing Write toolbar and Text tools overflow.
 - Show format-specific toolbar options only for applicable formats.
-- Keep the gutter inside the white page's left edge, matching the user's approved
-  14 November screenshot, with labels vertically aligned to their logical lines.
+- Keep gutter labels vertically aligned. The user's latest 14 November reference
+  supersedes the earlier white gutter: use contrasting grey, fold arrows left of
+  line numbers, and change bars beside the text area, with stable column widths.
 - Run targeted checks for changed behavior; avoid unnecessary entire suites.
 - Work on and push main. Keep the package version at 0.13.0.
 

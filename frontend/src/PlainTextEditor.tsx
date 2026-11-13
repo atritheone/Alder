@@ -78,6 +78,7 @@ import {
   indentationFolding,
   dirtyLineField,
   dirtyLineGutter,
+  sheetGutterHeight,
   diskSaved,
 } from "./plainTextViews";
 import { completeDocumentWord, documentWords } from "./plainTextCompletion";
@@ -579,15 +580,29 @@ export default forwardRef<EditorHandle, Props>(
         codeFolding(),
         foldGutter({
           markerDOM(open) {
+            const ns = "http://www.w3.org/2000/svg";
             const marker = document.createElement("span");
             marker.className = "txt-fold-control";
-            marker.dataset.foldMarker = open ? "⌄" : "›";
             marker.title = open ? "Fold line" : "Unfold line";
+            const icon = document.createElementNS(ns, "svg");
+            icon.setAttribute("viewBox", "0 0 8 12");
+            icon.setAttribute("width", "8");
+            icon.setAttribute("height", "100%");
+            icon.setAttribute("aria-hidden", "true");
+            icon.setAttribute("focusable", "false");
+            const path = document.createElementNS(ns, "path");
+            path.setAttribute("d", open ? "M1 4 L4 7 L7 4" : "M2 2 L6 6 L2 10");
+            path.setAttribute("fill", "none");
+            path.setAttribute("stroke", "currentColor");
+            path.setAttribute("stroke-width", "1.3");
+            icon.appendChild(path);
+            marker.appendChild(icon);
             return marker;
           },
         }),
         dirtyLineField,
         dirtyLineGutter,
+        sheetGutterHeight,
         EditorView.inputHandler.of((v, from, to, text) => {
           if (
             !overwriteRef.current ||
@@ -1030,7 +1045,10 @@ export default forwardRef<EditorHandle, Props>(
               : []),
           EditorState.tabSize.of(tabSize),
           EditorView.theme({
-            "&": { fontSize: `${fontSize * (props.pageLayout?.zoom || 1)}px` },
+            "&": {
+              fontFamily: font,
+              fontSize: `${fontSize * (props.pageLayout?.zoom || 1)}px`,
+            },
             ".cm-content": {
               fontFamily: font,
               lineHeight: String(props.pageLayout?.lineHeight || 1.2),
