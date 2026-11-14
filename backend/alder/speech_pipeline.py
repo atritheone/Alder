@@ -21,6 +21,7 @@ from . import system_voices
 from .speech_quality import QUALITY_VERSION, inspect_pcm, projected_sections, valid_timings, speech_projection
 from .reading import word_timings, TIMING_VERSION
 from .speech_comparison import VERSION as COMPARISON_VERSION, recognition_hint
+from .bounded_cache import ByteCache
 
 STOPPED = {"cancelling", "ready", "failed", "cancelled", "interrupted", "needs_review"}
 
@@ -36,7 +37,8 @@ class SpeechPipeline(SpeechService):
         self._events = {}
         self._signatures = {}
         self._orders = {}
-        self._integrity = {}
+        self._integrity = ByteCache(8*1024*1024,32768)
+        self._access = {}
         self._event_condition = threading.Condition()
         self._serial = threading.RLock()
         # The native engines have their own workers. Loading a neural voice in
@@ -112,9 +114,8 @@ class SpeechPipeline(SpeechService):
             actual = self._integrity.get(key)
             if actual is None:
                 actual = hashlib.sha256(path.read_bytes()).hexdigest()
-                if len(self._integrity) >= 512:
-                    self._integrity.clear()
                 self._integrity[key] = actual
+            else:self._integrity.move_to_end(key)
             return actual == expected
         except OSError:
             return False
@@ -143,14 +144,25 @@ class SpeechPipeline(SpeechService):
                 result["message"] = "This saved recording needs checking. Resume to recover or verify its audio."
         return result
 
-    def _persist(self, job):
+    def _job(self, identity):
+        job=super()._job(identity)
+        self._access[identity]=time.monotonic()
+        return job
+
+    def _persist(self, job, dirty_ids=None):
         # All writers, including export completion, serialize manifests/events.
         with self._lock:
             job["eventSequence"] = job.get("eventSequence", 0) + 1
             super()._persist(job)
             signatures = self._signatures.setdefault(job["id"], {})
+            # Hints apply only to an already published, unchanged chunk order.
+            # Structural edits, split/append, recovery and legacy callers retain
+            # the complete comparison. Durable manifests are always complete.
+            order = [c['id'] for c in job['chunks']]
+            selective = dirty_ids is not None and self._orders.get(job['id']) == order
             changed = []
             for c in job["chunks"]:
+                if selective and c['id'] not in dirty_ids: continue
                 signature = _hash(c)
                 if signatures.get(c["id"]) != signature:
                     item = copy.deepcopy(c)
@@ -166,7 +178,6 @@ class SpeechPipeline(SpeechService):
             header["error"] = job.get("error")
             header["audioUrl"] = job.get("audioUrl") if not job.get("hasMoreText") and all(self._eligible(job, c) for c in job["chunks"]) else None
             events = self._events.setdefault(job["id"], deque(maxlen=128))
-            order = [c["id"] for c in job["chunks"]]
             event = {"sequence": job["eventSequence"], "header": header, "chunks": changed}
             if self._orders.get(job["id"]) != order:
                 event["order"] = order
@@ -308,7 +319,7 @@ class SpeechPipeline(SpeechService):
                         chunk["status"] = "generating"
                         job["status"] = "generating"
                         self._inflight.add((job_id, chunk["id"]))
-                        self._persist(job)
+                        self._persist(job, {chunk['id']})
                         self._pool.submit(self._process_section, job, chunk)
                         self._enqueue(job)
                 if defer:
@@ -421,7 +432,7 @@ class SpeechPipeline(SpeechService):
         with self._lock:
             chunk["status"] = "checking"
             chunk["verificationStatus"] = "checking"
-            self._persist(job)
+            self._persist(job, {chunk['id']})
         started = time.monotonic()
         native = json.loads(cache.with_suffix(".native.json").read_text("utf-8")) if system_voices.is_system(chunk["voiceId"]) else None
         if native and native.get("words"):
@@ -727,6 +738,22 @@ class SpeechPipeline(SpeechService):
         self._maintenance_at = now
         if self._inflight or self._assembling:
             return
+        # Only durable, inactive recordings are disposable. Active readers keep
+        # their manifests via events/demand; reconnect reloads canonical disk data.
+        with self._lock:
+            cold=[(self._access.get(identity,0),identity,job) for identity,job in self._jobs.items()
+                  if job['status'] in STOPPED and now-max(self._access.get(identity,0),self._demand.get(identity,{}).get('at',0))>120]
+            weights={}
+            for _,identity,job in cold:
+                try:weights[identity]=(self.root/'jobs'/identity/'manifest.json').stat().st_size*4+len(job.get('chunks',[]))*256
+                except OSError:weights[identity]=0  # Preserve missing/unreadable recovery state.
+            retained=sum(weights.values())
+            for _,identity,job in sorted(cold):
+                if len(self._jobs)<=32 and retained<=32*1024*1024:break
+                if not weights[identity]:continue
+                retained-=weights[identity]
+                self._jobs.pop(identity,None);self._access.pop(identity,None)
+                self._events.pop(identity,None);self._signatures.pop(identity,None);self._orders.pop(identity,None);self._demand.pop(identity,None)
         if now - self._last_work > 300:
             if self._serial.acquire(blocking=False):
                 try:

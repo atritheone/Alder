@@ -241,7 +241,7 @@ def _u16(text: str, offset: int) -> int:
     return len(text[:offset].encode("utf-16-le")) // 2
 
 
-def analyze(text: str, project: dict | None = None, rules: list | None = None, rule_ids: list | None = None) -> dict:
+def analyze(text: str, project: dict | None = None, rules: list | None = None, rule_ids: list | None = None, *, checkpoint=None) -> dict:
     if not isinstance(text, str):
         raise ValidationError("Analysis text must be a string.")
     if rules is not None and (not isinstance(rules, list) or not all(isinstance(rule, str) for rule in rules)):
@@ -256,11 +256,18 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
     enabled -= ignored
     # UTF-16 offsets without repeatedly encoding the entire prefix of long documents.
     from bisect import bisect_left
-    astral = [i for i, char in enumerate(text) if ord(char) > 0xffff]
+    astral = [match.start() for match in re.finditer(r'[\U00010000-\U0010ffff]',text)]
     def offset(index):
         return index + bisect_left(astral, index)
     annotations = []
-    tokens = list(WORDS.finditer(text))
+    def checked(values, interval=256):
+        if checkpoint is None:
+            yield from values
+            return
+        for index,value in enumerate(values):
+            if index%interval==0: checkpoint()
+            yield value
+    tokens = list(checked(WORDS.finditer(text)))
 
     def add(rule, start, end, message, suggestion=None, kind="style", rule_id=None, rule_name=None):
         annotation = {"id": f"{rule}:{start}:{end}", "type": kind, "rule": rule, "start": offset(start), "end": offset(end), "message": message}
@@ -272,7 +279,7 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
 
     if "repetition" in enabled:
         last = {}
-        for index, token in enumerate(tokens):
+        for index, token in enumerate(checked(tokens)):
             word = token.group().lower()
             if index and word == tokens[index - 1].group().lower() and text[tokens[index - 1].end():token.start()].strip() == "":
                 add("repetition", token.start(), token.end(), f"“{token.group()}” repeats immediately. Keep it if the repetition is intentional.", "")
@@ -291,7 +298,7 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
         accepted |= {i["word"].lower() for i in (project or {}).get("ideas", [])}
         unknown = checker.unknown({t.group().lower().replace("’", "'") for t in tokens if 1 < len(t.group()) < 40}) - accepted
         suggestions = {}
-        for token in tokens:
+        for token in checked(tokens):
             word = token.group().lower().replace("’", "'")
             if word in unknown and not token.group().isupper():
                 if word not in suggestions:
@@ -301,21 +308,21 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
                     suggestion = suggestion[:1].upper() + suggestion[1:]
                 add("spelling", token.start(), token.end(), f"“{token.group()}” is not in the English or project dictionary.", suggestion, "spelling")
     if "preferred-terms" in enabled:
-        for entry in (project or {}).get("dictionary", []):
+        for entry in checked((project or {}).get("dictionary", []),1):
             if entry.get("preferred") and entry["preferred"].lower() != entry["word"].lower():
                 for match in re.finditer(r"(?<!\w)" + re.escape(entry["word"]) + r"(?!\w)", text, re.I):
                     add("preferred-terms", match.start(), match.end(), "This project defines a preferred expression.", entry["preferred"])
-    sentences = [m for m in re.finditer(r"[^.!?\n]+(?:[.!?]+|(?=\n)|$)", text) if WORDS.search(m.group())]
+    sentences = [m for m in checked(re.finditer(r"[^.!?\n]+(?:[.!?]+|(?=\n)|$)", text)) if WORDS.search(m.group())]
     if "sentence-length" in enabled:
         threshold = (project or {}).get("settings", {}).get("longSentenceWords", 35)
         threshold = threshold if isinstance(threshold, int) and 5 <= threshold <= 300 else 35
-        for sentence in sentences:
+        for sentence in checked(sentences):
             count = len(WORDS.findall(sentence.group()))
             if count > threshold:
                 add("sentence-length", sentence.start(), sentence.end(), f"This sentence has {count:,} words. A pause or split may improve readability.")
     if "sentence-openings" in enabled:
         previous = None
-        for sentence in sentences:
+        for sentence in checked(sentences):
             opening = WORDS.search(sentence.group())
             if opening:
                 word = opening.group().lower()
@@ -330,7 +337,8 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
     if "brackets" in enabled:
         stack = []
         pairs = {")": "(", "]": "[", "}": "{"}
-        for index, char in enumerate(text):
+        for match in checked(re.finditer(r'[()[\]{}]',text)):
+            index,char=match.start(),match.group()
             if char in "([{":
                 stack.append((char, index))
             elif char in pairs:
@@ -349,7 +357,7 @@ def analyze(text: str, project: dict | None = None, rules: list | None = None, r
                 custom_rules.append({**legacy, "id": legacy.get("id", f"legacy_{index}"), "match": legacy.get("find", ""), "replacement": legacy.get("replace"), "wholeWord": legacy.get("wholeWord", True)})
         ignored_ids = ignored | set(settings.get("ignoredRuleIds", []))
         selected_ids = set(rule_ids) if rule_ids is not None else None
-        for rule in custom_rules[:300]:
+        for rule in checked(custom_rules[:300],1):
             if not isinstance(rule, dict) or not rule.get("enabled", True):
                 continue
             identifier = rule.get("id")

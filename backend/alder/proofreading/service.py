@@ -8,10 +8,12 @@ from pathlib import Path
 import threading
 import time
 import uuid
+import re
 from bisect import bisect_right
 
 from .. import language
 from ..models import ValidationError
+from ..bounded_cache import ByteCache
 from .contracts import (DIALECTS, blocks, configuration, diagnostic,
                         fingerprint, model_correction, shift, slice16, u16, language_segments)
 from .engines import ModelEngine, Resources, RuleEngine
@@ -25,14 +27,16 @@ TERMINAL = {"completed", "partial", "failed", "cancelled"}
 class ProofreadingService:
     _source_repair_enabled = False  # Failed the frozen 2026-11-13 quality gate; developer study only.
 
-    def __init__(self, resources, data_dir, speech_busy=None):
+    def __init__(self, resources, data_dir, speech_busy=None,policy=None):
         self.resources = Resources(resources)
         self.rules = RuleEngine(self.resources)
         self.model = ModelEngine(self.resources)
         self.data_dir = Path(data_dir)
         self.speech_busy = speech_busy or (lambda: False)
+        self.policy=policy
         self.lock = threading.RLock()
         self.jobs = {}
+        self.basic_cache=ByteCache()
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="alder-proofreading")
         self.advanced_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="alder-grammar")
         self.closed = threading.Event()
@@ -150,16 +154,18 @@ class ProofreadingService:
         # must not scan a whole manuscript or hold the job lock before the model
         # can use them. Checking/coverage semantics remain whole-document.
         try:
-            if self._cancelled(job): return
+            self._checkpoint(job)
             self._update(job, status='running', stage='model', message='Preparing sentence review…')
             passages = []
             for passage in revision_passages(text, checked_text, offset, segments, config, selected):
-                if self._cancelled(job): return
+                self._checkpoint(job)
                 passages.append(passage)
             passages.sort(key=lambda passage: 0 if passage['start'] <= focus <= passage['start'] + u16(passage['text']) else abs(passage['start'] - focus))
             coverage = {"totalBlocks": len(passages), "checkedBlocks": 0, "advancedBlocks": 0, "skippedBlocks": 0}
             self._update(job, coverage=coverage)
             self._advanced(job, passages, config, coverage, [])
+        except InterruptedError:
+            return
         except Exception:
             self._update(job, status='partial', message='Sentence review incomplete.', warnings=['Sentence review preparation failed. Try again.'])
         finally:
@@ -172,22 +178,28 @@ class ProofreadingService:
 
     def _update(self, job, **fields):
         with self.lock:
+            if all(job.get(key) == value for key,value in fields.items()): return
             job.update(fields)
             job["sequence"] += 1
 
     def _cancelled(self, job):
         return self.closed.is_set() or job["_cancel"].is_set()
 
+    def _checkpoint(self,job):
+        if self._cancelled(job) or (self.policy and not self.policy.checkpoint(lambda:self._cancelled(job))): raise InterruptedError()
+
     def _append(self, job, results):
         with self.lock:
             existing = job.setdefault("_seen", set())
+            changed = False
             for item in results:
                 key = (item["start"], item["end"], item.get("suggestion"))
                 if key in existing:
                     continue
                 job["annotations"].append(item)
                 existing.add(key)
-            job["sequence"] += 1
+                changed = True
+            if changed: job["sequence"] += 1
 
     def _run(self, job, text, project, config, advanced,segments):
         warnings = []
@@ -197,6 +209,7 @@ class ProofreadingService:
             paragraphs=[]
             for segment in segments:
                 for block in blocks(segment['text']):
+                    self._checkpoint(job)
                     block.update(start=block['start']+segment['start'],language=segment['language'])
                     paragraphs.append(block)
             coverage = {"totalBlocks": len(paragraphs), "checkedBlocks": 0,
@@ -211,7 +224,7 @@ class ProofreadingService:
                 project["dictionary"] = project.get("dictionary", []) + [
                     {"word": word} for word in config["acceptedWords"]]
                 warnings.append("Basic spelling and punctuation only: the local grammar resource pack is unavailable. Full grammar and dialect checks were not performed.")
-            base = language.analyze(text, project, enabled)
+            base = language.analyze(text, project, enabled,checkpoint=lambda:self._checkpoint(job))
             self._update(job, sentences=base["sentences"], truncated=base.get("truncated", False))
             project_findings = []
             encoded = text.encode("utf-16-le")
@@ -223,8 +236,28 @@ class ProofreadingService:
                 local_enabled=['concision','repetition','sentence-length','sentence-openings'] if config['style'] else []
                 if not rules_available:local_enabled+=['spelling','punctuation']
                 if local_enabled:
-                    local=language.analyze(segment['text'],{**project,'language':segment['language']},local_enabled)
-                    findings.extend((item,segment['start']) for item in local['annotations'])
+                    context={**project,'language':segment['language']}
+                    if config['style']:
+                        local=language.analyze(segment['text'],context,local_enabled,checkpoint=lambda:self._checkpoint(job))
+                        findings.extend((item,segment['start']) for item in local['annotations'])
+                    else:
+                        # Spelling/punctuation have no cross-newline dependency.
+                        # Global brackets, custom terms and optional style rules
+                        # above keep their full-context semantics.
+                        scope=fingerprint([segment['language'],local_enabled,project.get('dictionary',[]),project.get('ideas',[]),project.get('settings',{}).get('ignoredRules',[])])
+                        source=segment['text'];cursor=0;units=segment['start']
+                        for match in re.finditer(r'[^\n]+',source):
+                            self._checkpoint(job)
+                            units+=u16(source[cursor:match.start()]);cursor=match.end()
+                            passage_text=match.group();key=fingerprint([scope,passage_text])
+                            with self.lock:
+                                cached=self.basic_cache.get(key)
+                                if cached is not None:self.basic_cache.move_to_end(key)
+                            if cached is None:
+                                cached=language.analyze(passage_text,context,local_enabled,checkpoint=lambda:self._checkpoint(job))['annotations']
+                                with self.lock:self.basic_cache[key]=cached
+                            findings.extend((copy.deepcopy(item),units) for item in cached)
+                            units+=u16(passage_text)
             for item,origin in findings:
                 rule = item.get("ruleId") or "alder:" + item["rule"]
                 if rule in config["ignoredRuleIds"]:
@@ -241,6 +274,7 @@ class ProofreadingService:
             resolved={tag:tag for tag in DIALECTS}
             unsupported=set()
             for block in paragraphs:
+                self._checkpoint(job)
                 if self._cancelled(job):
                     return
                 tag=block['language']
@@ -270,6 +304,8 @@ class ProofreadingService:
                 return
             self._update(job, status="partial" if warnings else "completed", stage="done", warnings=warnings,
                          coverage=coverage, message="Check incomplete." if warnings else "Check complete.")
+        except InterruptedError:
+            return
         except Exception as exc:
             # Runtime exceptions must not be rendered as a clean manuscript.
             message = str(exc) if isinstance(exc, (RuntimeError, ValidationError)) else "The local check failed. Try again or repair the proofreading pack."
@@ -282,6 +318,7 @@ class ProofreadingService:
     def _advanced(self, job, paragraphs, config, coverage, warnings, begin=0):
         try:
             for position in range(begin, len(paragraphs)):
+                self._checkpoint(job)
                 block = paragraphs[position]
                 if self._cancelled(job):
                     return
@@ -296,6 +333,7 @@ class ProofreadingService:
                 while self.speech_busy():
                     if job["_cancel"].wait(.25) or self.closed.is_set():
                         return
+                self._checkpoint(job)
                 self._update(job, message="Reviewing grammar with the local model…")
                 try:
                     block_config = block.get('configuration', config)
@@ -330,6 +368,8 @@ class ProofreadingService:
                     return
             self._update(job, status="partial" if warnings else "completed", stage="done", warnings=warnings,
                          coverage=coverage, message="Check incomplete." if warnings else "Check complete.")
+        except InterruptedError:
+            return
         except Exception as exc:
             message = str(exc) if isinstance(exc, RuntimeError) else "Advanced grammar failed. Fast results remain available."
             self._update(job, status="partial", warnings=warnings + [message], message="Check incomplete.")

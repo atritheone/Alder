@@ -12,6 +12,8 @@ import math
 import re
 from typing import Any
 from uuid import uuid4
+from .performance import span
+MAX_PROJECT_BYTES = 40_000_000
 from .page_geometry import validate_page_settings
 from .page_numbering import validate_numbering
 
@@ -79,6 +81,11 @@ MARK_TYPES = {"bold", "strong", "italic", "em", "underline", "strike", "s", "cod
 
 
 def validate_document(document: Any, *, _plain_fast=True) -> dict:
+    with span('document.validate'):
+        return _validate_document(document, _plain_fast=_plain_fast)
+
+
+def _validate_document(document: Any, *, _plain_fast=True) -> dict:
     if not isinstance(document, dict) or document.get("type") != "doc":
         raise ValidationError("A draft document must have a doc root.")
     count = 0
@@ -322,12 +329,14 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     if not isinstance(raw, dict):
         raise ValidationError("Project must be a JSON object.")
     try:
-        serial = json.dumps(raw, ensure_ascii=False, allow_nan=False)
+        with span('save.validate-json'):
+            serial = json.dumps(raw, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError, RecursionError) as exc:
         raise ValidationError("Project must contain finite JSON values.") from exc
-    if len(serial.encode("utf-8")) > 40_000_000:
+    if len(serial.encode("utf-8")) > MAX_PROJECT_BYTES:
         raise ValidationError("Project exceeds the 40 MB structured-text limit.")
-    p = deepcopy(raw)
+    with span('save.clone'):
+        p = deepcopy(raw)
     _identity(p.get("id"), "project")
     if type(p.get("schemaVersion", 1)) is not int or p.get("schemaVersion", 1) not in (1, 2):
         raise ValidationError("This project uses an unsupported schema version. Its source has been preserved.")
@@ -597,7 +606,8 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
     p.setdefault("updatedAt", p["createdAt"])
     from .document_schema import migrate_project
     try:
-        return migrate_project(p)
+        with span('save.migrate'):
+            return migrate_project(p)
     except ValueError as error:
         raise ValidationError(str(error)) from error
 

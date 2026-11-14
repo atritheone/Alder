@@ -99,6 +99,12 @@ export const hyphenationLayoutChange = (view: EditorView) =>
   layoutChanges.get(view);
 export const clearHyphenationLayoutChange = (view: EditorView) =>
   layoutChanges.delete(view);
+export function restoreHyphenationLayoutChange(view:EditorView,change:ReturnType<typeof hyphenationLayoutChange>){
+  if(!change||view.isDestroyed)return;
+  const current=layoutChanges.get(view);
+  const doc=current&&current.doc!==change.doc?(change.doc!==view.state.doc?change.doc:current.doc):change.doc;
+  layoutChanges.set(view,{doc,from:Math.min(change.from,current?.from??change.from),to:Math.max(change.to,current?.to??change.to)});
+}
 export const hasDiscretionaryBreak = (doc: PMNode, pos: number) =>
   hasHyphenationPosition(breakPositions.get(doc) || [], pos);
 export const hyphenationStatus = (view: EditorView) =>

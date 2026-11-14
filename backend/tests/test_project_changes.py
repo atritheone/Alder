@@ -44,13 +44,13 @@ def test_concurrent_commit_between_read_and_validation_is_rejected(tmp_path, mon
         original = app.state.store.create(template='blank')
         update = app.state.store.update
         advanced = False
-        def concurrent(project_id, project, expected):
+        def concurrent(project_id, project, expected, **options):
             nonlocal advanced
             if not advanced:
                 advanced = True
                 winner = app.state.store.get(project_id); winner['name'] = 'Concurrent winner'
                 update(project_id,winner,expected)
-            return update(project_id,project,expected)
+            return update(project_id,project,expected,**options)
         monkeypatch.setattr(app.state.store,'update',concurrent)
         response=client.put('/api/projects/'+original['id'],json={'expectedRevision':original['revision'],'changes':[{'path':['name'],'value':'Stale edit'}]})
         assert response.status_code==409

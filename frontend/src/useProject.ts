@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project } from "./types";
 import { api } from "./api";
+import { recordOperation } from "./operationPerformance";
 import { canonicalSaved, type SaveReply } from "./saveChanges";
 import { createEditorDraft } from "./editorDraft";
 import { migrateBook } from "./book";
@@ -109,13 +110,16 @@ export function useProject() {
         // own request copy. Retain this revision instead of cloning it twice.
         const snapshot = current.current,
           seq = serial.current;
+        const operationId = crypto.randomUUID();
         setSaveState("Saving…");
         try {
+          const differenceStarted = performance.now();
           const changes =
             savedBase.current?.id === snapshot.id &&
             savedBase.current.revision === revision.current
               ? projectSaveChanges(savedBase.current, snapshot)
               : null;
+          recordOperation('save.diff', differenceStarted, operationId, {changes:changes?.length ?? -1});
           if (changes?.length === 0) {
             setSaveState("Saved");
             continue;
@@ -127,11 +131,15 @@ export function useProject() {
               expectedRevision: revision.current,
               ...(changes ? { changes } : { project: snapshot }),
               responseMode: "changes",
+              operationId,
             },
           );
+          const correctionStarted = performance.now();
           const saved = canonicalSaved(snapshot, reply);
+          recordOperation('save.apply-corrections', correctionStarted, operationId);
           savedBase.current = saved;
           revision.current = saved.revision;
+          const publicationStarted = performance.now();
           if (seq === serial.current) {
             current.current = shareProject(current.current!, saved);
             setProject(current.current);
@@ -140,6 +148,7 @@ export function useProject() {
           }
           if (current.current) remember(current.current);
           setSaveState(dirty.current ? "Saving…" : "Saved");
+          recordOperation('save.publish', publicationStarted, operationId, {newerEdit:dirty.current?1:0});
         } catch (e) {
           dirty.current = true;
           setSaveState("Changes need saving");

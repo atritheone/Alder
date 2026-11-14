@@ -1,4 +1,5 @@
 import { Fragment, Slice, type Node as PMNode } from "prosemirror-model";
+import { recordOperation } from './operationPerformance';
 import { Mapping, StepMap } from "prosemirror-transform";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { pageInsets, type PageGeometry } from "./pageGeometry";
@@ -13,6 +14,7 @@ import {
   hasDiscretionaryBreak,
   hyphenationLayoutChange,
   clearHyphenationLayoutChange,
+  restoreHyphenationLayoutChange,
 } from "./hyphenation";
 import { layoutExactLeading } from "./exactLeading";
 import { flowEndnoteBank, type EndnoteBank } from "./sectionEndnotes";
@@ -132,6 +134,18 @@ export function disposePageLayout(view: EditorView) {
   flowCache.delete(view);
 }
 
+/** Off-screen work may yield only when every flow container is ordinary prose.
+ * Complex note/column/table passes retain their complete synchronous contract. */
+export function canSlicePageFlow(view: EditorView,layout:PageLayout){
+  if(!flowCache.has(view)||layout.columns&&layout.columns.count>1||layout.columnSource||layout.pageReserves?.some(Boolean)||layout.pageMinimums?.length||layout.sectionEndnotes?.length)return false;
+  for(let i=0;i<view.state.doc.childCount;i++){
+    const node=view.state.doc.child(i);
+    if(!['paragraph','heading'].includes(node.type.name))return false;
+    for(let j=0;j<node.childCount;j++){const child=node.child(j);if(!child.isText&&child.type.name!=='hard_break')return false;}
+  }
+  return true;
+}
+
 /** Paginate one continuous editable document using layout-only spacers.
  * Nothing is inserted into the document or its undo/export history.
  */
@@ -141,8 +155,37 @@ export function paginatePages(
   apply: (decorations: DecorationSet) => void,
   invalidate = false,
 ): FlowPage[] {
+  const work = paginatePageSteps(view,layout,apply,invalidate);
+  let step=work.next();
+  while(!step.done) step=work.next();
+  return step.value;
+}
+
+/** Same exact flow algorithm, resumable between blocks for the live viewport.
+ * Print, notes, columns and callers needing immediate complete geometry drain
+ * it synchronously through paginatePages. No partial page map is published. */
+export function* paginatePageSteps(
+  view: EditorView,
+  layout: PageLayout,
+  apply: (decorations: DecorationSet) => void,
+  invalidate=false,
+  quantum=Infinity,
+): Generator<void,FlowPage[],void> {
+  const started=performance.now();
+  let reads=0,writes=0,visited=0,retainedTail=0;
   const doc = view.state.doc;
+  const ordinaryProse=Array.from({length:doc.childCount},(_,i)=>doc.child(i)).every(node=>
+    ['paragraph','heading'].includes(node.type.name)&&Array.from({length:node.childCount},(_,i)=>node.child(i)).every(child=>child.isText||child.type.name==='hard_break'));
+  const rootElements=Array.from(view.dom.children).filter(element=>!element.classList.contains('ProseMirror-widget'));
+  const blockDOM=new Map<number,Element>();
+  if(ordinaryProse&&rootElements.length===doc.childCount)doc.forEach((_node,pos,index)=>blockDOM.set(pos,rootElements[index]));
+  const nodeDOM=(pos:number)=>{
+    const element=blockDOM.get(pos);
+    return element?.isConnected&&element.parentElement===view.dom?element:view.nodeDOM(pos);
+  };
   const hyphenChange = hyphenationLayoutChange(view);
+  let completed=false;
+  try {
   clearHyphenationLayoutChange(view);
   if (hyphenChange && hyphenChange.doc !== doc) invalidate = true;
   const hasSections = Array.from({ length: doc.childCount }, (_, i) =>
@@ -192,6 +235,8 @@ export function paginatePages(
       : undefined;
   // Display zoom is a transform; it cannot change the logical page map.
   if (candidate?.doc.eq(doc) && !hyphenChange) {
+    completed=true;
+    recordOperation('layout.cache-hit',started);
     apply(candidate.decorations);
     return candidate.renderedPages || candidate.pages;
   }
@@ -225,7 +270,7 @@ export function paginatePages(
     while (index > 0) {
       const prior = doc.child(index - 1);
       const priorPos = restart - prior.nodeSize;
-      const element = view.nodeDOM(priorPos);
+      const element = nodeDOM(priorPos);
       if (
         !(element instanceof HTMLElement) ||
         getComputedStyle(element).breakAfter !== "avoid"
@@ -245,13 +290,13 @@ export function paginatePages(
   // one paragraph at a time. Removing hundreds of distant spacers makes the
   // browser collapse/rebuild the entire manuscript for a local edit. Complex
   // containers and keep-with-next chains still use the complete measurement.
-  const simpleProse = !hasSections &&
+  const incrementalProse = !hasSections &&
     !layout.columnSource && !layout.pageReserves?.some(Boolean) &&
     !layout.pageMinimums?.length &&
     Array.from({length:doc.childCount},(_,i)=>doc.child(i)).every(node=>
-      node.type.name==='paragraph' && !node.attrs.styleId && !node.attrs.keepWithNext &&
+      ['paragraph','heading'].includes(node.type.name) &&
       Array.from({length:node.childCount},(_,i)=>node.child(i)).every(child=>child.isText||child.type.name==='hard_break'));
-  const plainProse = !!previous && !!endDiff && simpleProse;
+  const plainProse = !!previous && !!endDiff && incrementalProse;
   let futureSpacers = plainProse ? previous!.spacers.filter(spacer=>spacer.pos>=endDiff!.a && spacer.pos+(endDiff!.b-endDiff!.a)>=restart).map(spacer=>({...spacer,pos:spacer.pos+endDiff!.b-endDiff!.a})) : [];
   let stable = false;
   const prefix =
@@ -307,7 +352,7 @@ export function paginatePages(
         return;
       }
       const element = (
-        elements.length === doc.childCount ? elements[index] : view.nodeDOM(pos)
+        elements.length === doc.childCount ? elements[index] : nodeDOM(pos)
       ) as HTMLElement | null;
       if (!element) return;
       const cached = presentation!.get(element);
@@ -372,8 +417,11 @@ export function paginatePages(
   let inlineImages: HTMLElement[] = [];
   let textBoxes: {from:number;to:number;element:HTMLElement}[] = [];
   let inlineImageRects: DOMRect[] | undefined;
+  const coordinateRects=new Map<number,ReturnType<EditorView['coordsAtPos']>>();
   const fixedKeys = !previous ? new Map((flowCache.get(view)?.spacers || []).filter(spacer=>!spacer.row&&!spacer.nodeSize).map(spacer=>[spacer.pos,spacer.key])) : new Map<number,string|undefined>();
   const render = () => {
+    writes++;
+    coordinateRects.clear();
     inlineImageRects = undefined;
     const painted = [...spacers,...futureSpacers];
     for (const spacer of painted) spacer.key ||= fixedKeys.get(spacer.pos) || `page-${nextSpacerKey++}`;
@@ -439,7 +487,7 @@ export function paginatePages(
             ),
       ),
     ];
-    if (simpleProse) {
+    if (incrementalProse) {
       // Retain the decoration tree for untouched paragraphs, as well as their
       // DOM widgets. Rebuilding the tree defeats ProseMirror's subtree reuse
       // when it combines these spacers with thousands of hyphenation marks.
@@ -484,8 +532,10 @@ export function paginatePages(
       ? frames[page].top + pageInsets(currentLayout).top - margins.top
       : page * pitch;
   const y = (pos: number) => {
+    reads++;
     const box=textBoxes.find(box=>pos>=box.from&&pos<box.to);
-    const rect = box ? (box.element.dataset.imageWrap !== "none" ? view.coordsAtPos(box.to,1) : box.element.getBoundingClientRect()) : view.coordsAtPos(pos, 1);
+    let rect = box ? (box.element.dataset.imageWrap !== "none" ? view.coordsAtPos(box.to,1) : box.element.getBoundingClientRect()) : coordinateRects.get(pos);
+    if(!rect){rect=view.coordsAtPos(pos,1);if(ordinaryProse)coordinateRects.set(pos,rect);}
     let top = rect.top,
       bottom = rect.bottom;
     if (inlineImages.length) {
@@ -501,9 +551,10 @@ export function paginatePages(
         }
       }
     }
+    const origin=rootTop();
     return {
-      top: (top - rootTop()) / scale,
-      bottom: (bottom - rootTop()) / scale,
+      top: (top - origin) / scale,
+      bottom: (bottom - origin) / scale,
     };
   };
   let page = hasSections ? frames.length - 1 : retained;
@@ -598,7 +649,7 @@ export function paginatePages(
     // Inline widgets split a line box. Correct for its actual browser height.
     if (!nodeSize) {
       const actualTop = row
-        ? ((view.nodeDOM(pos) as HTMLElement).getBoundingClientRect().top -
+        ? ((nodeDOM(pos) as HTMLElement).getBoundingClientRect().top -
             rootTop()) /
           scale
         : y(pos).top;
@@ -675,6 +726,7 @@ export function paginatePages(
         }
         if (tail.length) render();
         stable = true;
+        retainedTail=tail.length;
       }
     }
   };
@@ -702,7 +754,19 @@ export function paginatePages(
   const visit = (node: PMNode, pos: number): boolean | undefined => {
     if (stable || pos + node.nodeSize <= restart) return false;
     if (futureSpacers.length && node.isTextblock) {
-      const remaining = futureSpacers.filter(spacer=>spacer.pos<pos||spacer.pos>=pos+node.nodeSize);
+      // Keeping a styled heading with following prose measures that whole
+      // chain. Remove its old gaps together; retained distant gaps must never
+      // be mistaken for authored height in keep-with-next calculations.
+      let end=pos+node.nodeSize;
+      if(incrementalProse){
+        let block=node,index=doc.resolve(pos).index(0)+1;
+        while(getComputedStyle(nodeDOM(end-block.nodeSize) as HTMLElement).breakAfter==='avoid'&&index<doc.childCount){
+          const next=doc.child(index++),element=nodeDOM(end);
+          if(!next.isTextblock||!(element instanceof HTMLElement)||getComputedStyle(element).breakBefore==='page')break;
+          end+=next.nodeSize;block=next;
+        }
+      }
+      const remaining = futureSpacers.filter(spacer=>spacer.pos<pos||spacer.pos>=end);
       if (remaining.length !== futureSpacers.length) {
         futureSpacers = remaining;
         render();
@@ -728,7 +792,7 @@ export function paginatePages(
       const positions: number[] = [];
       node.forEach((_row, offset) => positions.push(pos + 1 + offset));
       const bounds = (row: number) =>
-        (view.nodeDOM(positions[row]) as HTMLElement).getBoundingClientRect();
+        (nodeDOM(positions[row]) as HTMLElement).getBoundingClientRect();
       const headerHeight = headerRows
         ? (bounds(headerRows - 1).bottom - bounds(0).top) / scale
         : 0;
@@ -824,7 +888,7 @@ export function paginatePages(
           for (let cellRow = row; cellRow < end; cellRow++) {
             const rowNode = node.child(cellRow), rowStart = positions[cellRow];
             rowNode.forEach((cell, cellOffset) => {
-              const element = view.nodeDOM(rowStart + 1 + cellOffset) as HTMLElement;
+              const element = nodeDOM(rowStart + 1 + cellOffset) as HTMLElement;
               const style = getComputedStyle(element);
               parallelInsets = {
                 top: (parseFloat(style.paddingTop) || 0) + (parseFloat(style.borderTopWidth) || 0) / 2 +
@@ -876,7 +940,7 @@ export function paginatePages(
       return false;
     }
     if (node.type.name === "table_row") {
-      const element = view.nodeDOM(pos) as HTMLElement;
+      const element = nodeDOM(pos) as HTMLElement;
       const rect = element.getBoundingClientRect();
       if (rect.height / scale <= bodyHeight) {
         if ((rect.bottom - rootTop()) / scale > bodyTop() + bodyHeight)
@@ -885,7 +949,7 @@ export function paginatePages(
       }
     }
     if (node.type.name === "section_break") {
-      const element = view.nodeDOM(pos) as HTMLElement;
+      const element = nodeDOM(pos) as HTMLElement;
       const bank = layout.sectionEndnotes?.find(bank => bank.pos === pos);
       const originalTop = (element.getBoundingClientRect().top - rootTop()) / scale;
       let afterNotes: number | undefined;
@@ -947,7 +1011,7 @@ export function paginatePages(
       return false;
     }
     if (node.type.name === "page_break" || node.type.name === 'column_break') {
-      const element = view.nodeDOM(pos) as HTMLElement | null;
+      const element = nodeDOM(pos) as HTMLElement | null;
       const top = element
         ? (element.getBoundingClientRect().top - rootTop()) / scale
         : y(pos).top;
@@ -961,7 +1025,7 @@ export function paginatePages(
       inlineImageRects = undefined;
       node.forEach((child, offset) => {
         if (["inline_image","text_box","equation","shape"].includes(child.type.name)) {
-          const image = view.nodeDOM(pos + offset + 1);
+          const image = nodeDOM(pos + offset + 1);
           if(["text_box","equation"].includes(child.type.name) && image instanceof HTMLElement)textBoxes.push({from:pos+offset+1,to:pos+offset+1+child.nodeSize,element:image});
           if (image instanceof HTMLElement)
             (child.attrs.wrap && child.attrs.wrap !== 'none' ? wrappedImages : inlineImages).push(image);
@@ -969,7 +1033,7 @@ export function paginatePages(
       });
       let from = pos + 1;
       const end = pos + node.nodeSize - 1;
-      const element = view.nodeDOM(pos) as HTMLElement;
+      const element = nodeDOM(pos) as HTMLElement;
       const flow = getComputedStyle(element);
       const paragraphTop = () => Math.min(y(pos + 1).top, ...wrappedImages.map(image => (image.getBoundingClientRect().top - rootTop()) / scale));
       if (flow.breakBefore === "page" && pos > starts[page])
@@ -994,7 +1058,7 @@ export function paginatePages(
         ) {
           const next = resolved.parent.child(index);
           if (!next.isTextblock || next.type.name === "page_break") break;
-          const nextDOM = view.nodeDOM(nextPosition) as HTMLElement | null;
+          const nextDOM = nodeDOM(nextPosition) as HTMLElement | null;
           if (!nextDOM) break;
           const nextFlow = getComputedStyle(nextDOM);
           if (nextFlow.breakBefore === "page") break;
@@ -1098,7 +1162,7 @@ export function paginatePages(
       return false;
     }
     if (node.isBlock && node.isLeaf) {
-      const element = view.nodeDOM(pos) as HTMLElement | null;
+      const element = nodeDOM(pos) as HTMLElement | null;
       if (element) {
         const rect = element.getBoundingClientRect();
         const top = (rect.top - rootTop()) / scale;
@@ -1111,7 +1175,19 @@ export function paginatePages(
       return false;
     }
   };
-  doc.descendants(visit);
+  // Explicit traversal can pause without retaining a callback stack. The same
+  // visit/skip semantics and child order are used by the synchronous oracle.
+  const traversal=[{node:doc,pos:-1,index:0,offset:0}];
+  let slice=performance.now();
+  while(traversal.length){
+    const frame=traversal.at(-1)!;
+    if(frame.index===frame.node.childCount){traversal.pop();continue;}
+    const node=frame.node.child(frame.index++),pos=frame.pos+1+frame.offset;
+    frame.offset+=node.nodeSize;
+    visited++;
+    if(visit(node,pos)!==false&&node.childCount)traversal.push({node,pos,index:0,offset:0});
+    if(performance.now()-slice>=quantum){yield;slice=performance.now();}
+  }
   const finalBank=layout.sectionEndnotes?.find(bank=>bank.pos===doc.content.size);
   if(finalBank)placeEndnotes(finalBank,doc.content.size,y(Math.max(0,doc.content.size-1)).bottom+4);
   const sectionStarts = [0];
@@ -1139,7 +1215,7 @@ export function paginatePages(
   });
   for (const spacer of spacers) {
     if (!spacer.header?.length) continue;
-    const node = view.nodeDOM(spacer.pos);
+    const node = nodeDOM(spacer.pos);
     const top = node instanceof HTMLElement ? (node.getBoundingClientRect().top - rootTop()) / scale : y(spacer.pos).top;
     const index = pageAtY(pages, top + margins.top, layout);
     const headers = pages[index].header ??= [];
@@ -1159,7 +1235,10 @@ export function paginatePages(
     decorations,
     continuousStates,
   });
+  recordOperation('layout.flow',started,undefined,{reads,writes,visited,tail:retainedTail,restart,invalidated:invalidate?1:0});
+  completed=true;
   return renderedPages;
+  }finally{if(!completed)restoreHyphenationLayoutChange(view,hyphenChange);}
 }
 
 /** Moving a physical page freezes the displayed boundaries as explicit breaks.

@@ -59,7 +59,8 @@ it('keeps a successful handoff acknowledged even if abort arrives during it', as
 it('keeps PDF on the desktop measured-publication route', async () => {
   request.mockResolvedValue({ downloadUrl: 'verified-pdf' });
   const progress = vi.fn();
-  expect(await prepareExport('project', { format: 'pdf' }, new AbortController().signal, progress)).toEqual({ downloadUrl: 'verified-pdf' });
-  expect(request).toHaveBeenCalledExactlyOnceWith('/api/projects/project/export', 'POST', { format: 'pdf' });
-  expect(progress).toHaveBeenLastCalledWith({ stage: 'Measuring and building PDF', cancellable: false });
+  const signal=new AbortController().signal;
+  expect(await prepareExport('project', { format: 'pdf' }, signal, progress)).toEqual({ downloadUrl: 'verified-pdf' });
+  expect(request).toHaveBeenCalledExactlyOnceWith('/api/projects/project/export', 'POST', { format: 'pdf' },signal);
+  expect(progress).toHaveBeenLastCalledWith({ stage: 'Measuring and building PDF', cancellable: true });
 });

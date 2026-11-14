@@ -3,8 +3,21 @@ import os
 import struct
 import subprocess
 import sys
+import hashlib
 from functools import lru_cache
 from pathlib import Path
+
+
+def catalogue_identity():
+    """Opaque epoch for the current font files, including activated collections."""
+    digest = hashlib.sha256()
+    for path in sorted(_font_paths()):
+        try:
+            stat = path.stat()
+            digest.update(str((str(path), stat.st_mtime_ns, stat.st_size)).encode('utf-8'))
+        except OSError:
+            continue
+    return digest.hexdigest()
 
 
 def _font_paths():

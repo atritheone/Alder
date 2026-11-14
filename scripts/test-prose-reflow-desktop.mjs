@@ -158,14 +158,30 @@ try {
         { start, length, insert },
       );
     const changed = await settle();
-    await editor.press("Control+z");
+    await editor.press("ControlOrMeta+z");
     const undone = await settle();
     expect(await page.evaluate(() => window.__layoutProbe.text())).toBe(before);
     expect(undone).toEqual(beforeMap);
-    await editor.press("Control+Shift+z");
+    await editor.press("ControlOrMeta+Shift+z");
     expect(await settle()).toEqual(changed);
     await sameAsFresh(label + " with undo/redo");
   }
+  // Styled headings and keep chains must retain exact fresh-layout geometry
+  // while a live reflow can be abandoned by a newer edit between frames.
+  await page.evaluate(()=>{
+    globalThis.__alderOperationTimings={enabled:true,events:[]};
+    const content=[{type:'heading',attrs:{level:1,keepWithNext:true,spaceAfter:8},content:[{type:'text',text:'A heading approaches its next line'}]},
+      ...Array.from({length:240},(_,i)=>({type:'paragraph',attrs:{keepWithNext:i%9===0,spaceAfter:5,lineSpacingMode:'exact',lineSpacing:18},content:[{type:'text',text:`STYLED${i} `+'A styled paragraph preserves exact page geometry. '.repeat(7)}]}))];
+    window.__layoutProbe.document({type:'doc',content});
+  });
+  await settle();
+  await page.evaluate(()=>{
+    const p=window.__layoutProbe;p.edit(0,0,'The heading grows to require several extra lines. '.repeat(5));
+  });
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+  await page.evaluate(()=>window.__layoutProbe.edit(0,0,'Superseding edit. '));
+  await sameAsFresh('Styled keep chains and superseded sliced reflow');
+  expect(await page.evaluate(()=>globalThis.__alderOperationTimings.events.some(event=>event.event==='layout.slice'))).toBe(true);
   await page.screenshot({ path: path.join(directory, "prose.png") });
   expect(report.errors).toEqual([]);
   report.status = "passed";

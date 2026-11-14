@@ -1,5 +1,5 @@
-import { EditorState } from "@codemirror/state";
-import { bookmarkField, markField } from "./plainTextMarks";
+import { EditorState, type Text } from "@codemirror/state";
+import { bookmarkField, markField, serializeMarks } from "./plainTextMarks";
 
 const fields = { bookmarks: bookmarkField, marks: markField };
 const key = (identity: string) => "alder.txt.metadata." + identity;
@@ -13,15 +13,28 @@ async function digest(text: string) {
   ).join("");
 }
 const writes = new Map<string, Promise<void>>();
+const hashes = new WeakMap<Text, Promise<string>>();
+function documentDigest(doc: Text) {
+  let hash = hashes.get(doc);
+  if (!hash) {
+    hash = digest(doc.toString());
+    hashes.set(doc, hash);
+  }
+  return hash;
+}
 export function persistTextMetadata(
   identity: string,
   state: EditorState,
 ): Promise<void> {
-  const value = state.toJSON(fields);
+  const value = {
+    selection: state.selection.toJSON(),
+    bookmarks: state.field(bookmarkField),
+    marks: serializeMarks(state.field(markField)),
+  };
   const work = (writes.get(identity) || Promise.resolve())
     .catch(() => {})
     .then(async () => {
-      const hash = await digest(state.doc.toString());
+      const hash = await documentDigest(state.doc);
       localStorage.setItem(
         key(identity),
         JSON.stringify({
@@ -47,7 +60,7 @@ export async function readTextMetadata(identity: string, state: EditorState) {
     const value = JSON.parse(localStorage.getItem(key(identity)) || "null");
     if (
       value?.version !== 1 ||
-      value.hash !== (await digest(state.doc.toString()))
+      value.hash !== (await documentDigest(state.doc))
     )
       return null;
     return EditorState.fromJSON(

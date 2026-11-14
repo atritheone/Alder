@@ -18,6 +18,7 @@ from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 from .models import ValidationError, create_project, now, uid, validate_project
 from .system_voices import is_system, references
 from .performance import span
+from .bounded_cache import ByteCache
 
 
 class ConflictError(ValueError):
@@ -32,6 +33,7 @@ class Store:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / "alder.sqlite3"
         self._lock = RLock()
+        self._version_metadata = ByteCache(4*1024*1024,32)
         with self.connection() as conn:
             # Check compatibility before DDL, journal-mode changes, or any write.
             # Version 1 is the only released schema; future migrations must take
@@ -145,24 +147,54 @@ class Store:
                 raise ConflictError("A project with this identity is already open.") from exc
         return [p for p, _ in prepared]
 
-    def update(self, project_id: str, project: dict, expected_revision: int) -> dict:
-        with self._lock, self.connection() as conn:
+    def update(self, project_id: str, project: dict, expected_revision: int, *, _base=None, _changes=None) -> dict:
+        # Validation uses an owned read snapshot, never a live SQLite row. The
+        # revision is checked again after acquiring the writer transaction.
+        with span('save.base-read'):
+            current = _base if _base is not None else self.get(project_id)
+        if expected_revision != current['revision']:
+            raise ConflictError("A newer revision is already saved. Reload before applying this change.", current)
+        if not isinstance(project,dict) or project.get('id')!=project_id:
+            raise ValidationError("The project identity cannot change during an edit.")
+        with span('save.validate'):
+            p = None
+            if _base is not None and _changes is not None:
+                from .project_changes import plain_text_edit
+                p = plain_text_edit(current,project,_changes)
+            incremental = p is not None
+            if p is None: p = validate_project(project,current)
+        p['createdAt'] = current['createdAt']
+        p['updatedAt'] = now()
+        p['revision'] = expected_revision + 1
+        with span('save.serialize'):
+            payload = json.dumps(p,ensure_ascii=False,allow_nan=False)
+        if incremental:
+            from .models import MAX_PROJECT_BYTES
+            from .project_changes import plain_input_bytes
+            too_large=plain_input_bytes(project,p,payload)>MAX_PROJECT_BYTES
+        else: too_large=False
+        if too_large:
+            # Retain the complete route's exact structured-size semantics at the
+            # boundary, including any canonicalisation which adds metadata.
+            p = validate_project(project,current)
+            p.update(createdAt=current['createdAt'],updatedAt=now(),revision=expected_revision+1)
+            payload = json.dumps(p,ensure_ascii=False,allow_nan=False)
+        with span('save.lock-wait'):
+            self._lock.acquire()
+        try:
+            return self._update_locked(project_id, p, payload, expected_revision)
+        finally:
+            self._lock.release()
+
+    def _update_locked(self, project_id, p, payload, expected_revision):
+        with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+            row = conn.execute("SELECT revision,cursor FROM projects WHERE id=?", (project_id,)).fetchone()
             if row is None:
                 raise KeyError("Project does not exist.")
-            current = json.loads(row["snapshot"])
             if expected_revision != row["revision"]:
+                current = json.loads(conn.execute('SELECT snapshot FROM projects WHERE id=?',(project_id,)).fetchone()[0])
                 raise ConflictError("A newer revision is already saved. Reload before applying this change.", current)
-            if not isinstance(project, dict) or project.get("id") != project_id:
-                raise ValidationError("The project identity cannot change during an edit.")
-            with span('save.validate'):
-                p = validate_project(project, current)
-            p["createdAt"] = current["createdAt"]
-            p["updatedAt"] = now()
-            p["revision"] = row["revision"] + 1
-            with span('save.serialize'):
-                payload = json.dumps(p, ensure_ascii=False)
             cursor = row["cursor"] + 1
             conn.execute("DELETE FROM history WHERE project_id=? AND seq>?", (project_id, row["cursor"]))
             conn.execute("INSERT INTO history VALUES (?,?,?)", (project_id, cursor, payload))
@@ -171,7 +203,13 @@ class Store:
             conn.execute("DELETE FROM history WHERE project_id=? AND seq<?", (project_id, max(0, cursor - 200)))
             conn.execute("UPDATE projects SET name=?,revision=?,updated_at=?,cursor=?,snapshot=? WHERE id=?",
                          (p["name"], p["revision"], p["updatedAt"], cursor, payload, project_id))
-            conn.commit()
+            with span('save.commit'):
+                conn.commit()
+            cached=self._version_metadata.get(project_id)
+            if cached and cached['revision']==expected_revision and cached['cursor']==row['cursor']:
+                rows=[{'sequence':cursor,'name':p['name'],'revision':p['revision'],'updatedAt':p['updatedAt']},
+                      *(item for item in cached['rows'] if max(0,cursor-200)<=item['sequence']<cursor)]
+                self._version_metadata[project_id]={'revision':p['revision'],'cursor':cursor,'rows':rows}
             return p
 
     def history_step(self, project_id: str, direction: int) -> dict:
@@ -193,14 +231,21 @@ class Store:
             return p
 
     def versions(self, project_id: str) -> list[dict]:
-        with self.connection() as conn:
-            current = conn.execute("SELECT cursor FROM projects WHERE id=?", (project_id,)).fetchone()
+        with self._lock,self.connection() as conn:
+            conn.execute('BEGIN')
+            current = conn.execute("SELECT cursor,revision FROM projects WHERE id=?", (project_id,)).fetchone()
             if current is None:
                 raise KeyError("Project does not exist.")
-            return [{**dict(row), "current": row["sequence"] == current[0]} for row in conn.execute(
+            cached=self._version_metadata.get(project_id)
+            if cached and cached['revision']==current['revision']:
+                self._version_metadata.move_to_end(project_id)
+                return [{**row,'current':row['sequence']==current['cursor']} for row in cached['rows']]
+            rows=[dict(row) for row in conn.execute(
                 "SELECT seq AS sequence, json_extract(snapshot,'$.name') AS name, "
                 "json_extract(snapshot,'$.revision') AS revision, json_extract(snapshot,'$.updatedAt') AS updatedAt "
                 "FROM history WHERE project_id=? ORDER BY seq DESC LIMIT 201", (project_id,))]
+            self._version_metadata[project_id]={'revision':current['revision'],'cursor':current['cursor'],'rows':rows}
+            return [{**row,'current':row['sequence']==current['cursor']} for row in rows]
 
     def recover_version(self, project_id: str, sequence: int) -> dict:
         with self.connection() as conn:

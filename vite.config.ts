@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 export default defineConfig({
+  resolve: {alias: process.env.VITE_ALDER_PROFILING === '1' ? {'react-dom/client':'react-dom/profiling'} : {}},
   plugins: [react()],
   root: "frontend",
   base: "./",

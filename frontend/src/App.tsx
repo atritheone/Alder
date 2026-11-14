@@ -1027,13 +1027,16 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
     const get = async () => {
       try {
         const result = await api<{ jobs: Job[] }>(
-          `/api/projects/${project.id}/speech`,
+          `/api/projects/${project.id}/speech?summary=true`,
         );
         if (!cancelled) {
-          setJobs(result.jobs);
+          setJobs(current => result.jobs.map(row => {
+            const hydrated=current.find(job=>job.id===row.id&&!job.summary);
+            return hydrated && hydrated.eventSequence===row.eventSequence ? hydrated : row;
+          }));
           if (activeJob) {
             const updated = result.jobs.find((j) => j.id === activeJob.id);
-            if (updated)
+            if (updated && !updated.summary)
               setActiveJob((previous) =>
                 previous?.id === updated.id &&
                 (updated.eventSequence || 0) >= (previous.eventSequence || 0)
@@ -3773,13 +3776,13 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
                       <div className="job-actions">
                         <span>
                           {
-                            formatInteger(job.chunks.filter(
+                            formatInteger(job.readyChunkCount ?? job.chunks.filter(
                               (c) =>
                                 c.status === "ready" ||
                                 c.status === "completed",
                             ).length)
                           }
-                          /{formatInteger(job.chunks.length)} chunks
+                          /{formatInteger(job.chunkCount ?? job.chunks.length)} chunks
                         </span>
                         {job.audioUrl && (
                           <>
@@ -3848,7 +3851,10 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
                           </button>
                         )}
                       </div>
-                      <NarrationReview
+                      {job.summary ? <button onClick={() => void run(async () => {
+                        const loaded=await api<Job>(`/api/speech/jobs/${job.id}`);
+                        setJobs(current=>current.map(row=>row.id===loaded.id?loaded:row));
+                      })}>Open recording</button> : <NarrationReview
                         job={job}
                         onReview={async (request) => {
                           const updated = await api<Job>(
@@ -3906,7 +3912,7 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
                               .catch((e) => setError(e.message));
                           }
                         }}
-                      />
+                      />}
                     </div>
                   ))}
                 </div>

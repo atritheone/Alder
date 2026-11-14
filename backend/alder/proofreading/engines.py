@@ -19,6 +19,7 @@ import urllib.parse
 from ..platform_runtime import resource_executable
 from .contracts import diagnostic, fingerprint, slice16
 from .memory import require_model_memory
+from ..bounded_cache import ByteCache
 from .revisions import REVISION_PROMPT_VERSION
 
 
@@ -87,7 +88,7 @@ class RuleEngine:
         self.process = None
         self.port = None
         self.lock = threading.Lock()
-        self.cache = OrderedDict()
+        self.cache = ByteCache()
         self.languages = {}
 
     def _request(self, method, path, body=None):
@@ -148,8 +149,6 @@ class RuleEngine:
                     raise RuntimeError("The local grammar engine failed. Try the check again or repair its resource pack.") from exc
                 matches = data.get("matches", [])
                 self.cache[key] = copy.deepcopy(matches)
-                while len(self.cache) > 128:
-                    self.cache.popitem(last=False)
         accepted = {word.casefold() for word in config["acceptedWords"]}
         result = []
         for match in matches:
@@ -186,7 +185,7 @@ class ModelEngine:
         self.verified = False
         self.lock = threading.Lock()
         self.last_used = 0.0
-        self.cache = OrderedDict()
+        self.cache = ByteCache(maximum_bytes=8*1024*1024,maximum_entries=2048)
 
     def _start(self):
         if self.process and self.process.poll() is None:
@@ -274,8 +273,6 @@ class ModelEngine:
                         raise RuntimeError("The grammar worker returned an invalid response.")
                     self.last_used = time.monotonic()
                     self.cache[key] = result["corrected"]
-                    while len(self.cache) > 128:
-                        self.cache.popitem(last=False)
                     return result["corrected"]
                 raise RuntimeError("Advanced grammar timed out. Fast checks remain available.")
             except BaseException:

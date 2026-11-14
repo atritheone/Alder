@@ -7,6 +7,7 @@ def canonical_changes(source, saved):
     changes = []
     class FullResponse(Exception): pass
     def compare(before, after, path):
+        if before is after: return
         if len(changes) > 64:
             # Large imports/migrations can normalise thousands of block ids.
             # Use the existing full response rather than applying thousands of

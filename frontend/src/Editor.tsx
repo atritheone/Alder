@@ -1,4 +1,6 @@
 import { bookPageContext, type ChapterBlocks } from "./bookPageContext";
+import { recordOperation } from './operationPerformance';
+import { slicedJob } from './slicedJob';
 import { indexedDecorations, sameDecorations } from "./indexedDecorations";
 import { listItemMoveSpec, moveListItems } from './listItemMoves';
 import { insertListItem, deleteListItems } from './trackedListItems';
@@ -243,6 +245,8 @@ import {
 import { dropCursor } from "prosemirror-dropcursor";
 import {
   paginatePages,
+  paginatePageSteps,
+  canSlicePageFlow,
   disposePageLayout,
   pageAtPosition,
   rearrangePages,
@@ -1253,6 +1257,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   const [documentVersion, documentTick] = useState(0);
   const pageDecorations = useRef(DecorationSet.empty);
   const measuredPages = useRef<FlowPage[]>([]);
+  const pageFlowTask = useRef<{finish:()=>boolean;cancel:()=>void;pending:boolean}|null>(null);
   const lastPageMeasurement = useRef<{
     doc: PMNode;
     key: string;
@@ -1839,7 +1844,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
       isLayoutReady() {
         const v = view.current, layout = latest.current.pageLayout;
-        return !!v && !!layout && !hyphenationStatus(v).pending && !hyphenationStatus(v).error &&
+        return !pageFlowTask.current?.pending && !!v && !!layout && !hyphenationStatus(v).pending && !hyphenationStatus(v).error &&
           !hyphenationLayoutChange(v) && lastPageMeasurement.current?.doc === v.state.doc &&
           lastPageMeasurement.current.displayScale === pageDisplayScaleRef.current &&
           lastPageMeasurement.current.layout === JSON.stringify([layout, latest.current.fontFamily,
@@ -1847,6 +1852,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           document.fonts.status === 'loaded';
       },
       getPagePublication(chapters) {
+        pageFlowTask.current?.finish();
         const v = editableView();
         if (v && hyphenationStatus(v).error)
           throw new Error(hyphenationStatus(v).error);
@@ -1879,6 +1885,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       },
       getIdentity: () => latest.current.identity,
       resolvePageReferences() {
+        pageFlowTask.current?.finish();
         const v = editableView(),
           layout = latest.current.pageLayout;
         if (!v || !layout || lastPageMeasurement.current?.doc !== v.state.doc || lastPageMeasurement.current.displayScale !== pageDisplayScaleRef.current)
@@ -2193,6 +2200,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         return view.current ? projectText(view.current.state.doc).text : "";
       },
       pageAtTextOffset(offset,note) {
+        if(pageFlowTask.current?.pending)return null;
         const v = view.current;
         if (!v) return null;
         try {
@@ -2219,6 +2227,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         v.focus();
       },
       navigatePage(page) {
+        if(pageFlowTask.current?.pending&&!pageFlowTask.current.finish())return;
         const v = editableView(),
           layout = latest.current.pageLayout;
         if (!v || !layout) return;
@@ -2238,6 +2247,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         });
       },
       movePage(from, to) {
+        if(pageFlowTask.current?.pending&&!pageFlowTask.current.finish())return;
         const v = editableView(),
           layout = latest.current.pageLayout;
         if (!v || !layout) return;
@@ -2729,6 +2739,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         }),
         clipboardTextSerializer: (slice) => clipboardText(schema, slice),
         dispatchTransaction(tr) {
+          const transactionStarted = performance.now();
           if (blocked.current && tr.docChanged) return;
           const previous = v.state;
           if (
@@ -2789,6 +2800,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           )
             tr = closeHistory(tr);
           const applied = v.state.applyTransaction(tr);
+          recordOperation('editor.apply',transactionStarted,undefined,{size:applied.state.doc.content.size});
           const next = applied.state;
           const docChanged = applied.transactions.some(
             (transaction) => transaction.docChanged,
@@ -2802,14 +2814,20 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               );
             }
           }
+          const viewStarted = performance.now();
           v.updateState(next);
+          recordOperation('editor.view',viewStarted);
           if (reviewGroup.current?.doc === tr.doc)
             reviewGroup.current.doc = next.doc;
           if (docChanged) {
             documentTick((n) => n + 1);
             setRangeWarning("");
+            const jsonStarted = performance.now();
             const json = documentJSON(next.doc);
+            const text = projectText(next.doc).text;
+            recordOperation('editor.project',jsonStarted);
             lastDocument.current = json;
+            const commitStarted = performance.now();
             withinEditorEdit(
               {
                 projectId: latest.current.projectId,
@@ -2818,10 +2836,13 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                 after: portableEditorState(next),
                 joined: undoDepth(previous) === undoDepth(next),
               },
-              () => (tr.getMeta('projectCommit') || latest.current.onChange)(json, projectText(next.doc).text),
+              () => (tr.getMeta('projectCommit') || latest.current.onChange)(json, text),
             );
+            recordOperation('editor.commit',commitStarted);
           }
+          const selectionStarted = performance.now();
           publishSelection(next);
+          recordOperation('editor.selection',selectionStarted);
           if (tr.selectionSet || docChanged)
             window.dispatchEvent(new Event("alder-proofreading-caret"));
           tick((n) => n + 1);
@@ -3298,7 +3319,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       return;
     let frame = 0;
     let forceMeasurement = false;
+    let flowTask:ReturnType<typeof slicedJob<FlowPage[]>>|undefined;
+    let active=true;
     const measure = (force = false) => {
+      flowTask?.cancel();
+      if(pageFlowTask.current===flowTask)pageFlowTask.current=null;
       forceMeasurement ||= force;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
@@ -3351,21 +3376,20 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         // pending native selection without repainting every plugin again.
         refreshEditorDecorations(v, false);
         const layout = latest.current.pageLayout!;
-        let pages:FlowPage[];
-        try{pages = paginateDocumentNotes(
-          v,
-          layout,
-          (decorations) => {
-            // Equivalent mapped spacer trees need no DOM/selection repaint.
-            // A local edit often remeasures a page without moving its breaks.
-            if (!sameDecorations(pageDecorations.current, decorations)) {
-              pageDecorations.current = decorations;
-              v.updateState(v.state);
-            }
-          },
-          invalidateFlow,
-        );}catch(cause){setRangeWarning(cause instanceof Error?cause.message:String(cause));return;}
-        if (viewport && scrollTop !== undefined && scrollLeft !== undefined) {
+        const sourceDoc=v.state.doc;
+        const layoutStarted=performance.now();
+        const deferredFlow=!invalidateFlow&&!settings.capturePages&&canSlicePageFlow(v,layout);
+        const apply=(decorations:DecorationSet)=>{
+          if(!sameDecorations(pageDecorations.current,decorations)){
+            pageDecorations.current=decorations;v.updateState(v.state);
+          }
+        };
+        const complete=(result:FlowPage[])=>{
+        if(!active||view.current!==v||v.state.doc!==sourceDoc)return;
+        if(pageFlowTask.current===flowTask)pageFlowTask.current=null;
+        let pages=result;
+        recordOperation('layout.measure',layoutStarted,undefined,{pages:pages.length,invalidated:invalidateFlow?1:0});
+        if (!deferredFlow && viewport && scrollTop !== undefined && scrollLeft !== undefined) {
           viewport.scrollTop = scrollTop;
           viewport.scrollLeft = scrollLeft;
         }
@@ -3428,6 +3452,21 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             settings.headingStarts,
           ]),
         };
+        };
+        if(deferredFlow){
+          let sliceStarted=0,sliceTop=0,sliceLeft=0;
+          flowTask=slicedJob(paginatePageSteps(v,layout,apply,false,6),{
+            current:()=>active&&view.current===v&&v.state.doc===sourceDoc,
+            complete,
+            error:cause=>{if(pageFlowTask.current===flowTask)pageFlowTask.current=null;setRangeWarning(cause instanceof Error?cause.message:String(cause));},
+            before:()=>{sliceStarted=performance.now();sliceTop=viewport?.scrollTop||0;sliceLeft=viewport?.scrollLeft||0;},
+            after:()=>{if(viewport?.isConnected){viewport.scrollTop=sliceTop;viewport.scrollLeft=sliceLeft;}recordOperation('layout.slice',sliceStarted);},
+          });
+          pageFlowTask.current=flowTask;flowTask.start();
+        }else{
+          try{complete(paginateDocumentNotes(v,layout,apply,invalidateFlow));}
+          catch(cause){setRangeWarning(cause instanceof Error?cause.message:String(cause));}
+        }
       });
     };
     measure();
@@ -3461,6 +3500,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     window.addEventListener("alder-fonts-changed", fontsChanged);
     window.addEventListener("alder-running-images", fontsChanged);
     return () => {
+      active=false;flowTask?.cancel();if(pageFlowTask.current===flowTask)pageFlowTask.current=null;
       cancelAnimationFrame(frame);
       observer.disconnect();
       v.dom.removeEventListener("load", assetsChanged, true);

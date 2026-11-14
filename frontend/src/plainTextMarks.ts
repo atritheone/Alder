@@ -98,19 +98,20 @@ export const markOccurrences = StateEffect.define<{
   ranges: readonly { start: number; end: number }[];
   color: number;
 }>();
+export function serializeMarks(value: DecorationSet) {
+  const result: { from: number; to: number; color: number }[] = [];
+  value.between(0, 1e12, (from, to, deco) => {
+    result.push({
+      from,
+      to,
+      color: Number(String(deco.spec.class).slice(-1)),
+    });
+  });
+  return result;
+}
 export const markField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
-  toJSON: (value) => {
-    const result: { from: number; to: number; color: number }[] = [];
-    value.between(0, 1e12, (from, to, deco) => {
-      result.push({
-        from,
-        to,
-        color: Number(String(deco.spec.class).slice(-1)),
-      });
-    });
-    return result;
-  },
+  toJSON: serializeMarks,
   fromJSON: (json, state) =>
     Decoration.set(
       (Array.isArray(json) ? json : [])

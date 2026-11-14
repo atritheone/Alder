@@ -1,4 +1,5 @@
 import { useReadReferences } from "./useReadReferences";
+import { prepareVoiceOnDemand } from "./voicePreparation";
 import { useStoredPreference } from "./useStoredPreference";
 import { readingBufferReady, highlightClock } from "./readingBuffer";
 import { voiceLanguageLabel } from "./voiceLabels";
@@ -72,18 +73,8 @@ export default function DocumentReader(p: Props) {
     ]),
     [voice, setVoice] = useState("default");
   const [voicesReady, setVoicesReady] = useState(false);
-  const preparedVoice = useRef<{ id: string; at: number } | null>(null);
   const prepareVoice = useCallback((id: string) => {
-    if (
-      preparedVoice.current?.id === id &&
-      Date.now() - preparedVoice.current.at < 240_000
-    )
-      return;
-    const preparation = { id, at: Date.now() };
-    preparedVoice.current = preparation;
-    void api("/api/speech/prepare", "POST", { voiceId: id }).catch(() => {
-      if (preparedVoice.current === preparation) preparedVoice.current = null;
-    });
+    void prepareVoiceOnDemand(id).catch(() => {});
   }, []);
   const [active, setActive] = useState(false);
   const [job, setJob] = useState<Job | null>(null),

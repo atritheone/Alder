@@ -1,4 +1,5 @@
 import type { Project, DocNode, Clip } from "./types";
+import { recordOperation } from "./operationPerformance";
 export async function api<T = any>(
   path: string,
   method = "GET",
@@ -11,7 +12,12 @@ export async function api<T = any>(
   if (signal && method !== "GET" && !(method === "POST" && /^\/api\/projects\/[^/?#]+\/export$/.test(path) && (body as any)?.format === "pdf"))
     throw new Error("This operation must finish before its result can be discarded.");
   if (window.alder) {
-    if (!signal) return window.alder.request(method, path, body);
+    if (!signal) {
+      const started = performance.now();
+      const result = await window.alder.request(method, path, body);
+      if ((body as any)?.operationId) recordOperation('save.transport', started, (body as any).operationId);
+      return result;
+    }
     const id = crypto.randomUUID();
     let abort!: () => void;
     const cancelled = new Promise<never>((_, reject) => {

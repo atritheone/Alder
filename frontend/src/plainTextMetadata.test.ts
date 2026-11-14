@@ -34,3 +34,15 @@ it("does not apply positions to changed text or malformed stored selections", as
   localStorage.setItem("alder.txt.metadata.p:write", JSON.stringify(saved));
   expect(await readTextMetadata("p:write", state())).toBeNull();
 });
+it("serializes metadata without serializing the document again for caret changes", async () => {
+  const initial = state(),
+    next = initial.update({ selection: { anchor: 4 } }).state;
+  const serialize = vi.spyOn(initial, "toJSON");
+  const digest = vi.spyOn(webcrypto.subtle, "digest");
+  await persistTextMetadata("cached", initial);
+  await persistTextMetadata("cached", next);
+  expect(serialize).not.toHaveBeenCalled();
+  expect(digest).toHaveBeenCalledTimes(1);
+  expect((await readTextMetadata("cached", next))?.selection.main.head).toBe(4);
+  digest.mockRestore();
+});

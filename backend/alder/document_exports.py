@@ -13,8 +13,9 @@ from . import export_staging
 
 
 class DocumentExports:
-    def __init__(self, store, builder=None):
+    def __init__(self, store, builder=None, *, policy=None):
         self.store, self.builder = store, builder
+        self.policy=policy
         self.root = (store.data_dir / 'exports').resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         export_staging.recover(self.root)
@@ -65,6 +66,7 @@ class DocumentExports:
 
     def _prepare(self, job):
         try:
+            if self.policy and not self.policy.checkpoint(job['cancel'].is_set): return
             with self.lock:
                 if job['cancel'].is_set(): return
                 job['status'] = 'building'
@@ -75,7 +77,11 @@ class DocumentExports:
             if self.builder is None:
                 from .publishing import build_export
             else: build_export = self.builder
-            result = build_export(project, job['format'], job['directory'], job['options'])
+            from .work_policy import background, checkpoint
+            with background(self.policy, job['cancel'].is_set):
+                checkpoint()
+                result = build_export(project, job['format'], job['directory'], job['options'])
+                checkpoint()
             path = Path(result['path']).resolve()
             if not path.is_relative_to(job['directory']) or not path.is_file():
                 raise ValidationError('The export component returned an invalid file reference.')

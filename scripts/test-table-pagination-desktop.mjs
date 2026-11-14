@@ -79,6 +79,8 @@ try {
       },
     }));
   const ready = async () => {
+    await page.evaluate(() => document.fonts.ready);
+    await expect.poll(() => page.evaluate(() => window.__layoutProbe.ready())).toBe(true);
     await page.evaluate(
       () =>
         new Promise((resolve) =>

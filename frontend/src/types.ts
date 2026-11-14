@@ -356,6 +356,9 @@ export type SpeechChunk = {
   }[];
 };
 export type Job = {
+  summary?: boolean;
+  chunkCount?: number;
+  readyChunkCount?: number;
   hasMoreText?: boolean;
   eventSequence?: number;
   settings?: { pauseSeconds?: number };

@@ -177,16 +177,24 @@ async function request(method: string, p: string, body?: unknown, signal?: Abort
   if (p !== "/api/health") await startBackend();
   if (!["GET", "POST", "PUT", "DELETE"].includes(method))
     throw new Error("Unsupported request");
+  const operation = (body as any)?.operationId;
+  const encodeStarted = performance.now();
+  const encoded = body ? JSON.stringify(body) : undefined;
+  if (operation) mark('save.main-encode', performance.now()-encodeStarted, operation);
+  const fetchStarted = performance.now();
   const response = await fetch(base + apiPath(p), {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: encoded,
     signal,
   });
+  if (operation) mark('save.main-fetch', performance.now()-fetchStarted, operation);
+  const decodeStarted = performance.now();
   const data = await response.json();
+  if (operation) mark('save.main-decode', performance.now()-decodeStarted, operation);
   if (!response.ok)
     throw new Error(
       typeof data.detail === "string"

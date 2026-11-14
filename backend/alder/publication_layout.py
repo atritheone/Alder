@@ -7,6 +7,9 @@ import re
 
 
 def prepare_layout(project, options=None):
+    from .fonts import catalogue_identity
+    from .work_policy import checkpoint
+    checkpoint()
     from .stationery import validate_stock
     validate_stock(project)
     from .publishing import _prepare_publication, _settings, _publication_sections, _Resources, _warn, plain_text
@@ -52,6 +55,7 @@ def prepare_layout(project, options=None):
         blocks.append({'type': 'page_break'})
         _warn(warnings, 'The publication contents option lists chapter titles. Insert a table of contents in Write for heading entries and generated page references.')
     for index, section in enumerate(sections):
+        checkpoint()
         if index and settings.get('chapterPageBreaks'):
             blocks.append({'type': 'page_break'})
         first = len(blocks)
@@ -62,6 +66,7 @@ def prepare_layout(project, options=None):
             chapter_blocks.append({'id':section['id'],'title':section.get('navigationTitle') or section['title'],
                                    'fromBlock':first,'bodyFromBlock':body_first,'toBlock':len(blocks)})
     def walk(node):
+        checkpoint()
         from .running_matter import stories
         for story in stories(node.get('attrs',{}).get('runningMatter')): walk(story)
         node.get('attrs', {}).pop('_headingLabel', None)
@@ -104,7 +109,7 @@ def prepare_layout(project, options=None):
     # Filesystem-only renderer options never cross into the page or manifest.
     settings.pop('assetRoot', None)
     identity = hashlib.sha256(json.dumps({'document': document, 'settings': settings, 'language': prepared.get('language','en'), 'chapterBlocks':chapter_blocks}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
-    return {'version': 1, 'projectId': project['id'], 'sourceRevision': project.get('revision', 0), 'sourceIdentity': identity,
+    return {'version': 1, 'fontIdentity':catalogue_identity(), 'projectId': project['id'], 'sourceRevision': project.get('revision', 0), 'sourceIdentity': identity,
             'name': project.get('name') or 'Untitled', 'language':prepared.get('language','en'),'document': document, 'settings': settings, 'styles': prepared.get('styles', []),
             'warnings': warnings, 'text': plain_text(document), 'chapterBlocks':chapter_blocks,
             **({'moveSourceIds': move_sources} if move_sources else {})}

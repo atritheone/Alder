@@ -12,9 +12,11 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24.21.0
@@ -30,22 +32,27 @@ jobs:
         run: npm run build
       - name: Check startup, import, and recovery boundaries
         shell: bash
-        run: '"$PYTHON" -B -m pytest backend/tests/test_startup.py backend/tests/test_proofreading.py backend/tests/test_sentence_revisions.py backend/tests/test_plain_text_file.py backend/tests/test_plain_text_api.py backend/tests/test_save_changes.py backend/tests/test_project_changes.py backend/tests/test_plain_validation.py backend/tests/test_core.py backend/tests/test_document_schema.py -q -p no:cacheprovider'
+        run: '"$PYTHON" -B -m pytest backend/tests/test_proofreading.py backend/tests/test_sentence_revisions.py backend/tests/test_plain_text_file.py backend/tests/test_plain_text_api.py backend/tests/test_save_changes.py backend/tests/test_project_changes.py backend/tests/test_incremental_plain_save.py backend/tests/test_operating_cache.py backend/tests/test_work_policy.py backend/tests/test_plain_validation.py backend/tests/test_core.py backend/tests/test_document_exports.py backend/tests/test_publication_layout.py -q -p no:cacheprovider'
       - name: Compare plain validation with the general validator
         shell: bash
         run: '"$PYTHON" -B scripts/developer/benchmark-plain-validation.py --output "$RUNNER_TEMP/validation-results/validation.json"'
+      - name: Check narration state and history metadata boundaries
+        shell: bash
+        run: |
+          "$PYTHON" -B -m pytest backend/tests/test_version_metadata_cache.py backend/tests/test_speech_operating_state.py backend/tests/test_speech_pipeline.py -q -k 'metadata or summaries or dirty or event or cancel or review or resume or staged or intact or corrupt' -p no:cacheprovider
+          "$PYTHON" -B scripts/verify-system-voices.py --output "$RUNNER_TEMP/native-voice-results"
       - name: Check bounded editor decorations and typing
-        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/speechTransport.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
+        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
       - name: Native startup and TXT/DOCX opening
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a node scripts/developer/benchmark-operations.mjs --output "$RUNNER_TEMP/operating-results"
-            xvfb-run -a node scripts/developer/test-startup-lifecycle.mjs
+            xvfb-run -a node scripts/developer/compare-operations.mjs --output "$RUNNER_TEMP/operating-results"
+            xvfb-run -a node scripts/test-prose-reflow-desktop.mjs
             xvfb-run -a node scripts/developer/test-operation-lifecycle.mjs
           else
-            node scripts/developer/benchmark-operations.mjs --output "$RUNNER_TEMP/operating-results"
-            node scripts/developer/test-startup-lifecycle.mjs
+            node scripts/developer/compare-operations.mjs --output "$RUNNER_TEMP/operating-results"
+            node scripts/test-prose-reflow-desktop.mjs
             node scripts/developer/test-operation-lifecycle.mjs
           fi
       - name: Retain timings and failures
@@ -60,3 +67,9 @@ jobs:
         with:
           name: validation-${{ matrix.os }}
           path: ${{ runner.temp }}/validation-results/validation.json
+      - name: Retain native voice evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-voices-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-voice-results/system-voices.json

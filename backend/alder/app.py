@@ -25,7 +25,7 @@ from .models import ValidationError, now, text_document, uid, validate_project
 from .store import ConflictError, Store
 from .platform_runtime import default_data_dir
 from .proofreading import ProofreadingService
-from .performance import span, mark, report as performance_report
+from .performance import span, mark, operation, report as performance_report
 
 
 ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173", "alder://app"}
@@ -37,17 +37,19 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     root = Path(project_root or os.environ.get("ALDER_PROJECT_ROOT") or Path(__file__).resolve().parents[2])
     token = session_token if session_token is not None else os.environ.get("ALDER_SESSION_TOKEN", "")
     from .deferred import DeferredService
+    from .work_policy import WorkPolicy
+    work_policy=WorkPolicy()
     def make_speech():
         from .speech_pipeline import SpeechPipeline as SpeechService
         return SpeechService(store.data_dir, root)
     speech = DeferredService(make_speech)
     proofreading = ProofreadingService(
         Path(os.environ.get("ALDER_RESOURCES_DIR", root / "resources")), store.data_dir,
-        speech_busy=getattr(speech, "has_active_generation", None))
+        speech_busy=getattr(speech, "has_active_generation", None),policy=work_policy)
     from .document_opening import DocumentOpening
     opening = DocumentOpening(store)
     from .document_exports import DocumentExports
-    exports = DocumentExports(store)
+    exports = DocumentExports(store,policy=work_policy)
     shutdown_lock = asyncio.Lock()
     speech_stopped = False
 
@@ -98,7 +100,10 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
                 supplied = request.query_params.get("token", "")
             if not hmac.compare_digest(supplied, token):
                 return JSONResponse({"detail": "An Alder desktop session is required."}, status_code=401)
-        response = await call_next(request)
+        interactive=(request.method=='PUT' and re.fullmatch(r'/api/projects/[^/]+',request.url.path)) or (request.method in ('POST','DELETE') and re.fullmatch(r'/api/speech/jobs/[^/]+/(?:demand|cancel|stop)',request.url.path))
+        if interactive:
+            with work_policy.interactive(): response=await call_next(request)
+        else: response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
@@ -155,7 +160,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
 
     @app.get("/api/performance")
     def performance():
-        return performance_report()
+        return {**performance_report(),'workPolicy':work_policy.report()}
 
     @app.post("/api/lifecycle/shutdown")
     async def shutdown(request: Request):
@@ -299,7 +304,12 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
 
     @app.put("/api/projects/{project_id}")
     async def update(project_id: str, request: Request):
-        data = await body(request)
+        with span('save.request-json'):
+            data = await body(request)
+        with operation(data.get('operationId')), span('save.request'):
+            return await save_update(project_id, data)
+
+    async def save_update(project_id: str, data):
         revision = data.get("expectedRevision")
         if not isinstance(revision, int) or isinstance(revision, bool):
             raise ValidationError("Every edit must include its expectedRevision integer.")
@@ -308,17 +318,22 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             if source is not None: raise ValidationError('Choose a complete snapshot or incremental changes.')
             from .project_changes import apply_project_changes
             def update_changes():
-                current = store.get(project_id)
+                with span('save.base-read'):
+                    current = store.get(project_id)
                 if current['revision'] != revision:
                     raise ConflictError('A newer revision is already saved. Reload before applying this change.', current)
-                submitted = apply_project_changes(current, data['changes'])
-                return submitted, store.update(project_id, submitted, revision)
+                with span('save.apply-changes'):
+                    submitted = apply_project_changes(current, data['changes'],persistent=True)
+                return submitted, store.update(project_id, submitted, revision,_base=current,_changes=data['changes'])
             source, saved = await run_in_threadpool(update_changes)
         else:
             saved = await run_in_threadpool(store.update, project_id, source, revision)
         if data.get('responseMode') == 'changes':
             from .save_changes import canonical_changes
-            return JSONResponse(await run_in_threadpool(canonical_changes, source, saved))
+            def corrections():
+                with span('save.corrections'): return canonical_changes(source, saved)
+            result = await run_in_threadpool(corrections)
+            with span('save.response-json'): return JSONResponse(result)
         return JSONResponse(saved)
 
     @app.get("/api/projects/{project_id}/history")
@@ -601,7 +616,24 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         options = dict(data.get('options') or {})
         options['assetRoot'] = store.asset_dir(project_id)
         try:
-            layout = await run_in_threadpool(prepare_layout, p, options)
+            import anyio
+            import threading
+            from .work_policy import background
+            cancelled = threading.Event()
+            async def observe_disconnect():
+                while not cancelled.is_set():
+                    if await request.is_disconnected():
+                        cancelled.set()
+                        return
+                    await anyio.sleep(.05)
+            def prepare():
+                with background(work_policy, cancelled.is_set): return prepare_layout(p, options)
+            observer = asyncio.create_task(observe_disconnect())
+            try: layout = await run_in_threadpool(prepare)
+            finally:
+                observer.cancel()
+                try: await observer
+                except asyncio.CancelledError: pass
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         if data.get('ephemeral') is True: return layout
@@ -852,9 +884,9 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             raise HTTPException(503, str(exc)) from exc
 
     @app.get("/api/projects/{project_id}/speech")
-    def speech_jobs(project_id: str):
+    def speech_jobs(project_id: str, summary: bool=False):
         p = store.get(project_id)
-        jobs = speech_service().list_jobs(project_id)
+        jobs = speech_service().list_jobs(project_id, **({'summaries':True} if summary else {}))
         for job in jobs:
             job["stale"] = job.get("sourceRevision") != p["revision"]
         return {"jobs": jobs}

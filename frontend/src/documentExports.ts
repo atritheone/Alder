@@ -8,10 +8,9 @@ const cancelled = (signal: AbortSignal) => { if (signal.aborted) throw new DOMEx
 export async function prepareExport(projectId: string, request: unknown, signal: AbortSignal, progress: (value: ExportProgress) => void) {
   cancelled(signal);
   // Desktop PDF must use the measured renderer and verified PDF handoff.
-  // Its layout/capture remains non-cancellable until that pipeline supports it.
   if ((request as { format?: string } | null)?.format === 'pdf') {
-    progress({ stage: 'Measuring and building PDF', cancellable: false });
-    return api(`/api/projects/${projectId}/export`, 'POST', request);
+    progress({ stage: 'Measuring and building PDF', cancellable: true });
+    return api(`/api/projects/${projectId}/export`, 'POST', request, signal);
   }
   let job: ExportJob | undefined, completed = false;
   const cancel = () => { if (job && !completed) void api(`/api/document-export-jobs/${job.id}`, 'DELETE').catch(() => {}); };

@@ -14,6 +14,9 @@ const { values } = parseArgs({
     settle: { type: "string", default: "5000" },
     runs: { type: "string", default: "1" },
     only: { type: "string" },
+    root: { type: "string", default: "." },
+    trace: { type: "boolean", default: false },
+    cpu: { type: "boolean", default: false },
   },
 });
 const resources = path.resolve(
@@ -65,7 +68,8 @@ const cases = [
   "Large 1MiB.txt",
   "Large 1000 paragraphs.docx",
 ];
-if (values.only && !cases.includes(values.only)) throw Error("Choose a supported operating fixture.");
+if (values.only && !cases.includes(values.only))
+  throw Error("Choose a supported operating fixture.");
 for (const filename of cases
   .filter((name) => !values.only || name === values.only)
   .flatMap((name) => Array(runs).fill(name))) {
@@ -82,7 +86,11 @@ for (const filename of cases
       delete env[key];
     app = await electron.launch({
       executablePath: desktopExecutable(),
-      args: [".", "--headless-test", `--user-data-dir=${profile}/chromium`],
+      args: [
+        values.root,
+        "--headless-test",
+        `--user-data-dir=${profile}/chromium`,
+      ],
       env,
       timeout: 60000,
     });
@@ -90,6 +98,10 @@ for (const filename of cases
     page.setDefaultTimeout(60000);
     page.on("pageerror", (e) => sample.errors.push(e.message));
     await page.evaluate(() => window.alder.ready());
+    if (values.trace)
+      await page.evaluate(() => {
+        globalThis.__alderOperationTimings = { enabled: true, events: [] };
+      });
     await app.evaluate(() => {
       const original = globalThis.fetch;
       globalThis.unsolicitedPrepare = 0;
@@ -118,6 +130,12 @@ for (const filename of cases
       .first();
     await editor.waitFor({ state: "visible", timeout: 60000 });
     await page.waitForTimeout(Number(values.settle));
+    let cdp;
+    if (values.cpu) {
+      cdp = await page.context().newCDPSession(page);
+      await cdp.send("Profiler.enable");
+      await cdp.send("Profiler.start");
+    }
     const snapshot = () =>
       page.evaluate(async () => {
         const p = await window.alder.request(
@@ -204,7 +222,22 @@ for (const filename of cases
         : undefined,
     }));
     sample.saveTraffic = await app.evaluate(() => globalThis.saveTraffic);
-    sample.backend = await page.evaluate(() => window.alder.request("GET", "/api/performance"));
+    sample.backend = await page.evaluate(() =>
+      window.alder.request("GET", "/api/performance"),
+    );
+    if (values.trace) {
+      sample.operations = await page.evaluate(
+        () => globalThis.__alderOperationTimings,
+      );
+      sample.main = await page.evaluate(() => window.alder.performance());
+    }
+    if (cdp) {
+      const cpu = await cdp.send("Profiler.stop");
+      fs.writeFileSync(
+        path.join(profile, "renderer-cpu.json"),
+        JSON.stringify(cpu.profile),
+      );
+    }
     sample.status = sample.errors.length ? "failed" : "passed";
   } catch (error) {
     sample.status = "failed";
@@ -214,7 +247,15 @@ for (const filename of cases
   }
   report.scenarios.push(sample);
   save();
-  console.log(JSON.stringify({filename, status:sample.status, quietSaveMs:sample.quietSaveMs, pausedSaveMs:sample.pausedSaveMs, error:sample.error}));
+  console.log(
+    JSON.stringify({
+      filename,
+      status: sample.status,
+      quietSaveMs: sample.quietSaveMs,
+      pausedSaveMs: sample.pausedSaveMs,
+      error: sample.error,
+    }),
+  );
 }
 report.status = report.scenarios.every((s) => s.status === "passed")
   ? "passed"

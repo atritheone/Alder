@@ -159,6 +159,8 @@ def _publication_sections(project, warnings):
 
 def _prepare_publication(project, options=None, warnings=None):
     """Resolve styles and optional generated matter on an isolated snapshot."""
+    from .work_policy import checkpoint
+    checkpoint()
     warnings = warnings if warnings is not None else []
     from .book import publication_project
     prepared = copy.deepcopy(publication_project(project))
@@ -223,6 +225,7 @@ def _prepare_publication(project, options=None, warnings=None):
         return result
 
     def walk(node):
+        checkpoint()
         if not isinstance(node, dict):
             return
         if (options or {}).get('includeReviewComments', prepared.get('settings', {}).get('includeReviewComments', True)) is False:

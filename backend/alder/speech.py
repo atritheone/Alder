@@ -597,8 +597,14 @@ class SpeechService:
             return any(job["status"] in ("queued", "generating", "checking", "cancelling")
                        for job in self._jobs.values())
 
-    def list_jobs(self, project_id):
+    def list_jobs(self, project_id, *, summaries=False):
         with self._lock:
+            if summaries:
+                from .speech_library import summary
+                identities=self._library.ids_for_project(project_id)
+                rows={identity:self._library.rows[identity]['summary'] for identity in identities}
+                rows.update({identity:summary(job) for identity,job in self._jobs.items() if job['projectId']==project_id})
+                return sorted(rows.values(),key=lambda job:job['createdAt'],reverse=True)
             for identity in self._library.ids_for_project(project_id):
                 try:
                     self._job(identity)
