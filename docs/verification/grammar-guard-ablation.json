@@ -1,0 +1,284 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-14",
+  "status": "guard-only-evaluation-complete-defaults-unchanged",
+  "baseCommit": "dedf412a0ebf72c637ebb4eedd3b11ebf098e347",
+  "scope": "Separate existing guard exceptions from model generation and the previously rejected retry strategy.",
+  "method": {
+    "profiles": 32,
+    "uniqueNaturalAndControlCases": 428,
+    "cohorts": {
+      "development": 200,
+      "previouslyExposedValidation": 150,
+      "authoredRegression": 78
+    },
+    "newModelCalls": 0,
+    "paidAPICalls": 0,
+    "allProfilesUseSameLegacyAuditedDraft": true,
+    "sameSerializedRequestsAndPinnedRuntime": true,
+    "references": "ERRANT 3.0.2; all human references independently scored and summed within source. Authored clean/meaning controls supplement natural references.",
+    "newIndependentNaturalValidation": false
+  },
+  "developmentBaseline": {
+    "tp": 176,
+    "fp": 181,
+    "fn": 148,
+    "precision": 0.493,
+    "recall": 0.5432,
+    "f0.5": 0.5023
+  },
+  "familyResults": [
+    {
+      "families": [
+        "contractions"
+      ],
+      "changedDevelopmentDeliveries": [
+        "eracond-5-70-0",
+        "eracond-1-29-7"
+      ],
+      "referenceCounts": {
+        "tp": 179,
+        "fp": 181,
+        "fn": 145,
+        "precision": 0.4972,
+        "recall": 0.5525,
+        "f0.5": 0.5074
+      },
+      "deltaReferenceTP": 3,
+      "deltaReferenceFP": 0,
+      "originalHarmfulChallengeAdmissions": 2,
+      "currentHarmfulChallengeAdmissions": []
+    },
+    {
+      "families": [
+        "existential-negation"
+      ],
+      "changedDevelopmentDeliveries": [
+        "eracond-5-3-1"
+      ],
+      "referenceCounts": {
+        "tp": 179,
+        "fp": 189,
+        "fn": 145,
+        "precision": 0.4864,
+        "recall": 0.5525,
+        "f0.5": 0.4983
+      },
+      "deltaReferenceTP": 3,
+      "deltaReferenceFP": 8,
+      "originalHarmfulChallengeAdmissions": 2,
+      "currentHarmfulChallengeAdmissions": [
+        "harmful-5",
+        "harmful-6"
+      ]
+    },
+    {
+      "families": [
+        "initial-maybe"
+      ],
+      "changedDevelopmentDeliveries": [
+        "eracond-4-16-10"
+      ],
+      "referenceCounts": {
+        "tp": 183,
+        "fp": 181,
+        "fn": 141,
+        "precision": 0.5027,
+        "recall": 0.5648,
+        "f0.5": 0.514
+      },
+      "deltaReferenceTP": 7,
+      "deltaReferenceFP": 0,
+      "originalHarmfulChallengeAdmissions": 1,
+      "currentHarmfulChallengeAdmissions": [
+        "harmful-2"
+      ]
+    },
+    {
+      "families": [
+        "negative-possession"
+      ],
+      "changedDevelopmentDeliveries": [],
+      "referenceCounts": {
+        "tp": 176,
+        "fp": 181,
+        "fn": 148,
+        "precision": 0.493,
+        "recall": 0.5432,
+        "f0.5": 0.5023
+      },
+      "deltaReferenceTP": 0,
+      "deltaReferenceFP": 0,
+      "originalHarmfulChallengeAdmissions": 1,
+      "currentHarmfulChallengeAdmissions": [
+        "harmful-7"
+      ]
+    },
+    {
+      "families": [
+        "quantifier"
+      ],
+      "changedDevelopmentDeliveries": [],
+      "referenceCounts": {
+        "tp": 176,
+        "fp": 181,
+        "fn": 148,
+        "precision": 0.493,
+        "recall": 0.5432,
+        "f0.5": 0.5023
+      },
+      "deltaReferenceTP": 0,
+      "deltaReferenceFP": 0,
+      "originalHarmfulChallengeAdmissions": 2,
+      "currentHarmfulChallengeAdmissions": [
+        "harmful-3",
+        "harmful-4"
+      ]
+    },
+    {
+      "families": [
+        "negative-possession",
+        "quantifier"
+      ],
+      "changedDevelopmentDeliveries": [
+        "eracond-5-52-1"
+      ],
+      "referenceCounts": {
+        "tp": 177,
+        "fp": 190,
+        "fn": 147,
+        "precision": 0.4823,
+        "recall": 0.5463,
+        "f0.5": 0.4939
+      },
+      "deltaReferenceTP": 1,
+      "deltaReferenceFP": 9,
+      "originalHarmfulChallengeAdmissions": 3,
+      "currentHarmfulChallengeAdmissions": [
+        "harmful-3",
+        "harmful-4",
+        "harmful-7"
+      ]
+    },
+    {
+      "families": [
+        "contractions",
+        "existential-negation",
+        "initial-maybe",
+        "negative-possession",
+        "quantifier"
+      ],
+      "changedDevelopmentDeliveries": [
+        "eracond-5-3-1",
+        "eracond-5-52-1",
+        "eracond-5-70-0",
+        "eracond-1-29-7",
+        "eracond-4-16-10"
+      ],
+      "referenceCounts": {
+        "tp": 190,
+        "fp": 198,
+        "fn": 134,
+        "precision": 0.4897,
+        "recall": 0.5864,
+        "f0.5": 0.5064
+      },
+      "deltaReferenceTP": 14,
+      "deltaReferenceFP": 17,
+      "originalHarmfulChallengeAdmissions": 8,
+      "currentHarmfulChallengeAdmissions": [
+        "harmful-2",
+        "harmful-3",
+        "harmful-4",
+        "harmful-5",
+        "harmful-6",
+        "harmful-7"
+      ]
+    }
+  ],
+  "validationAndControls": [
+    {
+      "name": "exposed-validation",
+      "cases": 150,
+      "uniqueOutputs": 1
+    },
+    {
+      "name": "controls",
+      "cases": 78,
+      "uniqueOutputs": 1
+    }
+  ],
+  "safety": {
+    "authoredCases": 23,
+    "faithfulCases": 12,
+    "harmfulMutations": 8,
+    "explicitVocabularyCases": 3,
+    "originalCombinedHarmfulAdmissions": 8,
+    "strictContractionFaithfulAdmissions": 4,
+    "strictContractionHarmfulAdmissions": [],
+    "strictContractionVocabularyFailures": [],
+    "policy": "Contract challenges are targeted functional checks, not independent editorial ratings or estimates of naturally occurring harm."
+  },
+  "contractionRefinement": {
+    "wholePassageMustMatchAfterPairedApostrophes": true,
+    "terminalFullStopOptional": true,
+    "quotedSpansExcluded": true,
+    "naturalRecoveriesRetained": 2,
+    "scope": "Developer opt-in candidate only; does not relax application defaults or trigger another generation."
+  },
+  "timing": {
+    "baseline": {
+      "p50Milliseconds": 0.1553,
+      "p95Milliseconds": 0.1703
+    },
+    "strict-contractions": {
+      "p50Milliseconds": 0.3551,
+      "p95Milliseconds": 0.3776
+    },
+    "scope": "Guard-only hot-loop on one known development example; not complete service or native inference latency."
+  },
+  "tests": {
+    "relevantPassed": 237,
+    "fullSuiteRun": false,
+    "integration": "One request, UTF-16 selected-document offsets, creative/rephrase exclusion"
+  },
+  "decision": {
+    "enableAnyDefault": false,
+    "takeForward": [
+      "exact-only contractions"
+    ],
+    "keepDisabled": [
+      "initial-maybe",
+      "quantifier",
+      "existential-negation",
+      "negative-possession"
+    ],
+    "reason": "Exact contractions preserve the known two recoveries and block the authored hazards. No family has shown fresh independent natural benefit; broader exceptions still admit specified harmful edits."
+  },
+  "limitations": [
+    "Previously exposed natural cohorts cannot establish new generalisation or Grammarly parity.",
+    "Human-reference unmatched proposed edits may be valid paraphrases; they are not independently judged grammar mistakes.",
+    "Initial-maybe has a useful developmental recovery but unresolved conditional-meaning risk.",
+    "Quantifier plus negative possession recover one attractive paragraph only together; no standalone benefit was observed.",
+    "No inference weights/runtime, memory admission, installed application, user data, or frontend code changed."
+  ],
+  "rights": {
+    "naturalData": [
+      "ErAConD MIT development data",
+      "JFLEG CC-BY-NC-SA-4.0 local noncommercial research only"
+    ],
+    "benchmarkTextRedistributed": false,
+    "oldSealedTestOpened": false
+  },
+  "provenance": {
+    "strictStudySHA256": "c2ef20987e1aaa8a2f0b111a9b10d62e7b613f9f75603b9656940acdcbd1badc",
+    "originalStudySHA256": "4237c7b9d7905583af0ee4d13ea00083451dd89a5195ad855115485acad33b31",
+    "strictReportSHA256": "cb51922058cffb1021f7c53db14880704fd7684135bf1f2a9d6327c497578880",
+    "challengeInputSHA256": "d698fab277be65754ac8fa453382f608c333b248ef8b51750067ba6c4597c347",
+    "originalChallengeOutcomesSHA256": "47614e8ca521e1bee32a3930adbcbdcb41e171fcbf15deadfec1e7af996e711f",
+    "naturalEquivalenceSHA256": "8e10c51cc9ffb176e066eea367119575278ccaba0af00b19d7ced2a03cd71074",
+    "originalArchiveSHA256": "f6194ab565e3b3da7229c27a581f2ad5ca60e109767056ea251240037061162e",
+    "strictArchiveSHA256": "99d6af9a1a891b1910ddc9824c0c8b1f04f398aef338384130a4ec135bb70180"
+  },
+  "evidenceDirectoryHint": "%LOCALAPPDATA%/AlderTesting/guard-ablation-20261114"
+}

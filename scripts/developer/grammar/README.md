@@ -543,6 +543,33 @@ positive diagnostic evidence. Its 10% reference-error reduction target is not
 editorial certification, a commercial dataset licence or Grammarly parity.
 No cloud judge or paid API is required for this repeatable regression comparison.
 
+### Guard-only ablation
+
+`guard_ablation.py --config <external-json> --output <new-external-directory>`
+replays the incumbent finaliser once, then applies all 32 combinations of the
+five lexical families to each identical audited draft. Config has `resources`
+and `cohorts`; each cohort provides `name`, `corpus`, `recorded`, `archive` and
+`split`. Recorded inference must cover its complete split; the archive, actual
+serialized requests, worker and pinned runtime are verified. No native model
+inference is allowed by the replay callback. Do not reuse incomplete or changed
+requests as a guessed response.
+
+`guard_challenges.py --output <external-json>` writes the authored safety inputs.
+Using the retained developer ERRANT environment,
+`guard_ablation_report.py --study <study.json> --challenges <external-json>
+--output-directory <new-external-directory>` scores all fixed-reference profiles,
+deduplicating identical outputs. Its safety contracts remain distinct from human
+reference overlap and cannot be relabelled as independent editorial ratings.
+
+`lexical_repairs=True` retains all-family study selection; an explicit collection
+selects individual `contractions`, `initial-maybe`, `quantifier`,
+`existential-negation` and `negative-possession` families. Unknown family names
+are rejected. The contraction exception now requires the whole passage to match
+after paired apostrophe insertion, with only a terminal full stop optional, and
+excludes quoted spans. Other exceptions remain unsafe on specified adversarial
+examples. Application defaults remain disabled. See
+`docs/grammar-guard-ablation-study.md` for the completed 14 November comparison.
+
 For application integration, `replay.py --recorded-source <frozen-source>` also
 verifies the worker/prompt and model/runtime identities, then compares the old
 and current engines' actual serialized model requests before returning each

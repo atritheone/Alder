@@ -1,6 +1,21 @@
 """Paired, narrow lexical repairs; never a general permission to change names."""
 import re
 
+REPAIR_FAMILIES=frozenset({'contractions','initial-maybe','quantifier',
+                         'existential-negation','negative-possession'})
+QUOTES=r'''"[^"]*"|“[^”]*”|‘[^’]*’|(?<!\w)'[^']*'(?!\w)'''
+
+
+def lexical_families(value):
+    """Keep the original boolean study option, or select explicit ablation arms."""
+    if value is True:return REPAIR_FAMILIES
+    if value is False or value is None:return frozenset()
+    if not isinstance(value,(tuple,list,set,frozenset)):
+        raise ValueError('Invalid lexical repair families.')
+    result=frozenset(value)
+    if not result<=REPAIR_FAMILIES:raise ValueError('Unknown lexical repair family.')
+    return result
+
 
 def _clause_anchor(text,start):
     clause=re.split(r'[.!?;,:]',text[:start])[-1]
@@ -13,24 +28,35 @@ def initial_maybe(source,target):
     return bool(match and re.match(r'^\s*maybe\s+'+match[1]+r'\s+'+match[2]+r'\b',target,re.I))
 
 
-def repaired_names(source,target):
+def repaired_names(source,target,families=REPAIR_FAMILIES):
     """Only isolated clause-initial malformed contractions with aligned verbs.
 
     Explicit accepted vocabulary is still checked independently. Repeated/mixed
     name uses are excluded; ordinary third-person verbs and internal names stay
     protected. These edits are opt-in until the fixed-model study qualifies them.
     """
-    result=set();normalized=target.replace('’',"'")
+    result=set();normalized=target.replace('’',"'");contractions={}
     verbs=r'(?:go|watch|see|send|check|call|try|take|bring|write|help|be|have|leave|wait|meet|start|look|do|make|read)'
-    for word,replacement in (('Ill',"I'll"),('Lets',"Let's")):
+    for word,replacement in ((('Ill',"I'll"),('Lets',"Let's")) if 'contractions' in families else ()):
         if len(re.findall(r'\b'+word+r'\b',source))!=1:continue
         prefix=r'(?:^|(?<=[.!?])\s+|\b(?:Thanks|Well|Okay|Yes|Sure|Hello|Hi),\s+)'
         match=re.search(prefix+word+r'\s+('+verbs+r')\b',source)
         if not match:continue
+        position=re.search(r'\b'+word+r'\b',source).start()
+        if any(quote.start()<=position<quote.end() for quote in re.finditer(QUOTES,source)):continue
         repaired=r'(?<!\w)'+re.escape(replacement)+r'\s+'+match[1]+r'\b'
         if len(re.findall(repaired,normalized))-len(re.findall(repaired,source.replace('’',"'")))==1 and not re.search(r'\b'+word+r'\b',target):
-            result.add(word)
-    if initial_maybe(source,target):
+            contractions[word]=replacement
+    # Removing a name veto must not also license an unrelated clause rewrite.
+    # For this small family the entire passage must match after inserting the
+    # paired apostrophes; only a terminal full stop is optional. Larger rewrites
+    # remain withheld, even when they also contain a legitimate contraction.
+    aligned=source.replace('’',"'")
+    for word,replacement in contractions.items():
+        aligned=re.sub(r'\b'+word+r'\b',lambda _:replacement,aligned)
+    if aligned.strip().removesuffix('.')==normalized.strip().removesuffix('.'):
+        result.update(contractions)
+    if 'initial-maybe' in families and initial_maybe(source,target):
         match=re.match(r'^\s*(may)\b',source,re.I)
         if match and len(re.findall(r'\b'+re.escape(match[1])+r'\b',source))==1:result.add(match[1])
     # A unique malformed quantifier, not an unrestricted capitalised-word fix.
@@ -38,19 +64,18 @@ def repaired_names(source,target):
     # retain their original protection. Explicit dictionary entries are checked
     # separately by revision_rejection().
     quantifier=re.search(r'\b[aA]\s+(Lo)\s+of\s+([^\W\d_]+(?:\s+[^\W\d_]+)?)\b',source)
-    quotes=r'''"[^"]*"|“[^”]*”|‘[^’]*’|(?<!\w)'[^']*'(?!\w)'''
-    if (quantifier and len(re.findall(r'\bLo\b',source))==1 and not re.search(r'\bLo\b',target)
-        and not any(match.start()<=quantifier.start()<match.end() for match in re.finditer(quotes,source))):
+    if ('quantifier' in families and quantifier and len(re.findall(r'\bLo\b',source))==1 and not re.search(r'\bLo\b',target)
+        and not any(match.start()<=quantifier.start()<match.end() for match in re.finditer(QUOTES,source))):
         paired=r'\ba\s+lot\s+of\s+'+r'\s+'.join(re.escape(word) for word in quantifier[2].split())+r'\b'
         if len(re.findall(paired,target,re.I))-len(re.findall(paired,source,re.I))==1:result.add('Lo')
     return result
 
 
-def modality_source(source,target):
+def modality_source(source,target,families=REPAIR_FAMILIES):
     """Normalize malformed adverb/negative-quantity forms only with paired evidence."""
     if source.count('?')!=target.count('?'):return source
-    if initial_maybe(source,target):source=re.sub(r'^(\s*)may be\b',r'\1maybe',source,count=1,flags=re.I)
-    for quantifier in ('much','many','enough'):
+    if 'initial-maybe' in families and initial_maybe(source,target):source=re.sub(r'^(\s*)may be\b',r'\1maybe',source,count=1,flags=re.I)
+    for quantifier in (('much','many','enough') if 'existential-negation' in families else ()):
         # Limit polarity normalization to the same existential construction and
         # tense. A matching quantity in another participant's claim is not proof.
         pattern=r"\b(theres|there's|there (?:is|are|was|were))\s+no\s+"+quantifier+r'\b((?:\s+[^\W\d_]+){0,2})'
@@ -65,7 +90,7 @@ def modality_source(source,target):
     # and "I have nothing else to do" express the same scoped negative. Match
     # subject, tense and the complete remaining clause, not merely a nearby
     # word "nothing". Other have-predicates make the alignment ambiguous.
-    if (len(re.findall(r'\b(?:have|has|had)\b',source,re.I))==1
+    if ('negative-possession' in families and len(re.findall(r'\b(?:have|has|had)\b',source,re.I))==1
         and len(re.findall(r'\b(?:have|has|had)\b',target,re.I))==1
         and re.findall(r'\b(?:if|unless|when|whenever|because|although|while|since|until|before|after)\b',source.casefold())
             ==re.findall(r'\b(?:if|unless|when|whenever|because|although|while|since|until|before|after)\b',target.casefold())):

@@ -220,8 +220,9 @@ def revision_rejection(text, corrected, accepted, *, lexical_repairs=False):
     if changes_known_direction(text,corrected):return 'scalar-direction'
     source_modality,target_modality=negative_forms(text),negative_forms(corrected)
     if lexical_repairs:
-        from .lexical_repairs import modality_source
-        source_modality=modality_source(source_modality,target_modality)
+        from .lexical_repairs import modality_source,lexical_families
+        families=lexical_families(lexical_repairs)
+        source_modality=modality_source(source_modality,target_modality,families)
     if Counter(re.findall(modality, source_modality, re.I)) != Counter(re.findall(modality, target_modality, re.I)):
         return 'modality-or-negation'
     for word in accepted:
@@ -232,7 +233,7 @@ def revision_rejection(text, corrected, accepted, *, lexical_repairs=False):
     names = protected_names(text, corrected)
     if lexical_repairs:
         from .lexical_repairs import repaired_names
-        names-=repaired_names(text,corrected)
+        names-=repaired_names(text,corrected,families)
     for name in names:
         if len(re.findall(r'\b' + re.escape(name) + r'\b', text)) != len(re.findall(r'\b' + re.escape(name) + r'\b', corrected)):
             return 'protected-name'
