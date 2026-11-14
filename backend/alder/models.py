@@ -78,7 +78,7 @@ MARK_TYPES = {"bold", "strong", "italic", "em", "underline", "strike", "s", "cod
               "textStyle", "text_style", "highlight", "subscript", "superscript", "color", "fontFamily", "fontSize"}
 
 
-def validate_document(document: Any) -> dict:
+def validate_document(document: Any, *, _plain_fast=True) -> dict:
     if not isinstance(document, dict) or document.get("type") != "doc":
         raise ValidationError("A draft document must have a doc root.")
     count = 0
@@ -99,6 +99,14 @@ def validate_document(document: Any) -> dict:
         attrs = node.get("attrs", {}) or {}
         if not isinstance(attrs, dict):
             raise ValidationError("Node attributes must be an object.")
+        # Most TXT nodes have no formatting, URLs, objects or revision metadata.
+        # Count/depth/type/text/container checks above still cover every node;
+        # global move/list/identity checks below are unchanged. Rich nodes keep
+        # the complete attribute/mark path rather than relying on a cache key.
+        if _plain_fast and node['type'] in ('text', 'paragraph') and set(attrs) <= {'blockId'} and node.get('marks', []) == []:
+            if node['type'] == 'paragraph' or not children:
+                for child in children: walk(child, depth + 1)
+                return
         if node['type'] == 'citation':
             from .citation_sources import validate_citation
             validate_citation(attrs)
