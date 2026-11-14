@@ -74,7 +74,9 @@ try {
     );
     const editor = page.locator(".cm-content[contenteditable=true]");
     await expect(editor).toBeVisible({ timeout: 60000 });
-    await expect(page.locator(".save-status")).toHaveText("Saved", { timeout: 30000 });
+    await expect(page.locator(".save-status")).toHaveText("Saved", {
+      timeout: 30000,
+    });
     await page.waitForTimeout(3000);
     await editor.focus();
     await page.keyboard.press(
@@ -93,19 +95,6 @@ try {
         })
         .toBe("x".repeat(i + 1) + text);
       const raw = fs.readFileSync(file);
-      expect(decode(raw)).toBe("x".repeat(i + 1) + text);
-      if (utf16)
-        expect([...raw.subarray(0, 2)]).toEqual([...original.subarray(0, 2)]);
-      if (!utf16 && original.includes(Buffer.from("\r\n")))
-        expect(raw.toString("utf8").includes("\r\n")).toBe(true);
-      const bom = utf16 ? 2 : 0;
-      expect(raw).toEqual(
-        Buffer.concat([
-          original.subarray(0, bom),
-          Buffer.from("x".repeat(i + 1), utf16 ? "utf16le" : "utf8"),
-          original.subarray(bom),
-        ]),
-      );
       const digest = createHash("sha256").update(raw).digest("hex");
       await expect
         .poll(
@@ -117,6 +106,22 @@ try {
         )
         .toBe(true);
       timings.push(performance.now() - start);
+      // Keep the byte oracle outside the measured Save interval.
+      expect(decode(raw)).toBe("x".repeat(i + 1) + text);
+      if (utf16)
+        expect([...raw.subarray(0, 2)]).toEqual([...original.subarray(0, 2)]);
+      if (!utf16 && original.includes(Buffer.from("\r\n")))
+        expect(raw.toString("utf8").includes("\r\n")).toBe(true);
+      const bom = utf16 ? 2 : 0;
+      expect(
+        raw.equals(
+          Buffer.concat([
+            original.subarray(0, bom),
+            Buffer.from("x".repeat(i + 1), utf16 ? "utf16le" : "utf8"),
+            original.subarray(bom),
+          ]),
+        ),
+      ).toBe(true);
     }
     const saved = fs.readFileSync(file);
     fs.appendFileSync(
