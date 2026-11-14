@@ -47,6 +47,7 @@ import {
 import { readingStatus, readingStatusKey } from "./readingStatus";
 import { usePlaybackSettings } from "./usePlaybackSettings";
 import { countSentences } from "./textCounts";
+import { chapterStats } from "./chapterStats";
 import type { Annotation, Chapter, Project } from "./types";
 import { pageAtPosition, type FlowPage } from "./pageFlow";
 import { pagesInRange } from "./pageRanges";
@@ -99,16 +100,16 @@ export default function BookWorkspace(p: Props) {
       chapters.map((chapter) =>
         plainTextWriting && !speechPlaying && !p.externalPlayback
           ? []
-          : indexWords(chapter.text),
+          : chapterStats(chapter, true).index!,
       ),
     [chapters, plainTextWriting, speechPlaying, p.externalPlayback],
   );
   const wordCounts = plainTextWriting
-    ? chapters.map((chapter) => words(chapter.text))
+    ? chapters.map((chapter) => chapterStats(chapter).words)
     : wordIndexes.map((index) => index.length);
   const totalWords = wordCounts.reduce((total, count) => total + count, 0);
   const totalSentences = useMemo(
-    () => chapters.reduce((sum, item) => sum + countSentences(item.text), 0),
+    () => chapters.reduce((sum, item) => sum + chapterStats(item).sentences, 0),
     [chapters, plainTextWriting],
   );
   const chapter = chapters.find((c) => c.id === p.chapterId) || chapters[0];

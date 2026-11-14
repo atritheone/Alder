@@ -4,6 +4,7 @@ import type { Analysis, Project, DocNode } from "./types";
 import { generatedTextSpans, intersectsTextSpans } from "./textProjection";
 import { proofreadingLanguages } from "./proofreadingLanguages";
 import { useSentenceRevisions } from "./useSentenceRevisions";
+import { proofreadingContext } from "./proofreadingContext";
 
 export type ProofreadingResult = Analysis & {
   id: string;
@@ -96,6 +97,8 @@ export function useProofreading(
     project?.settings.ignoredRules,
     project?.dictionary,
   ]);
+  const context = useMemo(() => project ? proofreadingContext(project) : undefined,
+    [project?.language, project?.dictionary, project?.ideas, project?.settings]);
   const revisions = useSentenceRevisions(
     text,
     targetId,
@@ -108,6 +111,7 @@ export function useProofreading(
     revisionRange,
     rephrase,
     flush,
+    context,
   );
   useEffect(() => {
     setRevisionRange(null);
@@ -161,7 +165,6 @@ export function useProofreading(
     timer = setTimeout(
       async () => {
         try {
-          await flush();
           if (disposed) return;
           const job = await api<ProofreadingResult>(
             "/api/proofreading/check",
@@ -170,6 +173,7 @@ export function useProofreading(
               text: source,
               targetId: target,
               projectId: project.id,
+              projectContext: context,
               configuration: JSON.parse(configuration),
               advanced,
               range: JSON.parse(selectedRange),
@@ -209,6 +213,7 @@ export function useProofreading(
     refresh,
     advanced,
     flush,
+    context,
   ]);
   const current =
     result?.targetId === targetId &&

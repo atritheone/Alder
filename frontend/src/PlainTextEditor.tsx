@@ -1,3 +1,4 @@
+import { changedPlainDocument } from "./plainTextChanges";
 import {
   forwardRef,
   useEffect,
@@ -829,10 +830,8 @@ export default forwardRef<EditorHandle, Props>(
                   undoDepth(update.startState) === undoDepth(update.state),
               },
               () => {
-                const document = plainTextDocument(
-                  text,
-                  lastPlainDocument.current,
-                );
+                const document = changedPlainDocument(lastPlainDocument.current,
+                  update.startState.doc, update.state.doc, update.changes);
                 lastPlainDocument.current = document;
                 latest.current.onChange(document, text);
               },

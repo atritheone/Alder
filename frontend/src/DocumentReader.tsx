@@ -85,11 +85,6 @@ export default function DocumentReader(p: Props) {
       if (preparedVoice.current === preparation) preparedVoice.current = null;
     });
   }, []);
-  useEffect(() => {
-    if (!voicesReady) return;
-    const timer = setTimeout(() => prepareVoice(voice), 400);
-    return () => clearTimeout(timer);
-  }, [voice, voicesReady, prepareVoice]);
   const [active, setActive] = useState(false);
   const [job, setJob] = useState<Job | null>(null),
     [error, setError] = useState("");

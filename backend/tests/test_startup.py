@@ -72,3 +72,20 @@ def test_project_payload_and_proofreading_context_preserve_language_settings(tmp
     assert context['settings']['customRules'] == saved['settings']['customRules']
     assert context['settings']['longSentenceWords'] == 45
     assert 'clips' not in context and 'book' not in context
+
+
+def test_proofreading_uses_validated_unsaved_configuration_without_saving(tmp_path):
+    from alder.app import create_app
+    app = create_app(tmp_path)
+    project = app.state.store.create(template='blank')
+    received = []
+    app.state.proofreading.start = lambda data, context: received.append(context) or {'status':'completed'}
+    context = {'language':'en-GB','dictionary':[], 'ideas':[],
+               'settings':{'customRules':[{'id':'live','match':'word','message':'Live'}]}}
+    with TestClient(app) as client:
+        response=client.post('/api/proofreading/check',json={'projectId':project['id'],'projectContext':context})
+        assert response.status_code == 200
+        assert received[-1]['settings']['customRules'][0]['id']=='live'
+        assert app.state.store.get(project['id'])['revision']==project['revision']
+        context['settings']['customRules'][0]['match']=''
+        assert client.post('/api/proofreading/check',json={'projectId':project['id'],'projectContext':context}).status_code==422

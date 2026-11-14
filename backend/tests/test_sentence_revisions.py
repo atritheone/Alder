@@ -1,9 +1,24 @@
 from alder.proofreading.revisions import sentences, revision, passages, complete_spelling
-from alder.proofreading.contracts import configuration, language_segments, u16, diagnostic
+from alder.proofreading.contracts import configuration, language_segments, u16, diagnostic, slice16
 from alder.proofreading.service import ProofreadingService
 import time
 import threading
 import pytest
+
+
+def test_passages_encode_manuscript_once_and_preserve_astral_offsets():
+    class Counted(str):
+        calls = 0
+        def encode(self, *args, **kwargs):
+            self.calls += 1
+            return super().encode(*args, **kwargs)
+    text = Counted(('😀 A clear sentence. Another sentence.\n') * 300)
+    config = configuration({})
+    rows = list(passages(text, text, 0, language_segments(text, [], 'en-GB'), config, None))
+    assert len(rows) == 600
+    assert text.calls < 5
+    for row in rows:
+        assert slice16(text, row['start'], row['start'] + u16(row['text'])) == row['text']
 
 
 def test_restructuring_is_not_limited_to_small_edits():

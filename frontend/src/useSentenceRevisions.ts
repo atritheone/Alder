@@ -21,6 +21,7 @@ export function useSentenceRevisions(
   range: { start: number; end: number } | null,
   rephrase: boolean,
   flush: () => Promise<void>,
+  projectContext?: unknown,
 ) {
   const submitted = useRef({ targetId: "", text: "" });
   const stop = useRef<() => void>(() => {});
@@ -87,7 +88,6 @@ export function useSentenceRevisions(
     timer = setTimeout(
       async () => {
         try {
-          await flush();
           if (disposed) return;
           setState((s) => ({
             ...s,
@@ -110,6 +110,7 @@ export function useSentenceRevisions(
             text,
             targetId: `${targetId}:revision`,
             projectId,
+            projectContext,
             revision: true,
             focus: range?.start ?? focus,
             revisionMode: rephrase ? "rephrase" : "improve",
@@ -154,6 +155,7 @@ export function useSentenceRevisions(
     range,
     rephrase,
     flush,
+    projectContext,
   ]);
   const valid =
     enabled &&

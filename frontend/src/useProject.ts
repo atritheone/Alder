@@ -31,6 +31,7 @@ export function useProject() {
     [],
   );
   const opened = useRef(new Map<string, Project>());
+  const dirtySince = useRef(0);
   const recentlyClosed = useRef<Project[]>([]);
   const [restoreDone, setRestoreDone] = useState(false);
   const restoreManifest = useRef(readTextSessionManifest());
@@ -98,7 +99,10 @@ export function useProject() {
     const task = (async () => {
       while (dirty.current && current.current) {
         dirty.current = false;
-        const snapshot = structuredClone(current.current),
+        dirtySince.current = 0;
+        // Project changes publish immutable snapshots; the IPC bridge takes its
+        // own request copy. Retain this revision instead of cloning it twice.
+        const snapshot = current.current,
           seq = serial.current;
         setSaveState("Saving…");
         try {
@@ -262,10 +266,12 @@ export function useProject() {
       remember(next);
       serial.current++;
       dirty.current = true;
+      dirtySince.current ||= performance.now();
       setProject(next);
       setSaveState("Unsaved changes");
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => void flush().catch(() => {}), 500);
+      timer.current = setTimeout(() => void flush().catch(() => {}),
+        Math.min(500, Math.max(0, 2000 - (performance.now() - dirtySince.current))));
     },
     [flush, remember, timelineFor],
   );

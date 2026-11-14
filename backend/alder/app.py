@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from . import __version__, language
-from .models import ValidationError, now, text_document, uid
+from .models import ValidationError, now, text_document, uid, validate_project
 from .store import ConflictError, Store
 from .platform_runtime import default_data_dir
 from .proofreading import ProofreadingService
@@ -303,7 +303,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         revision = data.get("expectedRevision")
         if not isinstance(revision, int) or isinstance(revision, bool):
             raise ValidationError("Every edit must include its expectedRevision integer.")
-        return await run_in_threadpool(store.update, project_id, data.get("project"), revision)
+        return JSONResponse(await run_in_threadpool(store.update, project_id, data.get("project"), revision))
 
     @app.get("/api/projects/{project_id}/history")
     def history(project_id: str):
@@ -390,6 +390,20 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         data = await body(request)
         def prepare():
             project = store.proofreading_context(data["projectId"]) if data.get("projectId") else None
+            if "projectContext" in data:
+                context = data["projectContext"]
+                if not isinstance(context, dict) or set(context) != {"language", "dictionary", "ideas", "settings"}:
+                    raise ValidationError("Invalid proofreading project context.")
+                from .models import create_project
+                candidate = create_project(template="blank")
+                candidate.update({key: context[key] for key in ("language", "dictionary", "ideas")})
+                if not isinstance(context["settings"], dict):
+                    raise ValidationError("Invalid proofreading settings.")
+                keys = {"customRules", "ignoredRules", "ignoredRuleIds", "rules", "longSentenceWords", "proofreadingDialect", "proofreadingStyle", "sentenceRevisionProfile"}
+                if set(context["settings"]) - keys:
+                    raise ValidationError("Invalid proofreading settings.")
+                candidate["settings"].update(context["settings"])
+                project = validate_project(candidate)
             return proofreading.start(data, project)
         return await run_in_threadpool(prepare)
 

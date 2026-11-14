@@ -116,6 +116,11 @@ def complete_spelling(corrected, config, check_rules, check_model, cancelled, *,
 
 def passages(text, checked_text, offset, segments, config, selected):
     """Keep inline fields inside their sentence, as protected literal phrases."""
+    # Slice the immutable source once encoded. Encoding the entire manuscript
+    # for every sentence made preparation quadratic on long documents.
+    encoded = text.encode('utf-16-le')
+    def source_slice(start, end):
+        return encoded[start * 2:end * 2].decode('utf-16-le')
     contexts = list(blocks(text))
     context_starts = [block['start'] for block in contexts]
     segment_ends = [segment['end'] for segment in segments]
@@ -140,8 +145,8 @@ def passages(text, checked_text, offset, segments, config, selected):
             rows = list(overlaps(start, end))
             tags = {row['language'] for row in rows if row['language'] != 'zxx'}
             language = next(iter(tags)) if len(tags) == 1 else 'und' if tags else 'zxx'
-            protected = [slice16(text,max(start,row['start']),min(end,row['end'])) for row in rows if row['language'] == 'zxx']
-            target_text=slice16(text,start,end)
+            protected = [source_slice(max(start,row['start']),min(end,row['end'])) for row in rows if row['language'] == 'zxx']
+            target_text=source_slice(start,end)
             literals=control_literals(target_text)
             context_block = contexts[max(0,bisect_right(context_starts,start)-1)]
             context = context_block['text']

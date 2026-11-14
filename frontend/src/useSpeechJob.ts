@@ -20,9 +20,12 @@ export function mergeSpeechEvents(job: Job, batch: EventBatch): Job {
       ? batch.snapshot
       : job;
   let next = job;
-  for (const event of batch.events || []) {
+  const pending = (batch.events || []).filter(event => event.sequence > (job.eventSequence || 0));
+  if (!pending.length) return job;
+  const chunks = new Map(job.chunks.map(c => [c.id, c]));
+  let order = job.chunks.map(c => c.id);
+  for (const event of pending) {
     if (event.sequence <= (next.eventSequence || 0)) continue;
-    const chunks = new Map(next.chunks.map((c) => [c.id, c]));
     for (const chunk of event.chunks)
       chunks.set(chunk.id, {
         ...chunks.get(chunk.id),
@@ -33,12 +36,10 @@ export function mergeSpeechEvents(job: Job, batch: EventBatch): Job {
       ...next,
       ...event.header,
       eventSequence: event.sequence,
-      chunks: (event.order || next.chunks.map((c) => c.id))
-        .map((id) => chunks.get(id)!)
-        .filter(Boolean),
     };
+    order = event.order || order;
   }
-  return next;
+  return { ...next, chunks: order.map(id => chunks.get(id)!).filter(Boolean) };
 }
 
 /** One outstanding long poll: updates arrive immediately, with bounded reconnect. */
