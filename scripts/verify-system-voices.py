@@ -41,11 +41,11 @@ def verify(output, ffmpeg=None, required=False):
                     duration = audio.getnframes() / audio.getframerate()
                     assert duration > .1
                 timings = system_voices.native_timings(response["words"], duration)
-                assert timings, "No valid native word events; word highlighting acceptance is pending."
                 elapsed = time.monotonic() - start
                 report["renders"].append({"voice": v["id"], "culture": v.get("culture"), "file": path.name,
                     "seconds": duration, "generationSeconds": elapsed, "realTimeFactor": elapsed / duration,
-                    "words": timings, "nativeEvents": response["words"]})
+                    "words": timings, "nativeEvents": response["words"],"timingSource":response.get('timingSource')})
+                assert timings, "No valid native word events; word highlighting acceptance is pending."
         report.update(status="passed", scope="native discovery, PCM rendering, controls and word-event bounds; desktop and listening acceptance are separate")
         return report
     except Exception as exc:

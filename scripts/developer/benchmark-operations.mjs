@@ -222,6 +222,20 @@ for (const filename of cases
     await page.evaluate(() => {
       globalThis.operatingInputs = [];
       globalThis.operatingLongTasks = [];
+      globalThis.operatingEvents = [];
+      new PerformanceObserver((list) =>
+        globalThis.operatingEvents.push(
+          ...list
+            .getEntries()
+            .filter((e) => e.name === "keydown")
+            .map((e) => ({
+              start: e.startTime,
+              duration: e.duration,
+              processing: e.processingEnd - e.processingStart,
+              interaction: e.interactionId,
+            })),
+        ),
+      ).observe({ type: "event", durationThreshold: 16, buffered: true });
       document.addEventListener(
         "beforeinput",
         () => {
@@ -314,6 +328,7 @@ for (const filename of cases
     }
     sample.renderer = await page.evaluate(() => ({
       inputToTwoFramesMs: globalThis.operatingInputs,
+      keyboardEventTimings: globalThis.operatingEvents,
       longTasks: globalThis.operatingLongTasks,
       heap: performance.memory
         ? {

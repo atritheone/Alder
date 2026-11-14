@@ -29,3 +29,20 @@ def test_job_summaries_use_derived_index_without_hydrating_recordings(tmp_path):
     assert s.list_jobs('p',summaries=True)==rows
     cold=SpeechLibrary(tmp_path/'jobs');assert cold.ids_for_project('p')==['fixture']
     assert cold.rows['fixture']['summary']==rows[0]
+
+def test_inactive_durable_recordings_are_evicted_without_touching_active_or_inflight(tmp_path):
+    import time
+    s,_=fixture(tmp_path);now=time.monotonic();s._access={};s._inflight=set();s._assembling=set()
+    s._maintenance_at=0;s._last_work=now
+    for i in range(40):
+        identity=f'job-{i}';directory=tmp_path/'jobs'/identity;directory.mkdir()
+        job={'id':identity,'projectId':'p','createdAt':'2026-11-14','status':'cancelled','chunks':[]}
+        (directory/'manifest.json').write_text(json.dumps(job));s._jobs[identity]=job
+    s._demand['job-0']={'at':now,'mode':'playing'};s._access['job-1']=now
+    s._inflight.add(('job-2','chunk'));s._maintenance()
+    assert len(s._jobs)==40  # In-flight work always owns its manifests.
+    s._inflight.clear();s._maintenance_at=0;s._maintenance()
+    assert len(s._jobs)==32 and 'job-0' in s._jobs and 'job-1' in s._jobs
+    retired=next(identity for identity in (f'job-{i}' for i in range(40)) if identity not in s._jobs)
+    s._library=SpeechLibrary(tmp_path/'jobs');assert s._job(retired)['id']==retired
+    assert (tmp_path/'jobs'/retired/'manifest.json').is_file()

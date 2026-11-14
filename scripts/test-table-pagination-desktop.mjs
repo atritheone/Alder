@@ -39,6 +39,7 @@ try {
   await page.evaluate(
     fs.readFileSync(path.join(directory, "probe.js"), "utf8"),
   );
+  await page.addStyleTag({ path: "frontend/src/book-workspace.css" });
   const paragraph = (text) => ({
     type: "paragraph",
     attrs: {
@@ -73,14 +74,16 @@ try {
   const pageMap = (pages) =>
     pages.map(({ header, ...page }) => ({
       ...page,
-      header: header && {
-        ...header,
-        height: Math.round(header.height * 1000) / 1000,
-      },
+      header: header?.map((item) => ({
+        ...item,
+        height: Math.round(item.height * 1000) / 1000,
+      })),
     }));
   const ready = async () => {
     await page.evaluate(() => document.fonts.ready);
-    await expect.poll(() => page.evaluate(() => window.__layoutProbe.ready())).toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => window.__layoutProbe.ready()))
+      .toBe(true);
     await page.evaluate(
       () =>
         new Promise((resolve) =>
@@ -131,17 +134,23 @@ try {
       const rows = [...root.querySelectorAll("tr")].filter(
         (row) => !row.classList.contains("pagination-spacer"),
       );
-      return rows.map((row) => {
-        const rect = row.getBoundingClientRect();
-        const top = (rect.top - origin.top) / scale - 20;
-        return {
-          text: row.innerText,
-          top: top % 308,
-          bottom: (top % 308) + rect.height / scale,
-        };
-      });
+      return {
+        canvasWidth: origin.width,
+        scale,
+        rootWidth: root.getBoundingClientRect().width,
+        rows: rows.map((row) => {
+          const rect = row.getBoundingClientRect();
+          const top = (rect.top - origin.top) / scale - 20;
+          return {
+            text: row.innerText,
+            top: top % 308,
+            bottom: (top % 308) + rect.height / scale,
+          };
+        }),
+      };
     });
-    for (const row of geometry) {
+    report.geometry = geometry;
+    for (const row of geometry.rows) {
       expect(row.bottom, row.text).toBeLessThanOrEqual(240.6);
       expect(row.top, row.text).toBeGreaterThanOrEqual(-0.6);
     }

@@ -9,6 +9,7 @@ import { DOMSerializer } from "prosemirror-model";
 import { schema } from "../frontend/src/Editor";
 import { clipboardSlice } from "../frontend/src/pasteText";
 import { identifiedDocument } from "../frontend/src/blockIdentities";
+import ContextMenus from "../frontend/src/ContextMenu";
 
 const paragraph = (text: string, attrs = {}): DocNode => ({
   type: "paragraph",
@@ -141,7 +142,8 @@ function Prototype() {
       pages.current = null;
       editor.current!.replaceRange(start, end, text);
     },
-    select: (start: number, end: number) => editor.current!.selectRange(start,end),
+    select: (start: number, end: number) =>
+      editor.current!.selectRange(start, end),
     clipboardRoundTrip: (value: DocNode, images?: Record<string, string>) => {
       const parsed = schema.nodeFromJSON(value);
       const container = window.document.createElement("div");
@@ -182,7 +184,7 @@ function Prototype() {
       styles={[]}
       showStructure={structure}
       suppressChecks
-      onToggleStructure={() => setStructure(value => !value)}
+      onToggleStructure={() => setStructure((value) => !value)}
       onImage={() => {}}
       onLink={() => {}}
       onSelection={() => {}}
@@ -210,4 +212,9 @@ function Prototype() {
     />
   );
 }
-createRoot(host).render(<Prototype />);
+createRoot(host).render(
+  <>
+    <Prototype />
+    <ContextMenus />
+  </>,
+);

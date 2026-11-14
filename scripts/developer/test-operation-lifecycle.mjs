@@ -114,23 +114,36 @@ try {
     .getByRole("button", { name: "Back To Write", exact: true })
     .click();
   await expect(editor).toContainText("A cancelled preview");
-  await app.evaluate(({app})=>{
-    globalThis.publicationWindows=0;
-    app.on('browser-window-created',()=>globalThis.publicationWindows++);
+  await app.evaluate(({ app }) => {
+    globalThis.publicationWindows = 0;
+    app.on("browser-window-created", () => globalThis.publicationWindows++);
   });
-  const repeated=await page.evaluate(async()=>{
-    const id=localStorage.getItem('alder.project');const timings=[];const digests=[];
-    for(let i=0;i<2;i++){
-      const started=performance.now();const result=await window.alder.request('POST',`/api/projects/${id}/export`,{format:'pdf',options:{includeTitle:true}});
-      const response=await fetch(window.alder.mediaBase+result.downloadUrl);
-      const bytes=await response.arrayBuffer();
-      if(!response.ok||bytes.byteLength<100)throw Error('Repeated PDF did not produce a publication.');
-      digests.push(Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).join(','));timings.push(performance.now()-started);
+  const repeated = await page.evaluate(async () => {
+    const id = localStorage.getItem("alder.project");
+    const timings = [];
+    const digests = [];
+    for (let i = 0; i < 2; i++) {
+      const started = performance.now();
+      const result = await window.alder.request(
+        "POST",
+        `/api/projects/${id}/export`,
+        { format: "pdf", options: { includeTitle: true } },
+      );
+      const response = await fetch(window.alder.mediaBase + result.downloadUrl);
+      const bytes = await response.arrayBuffer();
+      if (!response.ok || bytes.byteLength < 100)
+        throw Error("Repeated PDF did not produce a publication.");
+      digests.push(
+        Array.from(
+          new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+        ).join(","),
+      );
+      timings.push(performance.now() - started);
     }
-    return {timings,equal:digests[0]===digests[1]};
+    return { timings, equal: digests[0] === digests[1] };
   });
   expect(repeated.equal).toBe(true);
-  expect(await app.evaluate(()=>globalThis.publicationWindows)).toBe(1);
+  expect(await app.evaluate(() => globalThis.publicationWindows)).toBe(1);
   expect(errors).toEqual([]);
   console.log(
     JSON.stringify({
@@ -138,7 +151,7 @@ try {
       platform: process.platform,
       cancelMs,
       readingRequests,
-      repeatedPreviewMs:repeated.timings,
+      repeatedPreviewMs: repeated.timings,
       checks: [
         "pending PDF request transport aborted",
         "preview queue recovered and rendered real PDF",

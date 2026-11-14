@@ -2,7 +2,15 @@ name: Native operating performance
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '**/*.md']
   workflow_dispatch:
+    inputs:
+      targets:
+        description: Native target JSON array
+        default: '["windows-latest", "ubuntu-latest", "macos-latest", "macos-15-intel"]'
+      runs:
+        description: Independent paired sequences (1–10)
+        default: '10'
 permissions:
   contents: read
 jobs:
@@ -10,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest, macos-15-intel]
+        os: ${{ fromJSON(inputs.targets || '["windows-latest", "ubuntu-latest", "macos-latest", "macos-15-intel"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
@@ -30,6 +38,15 @@ jobs:
         run: python scripts/developer/prepare-opening-runtime.py --native-audio --state "$RUNNER_TEMP/alder-opening-core"
       - name: Build for the native OS
         run: npm run build
+      - name: Identify production changes for repeated measurements
+        id: changes
+        shell: bash
+        run: |
+          if git diff --quiet HEAD^ HEAD -- frontend electron backend/alder; then
+            echo 'application=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'application=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Check startup, import, and recovery boundaries
         shell: bash
         run: '"$PYTHON" -B -m pytest backend/tests/test_proofreading.py backend/tests/test_sentence_revisions.py backend/tests/test_plain_text_file.py backend/tests/test_plain_text_api.py backend/tests/test_save_changes.py backend/tests/test_project_changes.py backend/tests/test_incremental_plain_save.py backend/tests/test_operating_cache.py backend/tests/test_work_policy.py backend/tests/test_plain_validation.py backend/tests/test_core.py backend/tests/test_document_exports.py backend/tests/test_publication_layout.py -q -p no:cacheprovider'
@@ -40,19 +57,37 @@ jobs:
         shell: bash
         run: |
           "$PYTHON" -B -m pytest backend/tests/test_version_metadata_cache.py backend/tests/test_speech_operating_state.py backend/tests/test_speech_pipeline.py -q -k 'metadata or summaries or dirty or event or cancel or review or resume or staged or intact or corrupt' -p no:cacheprovider
-          "$PYTHON" -B scripts/verify-system-voices.py --ffmpeg "$FFMPEG" --output "$RUNNER_TEMP/native-voice-results"
+      - name: Measure available native voice PCM and word events
+        # Optional OS voice packs are not the isolated core fixture. Preserve a
+        # failed/pending voice report without preventing editor/save qualification.
+        continue-on-error: true
+        shell: bash
+        run: '"$PYTHON" -B scripts/verify-system-voices.py --ffmpeg "$FFMPEG" --output "$RUNNER_TEMP/native-voice-results"'
       - name: Check bounded editor decorations and typing
         run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
       - name: Native startup and TXT/DOCX opening
+        if: steps.changes.outputs.application == 'true' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a node scripts/developer/compare-operations.mjs --output "$RUNNER_TEMP/operating-results"
+            xvfb-run -a node scripts/developer/compare-operations.mjs --runs "${{ inputs.runs || '10' }}" --output "$RUNNER_TEMP/operating-results"
+          else
+            node scripts/developer/compare-operations.mjs --runs "${{ inputs.runs || '10' }}" --output "$RUNNER_TEMP/operating-results"
+          fi
+      - name: Qualify changed layout, preview and cancellation boundaries
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a node scripts/test-prose-reflow-desktop.mjs
+            xvfb-run -a node scripts/test-table-pagination-desktop.mjs
+            xvfb-run -a node scripts/test-continuous-layout-desktop.mjs
+            xvfb-run -a node scripts/developer/test-complex-flow-equivalence.mjs
             xvfb-run -a node scripts/developer/test-operation-lifecycle.mjs
           else
-            node scripts/developer/compare-operations.mjs --output "$RUNNER_TEMP/operating-results"
             node scripts/test-prose-reflow-desktop.mjs
+            node scripts/test-table-pagination-desktop.mjs
+            node scripts/test-continuous-layout-desktop.mjs
+            node scripts/developer/test-complex-flow-equivalence.mjs
             node scripts/developer/test-operation-lifecycle.mjs
           fi
       - name: Retain timings and failures

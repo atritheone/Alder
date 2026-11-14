@@ -38,6 +38,7 @@ try {
   await page.evaluate(
     fs.readFileSync(path.join(directory, "probe.js"), "utf8"),
   );
+  await page.addStyleTag({path:'frontend/src/book-workspace.css'});
   const editor = page.getByRole("textbox", {
     name: "Text editor",
     exact: true,
