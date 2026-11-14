@@ -1,8 +1,46 @@
 import codecs
+import copy
+import pytest
 import unittest
 import tempfile
 from pathlib import Path
 from alder.plain_text_file import decode_file, encode_file
+
+
+def test_plain_export_projection_matches_complete_publisher(tmp_path):
+    from alder.models import create_project, text_document, validate_project
+    from alder.publishing import build_export
+    from alder.plain_text_file import plain_project_bytes
+    for i, raw in enumerate((b'a\r\nb\nc\r', codecs.BOM_UTF16_BE + '字😀\n'.encode('utf-16-be'), b'caf\xe9\r\n')):
+        text, metadata = decode_file(raw)
+        project = create_project(template='blank')
+        project['settings'].update(documentKind='txt', includeTitle=False, includeToc=False, textFile=metadata)
+        project['book'] = {'version': 1, 'chapters': [{'id': 'plain', 'title': 'Text', 'document': text_document(text)}]}
+        project = validate_project(project)
+        # Preserve settings warnings as well as content/metadata; do not skip
+        # the normal publication contract merely because a body is plain.
+        for suffix, settings in [('normal', {}), ('glossary', {'includeGlossary': True}),
+                                 ('margin', {'marginMm': 100}), ('header', {'header': 'Header'})]:
+            candidate = copy.deepcopy(project)
+            candidate['settings'].update(settings)
+            before = copy.deepcopy(candidate)
+            fast = build_export(candidate, 'txt', tmp_path / f'{i}-{suffix}-fast')
+            full = build_export(candidate, 'txt', tmp_path / f'{i}-{suffix}-full', _plain_projection=False)
+            assert Path(fast['path']).read_bytes() == Path(full['path']).read_bytes()
+            assert {k: fast[k] for k in ('warnings', 'validation', 'mime')} == {k: full[k] for k in ('warnings', 'validation', 'mime')}
+            assert candidate == before
+        project['settings']['includeGlossary'] = True
+        assert plain_project_bytes(project) is None
+    # Publication overrides and rich content must keep the general path.
+    for options in ({'includeTitle': True}, {'includeGlossary': True}, {'reviewView': 'invalid'}):
+        try:
+            fast = build_export(before, 'txt', tmp_path / 'options-fast', options)
+        except ValueError:
+            with pytest.raises(ValueError):
+                build_export(before, 'txt', tmp_path / 'options-full', options, _plain_projection=False)
+        else:
+            full = build_export(before, 'txt', tmp_path / 'options-full', options, _plain_projection=False)
+            assert Path(fast['path']).read_bytes() == Path(full['path']).read_bytes()
 
 
 def test_plain_fingerprint_bytes_match_publisher_and_reject_rich_content():

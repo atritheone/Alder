@@ -478,6 +478,7 @@ export function useProject() {
     setError,
     history,
     openDocumentSnapshots: () => [...opened.current.values()],
+    currentProject: () => current.current,
     reopenClosed,
   };
 }

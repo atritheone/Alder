@@ -433,3 +433,13 @@ export async function refreshProjectCitations(
   }
   return project;
 }
+
+/** Read-only preflight before taking a private formatting snapshot. */
+export function projectHasCitations(project: Project): boolean {
+  const contains = (node: DocNode): boolean =>
+    node.type === 'citation' || node.type === 'bibliography' ||
+    !!node.content?.some(contains);
+  return !!project.book?.chapters.some(chapter => contains(chapter.document)) ||
+    project.clips.some(clip => contains(clip.document) ||
+      clip.variants.some(variant => contains(variant.document)));
+}

@@ -8,7 +8,7 @@ def plain_project_bytes(project):
     """Fast path only for a single plain TXT chapter; rich work uses publishing."""
     settings = project.get('settings', {})
     chapters = [c for c in project.get('book', {}).get('chapters', []) if c.get('include', True)]
-    if settings.get('documentKind') != 'txt' or settings.get('includeTitle') or settings.get('includeToc') or len(chapters) != 1:
+    if settings.get('documentKind') != 'txt' or any(settings.get(key) for key in ('includeTitle', 'includeToc', 'includeGlossary')) or len(chapters) != 1:
         return None
     doc = chapters[0]['document']
     if doc.get('attrs') or doc.get('marks'):

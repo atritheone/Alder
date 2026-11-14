@@ -2174,10 +2174,29 @@ def _pdf(project, path, settings, warnings):
     document.build(story)
 
 
-def build_export(project: dict, format: str, output_dir: Path, options: dict | None = None) -> dict:
+def build_export(project: dict, format: str, output_dir: Path, options: dict | None = None, *, _plain_projection=True) -> dict:
     format = {"markdown": "md", "htm": "html"}.get(format.lower(), format.lower())
     if format not in SUPPORTED_FORMATS:
         raise ValueError("Unsupported export format: " + format)
+    # A featureless TXT body has no layout/field/review transformations. Encode
+    # it once, but run the normal publisher on a small body to retain settings,
+    # style validation, format warnings and result metadata. Rich bodies and
+    # publication option overrides retain the complete existing path.
+    if _plain_projection and format == 'txt' and not set(options or {}) - {'assetRoot', 'reviewView'}:
+        from .plain_text_file import plain_project_bytes
+        content = plain_project_bytes(project)
+        if content is not None:
+            probe = {**project, 'book': {**project['book'], 'chapters': [
+                {**chapter, 'document': text_document(''), 'text': ''}
+                for chapter in project['book']['chapters']]}}
+            result = build_export(probe, format, output_dir, options, _plain_projection=False)
+            path = Path(result['path'])
+            try:
+                path.write_bytes(content)
+            except Exception:
+                path.unlink(missing_ok=True)
+                raise
+            return result
     warnings = []
     options = dict(options or {})
     if format in ('txt', 'md', 'odt', 'rtf', 'pdf', 'azw3'): options.setdefault('reviewView', 'final')

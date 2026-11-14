@@ -69,15 +69,26 @@ jobs:
         shell: bash
         run: node scripts/developer/test-native-waveform.mjs "$RUNNER_TEMP/native-voice-results"
       - name: Check bounded editor decorations and typing
-        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/preparedEditorDocument.test.ts frontend/src/editorSessions.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/NarrationReview.test.ts frontend/src/pcmWaveform.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
+        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/preparedEditorDocument.test.ts frontend/src/editorSessions.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/NarrationReview.test.ts frontend/src/pcmWaveform.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts frontend/src/citationSavePreflight.test.ts frontend/src/documentCitations.test.ts --reporter=dot
+      - name: Native TXT final-character Save and byte protection
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node scripts/developer/benchmark-native-save.mjs "$RUNNER_TEMP/native-save-results"
+          else
+            node scripts/developer/benchmark-native-save.mjs "$RUNNER_TEMP/native-save-results"
+          fi
       - name: Native startup and TXT/DOCX opening
         if: steps.changes.outputs.application == 'true' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
+          # Pushes use one correctness/control sequence. Dispatch ten alternating
+          # pairs for an intentional performance qualification, avoiding repeated
+          # statistical runs for each focused follow-up change.
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a node scripts/developer/compare-operations.mjs --runs "${{ inputs.runs || '10' }}" --output "$RUNNER_TEMP/operating-results"
+            xvfb-run -a node scripts/developer/compare-operations.mjs --runs "${{ inputs.runs || '1' }}" --output "$RUNNER_TEMP/operating-results"
           else
-            node scripts/developer/compare-operations.mjs --runs "${{ inputs.runs || '10' }}" --output "$RUNNER_TEMP/operating-results"
+            node scripts/developer/compare-operations.mjs --runs "${{ inputs.runs || '1' }}" --output "$RUNNER_TEMP/operating-results"
           fi
       - name: Qualify changed layout, preview and cancellation boundaries
         shell: bash
@@ -101,6 +112,12 @@ jobs:
         with:
           name: operating-${{ matrix.os }}
           path: ${{ runner.temp }}/operating-results/report.json
+      - name: Retain native Save timings and protections
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-save-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-save-results/native-save.json
       - name: Retain paired native validation timings
         if: always()
         uses: actions/upload-artifact@v7

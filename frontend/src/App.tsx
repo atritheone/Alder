@@ -129,7 +129,7 @@ import ContentsDialog from "./ContentsDialog";
 import SourcesDialog from './SourcesDialog';
 import AccessibilityDialog from './AccessibilityDialog';
 import {accessibilityIssues,projectAccessibilitySources,type AccessibilityIssue} from './documentAccessibility';
-import { refreshProjectCitations, documentCitationSources, replaceCitationSources } from './documentCitations';
+import { refreshProjectCitations, projectHasCitations, documentCitationSources, replaceCitationSources } from './documentCitations';
 import type { CitationItem, CitationStyle, CitationSource } from './citationTypes';
 import {
   hasPageReferences,
@@ -302,6 +302,7 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
     setError,
     history,
     openDocumentSnapshots,
+    currentProject,
     reopenClosed,
   } = useProject();
   const workspaceOpen = Boolean(project);
@@ -759,6 +760,8 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
     else change(draft=>applyCitationProject(draft,snapshot!));
   };
   const refreshCitationsBeforeSave=async()=>{
+    const current = currentProject();
+    if (!current || !projectHasCitations(current)) return;
     let snapshot:Project|undefined;change(draft=>{snapshot=structuredClone(draft);});if(!snapshot)return;
     const before=citationProjectSignature(snapshot);await refreshProjectCitations(snapshot);
     if(citationProjectSignature(snapshot)===before)return;
