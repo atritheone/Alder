@@ -39,7 +39,7 @@ try {
   await expect(page.locator('.start-screen')).toBeVisible();
   report.checks.push('Cancel on start leaves no workspace.');
   await upload([{ name: 'Original.txt', text: 'The existing document remains available.' }]);
-  const editor = page.getByRole('textbox', { name: 'Chapter text editor', exact: true });
+  const editor = page.getByRole('textbox', { name: /^(Chapter text editor|TXT text editor)$/ });
   await expect(editor).toContainText('The existing document remains available.'); await expect(progress).not.toBeVisible();
   await expect.poll(count).toBe(1);
   for (const scale of ['0.5', '1.5', '1']) {

@@ -8,6 +8,7 @@ export type FontCatalogue = {
 };
 const loaded = new Map<string, Promise<void>>();
 const faces = new Map<string, FontFace[]>();
+let notification = 0;
 export function loadDocumentFont(family = FALLBACK_FONT) {
   if (!loaded.has(family)) {
     const task = Promise.all(
@@ -27,7 +28,10 @@ export function loadDocumentFont(family = FALLBACK_FONT) {
         faces.set(family, [...(faces.get(family) || []), font]);
       }),
     ).then(() => {
-      window.dispatchEvent(new Event("alder-fonts-changed"));
+      if (!notification) notification = requestAnimationFrame(() => {
+        notification = 0;
+        window.dispatchEvent(new Event("alder-fonts-changed"));
+      });
     });
     loaded.set(family, task);
     task.catch(() => loaded.delete(family));

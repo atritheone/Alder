@@ -29,6 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { executable, dataDirectory, platformMenu } from "./platform";
+import { mark, performanceReport } from "./performance";
 
 app.setAppUserModelId("org.alder.language");
 if (process.platform === "linux")
@@ -54,7 +55,7 @@ function queueFiles(files: string[]) {
   sendFiles();
 }
 function sendFiles() {
-  if (rendererReady && window && !window.isDestroyed() && pendingFiles.length)
+  if (rendererReady && backendIsReady && window && !window.isDestroyed() && pendingFiles.length)
     window.webContents.send("alder:open-files", pendingFiles.splice(0));
 }
 protocol.registerSchemesAsPrivileged([
@@ -66,6 +67,7 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
       corsEnabled: true,
       stream: true,
+      codeCache: true,
     },
   },
 ]);
@@ -133,6 +135,10 @@ let closeAllowed = false,
   closeInFlight = false;
 let quitting = false;
 let reopening: Promise<void> | null = null;
+let backendReady: Promise<void> | null = null;
+let backendIsReady = false;
+let startupAbort = new AbortController();
+let initializing = true;
 const flushRequests = new Map<
   string,
   (value: { ok: boolean; message?: string }) => void
@@ -165,7 +171,8 @@ function apiPath(value: unknown): string {
     throw new Error("Invalid application request");
   return value;
 }
-async function request(method: string, p: string, body?: unknown) {
+async function request(method: string, p: string, body?: unknown, signal?: AbortSignal) {
+  if (p !== "/api/health") await startBackend();
   if (!["GET", "POST", "PUT", "DELETE"].includes(method))
     throw new Error("Unsupported request");
   const response = await fetch(base + apiPath(p), {
@@ -175,6 +182,7 @@ async function request(method: string, p: string, body?: unknown) {
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   const data = await response.json();
   if (!response.ok)
@@ -197,13 +205,19 @@ async function freePort(): Promise<number> {
     });
   });
 }
-async function startBackend() {
+function startBackend(): Promise<void> {
+  if (!backendReady && (quitting || closeInFlight)) return Promise.reject(new Error("Alder is closing."));
+  return backendReady ??= launchBackend();
+}
+async function launchBackend() {
+  const abort = startupAbort.signal;
   const python = executable(resources, "python");
   if (!fs.existsSync(python))
     throw new Error(
       "Alder’s bundled language runtime is missing. Restore the complete Alder application folder.",
     );
   const port = await freePort();
+  abort.throwIfAborted();
   base = `http://127.0.0.1:${port}`;
   const data = dataDirectory();
   fs.mkdirSync(data, { recursive: true });
@@ -232,6 +246,7 @@ async function startBackend() {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+  mark("backend.spawn");
   backend.stdout?.pipe(log);
   backend.stderr?.pipe(log);
   let failure = "";
@@ -241,13 +256,21 @@ async function startBackend() {
   backend.on("exit", (code) => {
     failure = `Language service exited (${code}).`;
   });
-  for (let i = 0; i < 200; i++) {
+  const deadline = performance.now() + 30000;
+  while (performance.now() < deadline) {
+    abort.throwIfAborted();
     if (failure) throw new Error(failure);
     try {
-      const response = await request("GET", "/api/health");
-      if (response.status) return;
+      const signal = AbortSignal.any([abort, AbortSignal.timeout(Math.max(1, Math.min(750, Math.ceil(deadline - performance.now()))))]);
+      const response = await request("GET", "/api/health", undefined, signal);
+      if (response.status === "ok") {
+        backendIsReady = true;
+        mark("backend.ready");
+        sendFiles();
+        return;
+      }
     } catch {}
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 40));
   }
   throw new Error(
     "The language service did not start. See service.log in Alder’s application data folder.",
@@ -258,6 +281,7 @@ async function registerProtocols() {
     const url = new URL(req.url);
     if (url.hostname === "local") {
       try {
+        await startBackend();
         const p = apiPath(url.pathname + url.search);
         const headers: Record<string, string> = {
           Authorization: `Bearer ${token}`,
@@ -310,6 +334,16 @@ async function registerProtocols() {
   });
 }
 function registerIPC() {
+  ipcMain.handle("alder:ready", async (event) => {
+    trusted(event);
+    await startBackend();
+    return { ready: true };
+  });
+  ipcMain.handle("alder:performance", (event, name?: string, duration?: number) => {
+    trusted(event);
+    if (name) mark(name, duration);
+    return performanceReport();
+  });
   ipcMain.handle(
     "alder:window-layout",
     (event, mode: unknown, width = 480, height = 342) => {
@@ -566,7 +600,11 @@ function registerIPC() {
   });
   ipcMain.handle("alder:upload", async (e, p, name, bytes, fields) => {
     trusted(e);
-    if (!Array.isArray(bytes) || bytes.length > 100 * 1024 * 1024)
+    await startBackend();
+    // Retain the legacy array bridge for existing integrations; normal file
+    // opening uses one binary IPC payload on every OS.
+    if (Array.isArray(bytes) && bytes.length <= 100 * 1024 * 1024 && bytes.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) bytes = Uint8Array.from(bytes);
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > 100 * 1024 * 1024)
       throw new Error("File exceeds the 100 MB import limit");
     const destination = apiPath(p);
     if (
@@ -583,7 +621,7 @@ function registerIPC() {
     const form = new FormData();
     form.append(
       "file",
-      new Blob([Uint8Array.from(bytes)]),
+      new Blob([bytes as Uint8Array<ArrayBuffer>]),
       path.basename(String(name)),
     );
     for (const [k, v] of Object.entries(fields || {})) {
@@ -1031,6 +1069,9 @@ async function createWindow() {
       backgroundThrottling: false,
     },
   });
+  mark("window.created");
+  window.once("show", () => mark("window.shown"));
+  window.webContents.once("dom-ready", () => mark("renderer.dom-ready"));
   if (process.platform === "win32") {
     windowsMenu = new WindowsMenu(window);
     if (applicationMenu)
@@ -1065,6 +1106,7 @@ async function createWindow() {
         console.warn(`Reading shortcut unavailable: ${key}`);
   }
   if (process.argv.includes("--smoke-test")) {
+    await startBackend();
     await new Promise((r) => setTimeout(r, 4000));
     const text = await window.webContents.executeJavaScript(
       "document.body.innerText",
@@ -1088,8 +1130,8 @@ async function createWindow() {
   }
 }
 app.whenReady().then(async () => {
+  mark("electron.ready");
   try {
-    await startBackend();
     await registerProtocols();
     registerIPC();
     session.defaultSession.setPermissionRequestHandler(
@@ -1097,8 +1139,9 @@ app.whenReady().then(async () => {
     );
     session.defaultSession.setPermissionCheckHandler(() => false);
     queueFiles(process.argv);
-    await createWindow();
+    await Promise.all([startBackend(), createWindow()]);
   } catch (e) {
+    if (quitting || closeInFlight) return;
     if (process.argv.includes("--smoke-test")) {
       console.error(e);
       app.exit(1);
@@ -1106,6 +1149,8 @@ app.whenReady().then(async () => {
       dialog.showErrorBox("Alder could not start", (e as Error).message);
       app.quit();
     }
+  } finally {
+    initializing = false;
   }
 });
 app.on("window-all-closed", () => {
@@ -1115,7 +1160,7 @@ app.on("activate", () => {
   void reopenWindow();
 });
 async function reopenWindow() {
-  if (!app.isReady() || closeInFlight || quitting) return;
+  if (!app.isReady() || initializing || closeInFlight || quitting) return;
   if (window && !window.isDestroyed()) {
     window.show();
     window.restore();
@@ -1125,8 +1170,7 @@ async function reopenWindow() {
   }
   if (!reopening)
     reopening = (async () => {
-      await startBackend();
-      await createWindow();
+      await Promise.all([startBackend(), createWindow()]);
     })()
       .catch((error) => {
         dialog.showErrorBox("Alder could not reopen", String(error));
@@ -1151,7 +1195,7 @@ async function closeApplication(quit = true) {
   if (closeInFlight || closeAllowed) return;
   closeInFlight = true;
   try {
-    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+    if (rendererReady && window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
       const id = randomBytes(12).toString("hex");
       const result = await new Promise<{ ok: boolean; message?: string }>(
         (resolve) => {
@@ -1185,6 +1229,7 @@ async function closeApplication(quit = true) {
         }
       }
     }
+    startupAbort.abort();
     try {
       await fetch(base + "/api/lifecycle/shutdown", {
         method: "POST",
@@ -1222,6 +1267,9 @@ async function closeApplication(quit = true) {
     }
     log?.end();
     backend = null;
+    backendReady = null;
+    backendIsReady = false;
+    startupAbort = new AbortController();
     globalShortcut.unregisterAll();
     closeAllowed = true;
     window?.destroy();

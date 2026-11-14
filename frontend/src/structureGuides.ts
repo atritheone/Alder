@@ -119,8 +119,13 @@ export function structureGuides(options: () => Options) {
           .closest(".editor-scroll")
           ?.getBoundingClientRect();
         const selected = view.state.selection;
+        const elements = [...view.dom.children].filter(element => !element.classList.contains("ProseMirror-widget"));
+        const roots = new Map<number, Element>();
+        if (elements.length === view.state.doc.childCount)
+          view.state.doc.forEach((_node, pos, index) => roots.set(pos, elements[index]));
         view.state.doc.descendants((node, pos) => {
-          const element = view.nodeDOM(pos);
+          if (node.isText) return false;
+          const element = roots.get(pos) || view.nodeDOM(pos);
           if (!(element instanceof Element)) return;
           // Bound expensive style/fragment reads to the visible neighbourhood.
           // Column fragments can project beyond their parent's source box.

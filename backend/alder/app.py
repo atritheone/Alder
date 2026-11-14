@@ -25,22 +25,22 @@ from .models import ValidationError, now, text_document, uid
 from .store import ConflictError, Store
 from .platform_runtime import default_data_dir
 from .proofreading import ProofreadingService
+from .performance import span, mark, report as performance_report
 
 
 ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173", "alder://app"}
 
 
 def create_app(data_dir: Path | str | None = None, project_root: Path | str | None = None, session_token: str | None = None) -> FastAPI:
-    store = Store(data_dir or default_data_dir())
+    with span("startup.storage"):
+        store = Store(data_dir or default_data_dir())
     root = Path(project_root or os.environ.get("ALDER_PROJECT_ROOT") or Path(__file__).resolve().parents[2])
     token = session_token if session_token is not None else os.environ.get("ALDER_SESSION_TOKEN", "")
-    speech = None
-    speech_error = None
-    try:
+    from .deferred import DeferredService
+    def make_speech():
         from .speech_pipeline import SpeechPipeline as SpeechService
-        speech = SpeechService(store.data_dir, root)
-    except (ImportError, RuntimeError, OSError) as exc:
-        speech_error = str(exc)
+        return SpeechService(store.data_dir, root)
+    speech = DeferredService(make_speech)
     proofreading = ProofreadingService(
         Path(os.environ.get("ALDER_RESOURCES_DIR", root / "resources")), store.data_dir,
         speech_busy=getattr(speech, "has_active_generation", None))
@@ -123,8 +123,10 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
             raise HTTPException(503, "The publishing component is unavailable in this build.") from exc
 
     def speech_service():
-        if speech is None:
-            raise HTTPException(503, "Speech resources are unavailable in this build. " + (speech_error or ""))
+        try:
+            speech.get()
+        except (ImportError, RuntimeError, OSError) as exc:
+            raise HTTPException(503, "Speech resources are unavailable in this build. " + str(exc)) from exc
         return speech
 
     async def body(request: Request) -> dict:
@@ -146,11 +148,14 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
 
     @app.get("/api/health")
     def health():
+        # Store compatibility checks and archive recovery completed before routes
+        # were registered. Optional resources must not gate document readiness.
         return {"status": "ok", "version": __version__, "dataDir": str(store.data_dir),
-                "capabilities": {"projects": True, "autosave": True, "history": True,
-                                 "language": language.capabilities(),
-                                 "speech": speech.capabilities() if speech else {"available": False, "message": speech_error},
-                                 "publishing": publication().capabilities() if importlib.util.find_spec("alder.publishing") else {"available": False}}}
+                "capabilities": {"projects": True, "autosave": True, "history": True}}
+
+    @app.get("/api/performance")
+    def performance():
+        return performance_report()
 
     @app.post("/api/lifecycle/shutdown")
     async def shutdown(request: Request):
@@ -274,7 +279,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
 
     @app.get("/api/projects/{project_id}")
     def project(project_id: str):
-        return store.get(project_id)
+        return Response(store.project_payload(project_id), media_type="application/json")
 
     @app.post('/api/document-open-jobs/import')
     async def start_document_open(file: UploadFile = File(...)):
@@ -290,7 +295,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
 
     @app.post('/api/document-open-jobs/{identity}/open')
     async def finish_document_open(identity: str):
-        return await run_in_threadpool(opening.commit, identity)
+        return JSONResponse(await run_in_threadpool(opening.commit, identity))
 
     @app.put("/api/projects/{project_id}")
     async def update(project_id: str, request: Request):
@@ -383,8 +388,10 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     @app.post("/api/proofreading/check")
     async def proofreading_check(request: Request):
         data = await body(request)
-        project = store.get(data["projectId"]) if data.get("projectId") else None
-        return proofreading.start(data, project)
+        def prepare():
+            project = store.proofreading_context(data["projectId"]) if data.get("projectId") else None
+            return proofreading.start(data, project)
+        return await run_in_threadpool(prepare)
 
     @app.get("/api/proofreading/jobs/{job_id}")
     def proofreading_job(job_id: str):
@@ -754,7 +761,10 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
 
     @app.get("/api/speech/capabilities")
     def speech_capabilities():
-        return speech.capabilities() if speech else {"available": False, "message": speech_error}
+        try:
+            return speech_service().capabilities()
+        except HTTPException as exc:
+            return {"available": False, "message": exc.detail}
 
     @app.get("/api/speech/voices")
     def voices(includeRemoved: bool = False, refresh: bool = False):

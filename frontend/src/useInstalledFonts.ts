@@ -12,7 +12,8 @@ import {
 const fallback = [DOCUMENT_FONT];
 let cached: FontCatalogue | null = null;
 let pending: Promise<FontCatalogue> | null = null;
-function readFonts() {
+function readFonts(refresh = false) {
+  if (cached && !refresh) return Promise.resolve(cached);
   if (!pending)
     pending = api<FontCatalogue>("/api/fonts")
       .then((catalogue) => {
@@ -29,27 +30,29 @@ export function useFontCatalogue(current?: string | null) {
   const [catalogue, setCatalogue] = useState<FontCatalogue | null>(cached);
   useEffect(() => {
     let alive = true;
-    const refresh = () => {
-      void readFonts()
+    const refresh = (force = false) => {
+      void readFonts(force)
         .then((next) => {
           if (alive) setCatalogue(next);
         })
         .catch(() => {});
     };
     refresh();
-    window.addEventListener("focus", refresh);
+    const focused = () => refresh(true);
+    window.addEventListener("focus", focused);
     return () => {
       alive = false;
-      window.removeEventListener("focus", refresh);
+      window.removeEventListener("focus", focused);
     };
   }, []);
   const missing = Boolean(
     current && catalogue && !fontIsAvailable(current, catalogue),
   );
   useEffect(() => {
-    void loadDocumentFont().catch(() => {});
+    if (!catalogue) return;
+    if (missing || current === FALLBACK_FONT) void loadDocumentFont().catch(() => {});
     if (missing && current) void loadDocumentFont(current).catch(() => {});
-  }, [current, missing]);
+  }, [current, missing, catalogue]);
   return {
     families: [
       ...new Set([

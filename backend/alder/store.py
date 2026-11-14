@@ -86,6 +86,36 @@ class Store:
             project = json.loads(row[0])
             return validate_project(project) if project.get("schemaVersion", 1) != 2 else project
 
+    def project_payload(self, project_id: str) -> str:
+        """Send a canonical snapshot without re-encoding every document node."""
+        with self.connection() as conn:
+            row = conn.execute("SELECT snapshot,json_extract(snapshot,'$.schemaVersion') FROM projects WHERE id=?", (project_id,)).fetchone()
+            if row is None:
+                raise KeyError("Project does not exist.")
+            if row[1] == 2:
+                return row[0]
+            return json.dumps(validate_project(json.loads(row[0])), ensure_ascii=False)
+
+    def proofreading_context(self, project_id: str) -> dict:
+        """Read language configuration without hydrating manuscript snapshots."""
+        settings = ('customRules', 'ignoredRules', 'longSentenceWords', 'proofreadingDialect',
+                    'proofreadingStyle', 'ignoredRuleIds', 'sentenceRevisionProfile')
+        paths = ('$.language', '$.dictionary', '$.ideas', *(f'$.settings.{key}' for key in settings))
+        sql = 'SELECT ' + ','.join('json_extract(snapshot,?)' for _ in paths) + ' FROM projects WHERE id=?'
+        with self.connection() as conn:
+            row = conn.execute(sql, (*paths, project_id)).fetchone()
+            if row is None:
+                raise KeyError("Project does not exist.")
+        context = {'language': row[0], 'dictionary': json.loads(row[1] or '[]'),
+                   'ideas': json.loads(row[2] or '[]'), 'settings': {}}
+        for key, value in zip(settings, row[3:]):
+            if value is None:
+                continue
+            if key == 'proofreadingStyle': value = bool(value)
+            elif key in ('customRules', 'ignoredRules', 'ignoredRuleIds'): value = json.loads(value)
+            context['settings'][key] = value
+        return context
+
     def create(self, name: str | None = None, template: str = "demo") -> dict:
         return self.insert(create_project(name, template))
 
@@ -94,9 +124,12 @@ class Store:
 
     def insert_many(self, projects: list[dict]) -> list[dict]:
         """Publish a generated group with one durable commit, or none of it."""
+        return self._insert_validated_many([validate_project(project) for project in projects])
+
+    def _insert_validated_many(self, projects: list[dict]) -> list[dict]:
+        """Internal handoff of owned, validated snapshots (never request bodies)."""
         prepared = []
-        for project in projects:
-            p = validate_project(project)
+        for p in projects:
             p["revision"] = 1
             p["updatedAt"] = now()
             prepared.append((p, json.dumps(p, ensure_ascii=False)))

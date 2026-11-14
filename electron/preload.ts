@@ -1,6 +1,20 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { version } from "../package.json";
+let fileListener: ((paths: string[]) => void) | undefined;
+const pendingFiles: string[] = [];
+ipcRenderer.on("alder:open-files", (_event, paths: string[]) => {
+  if (fileListener) fileListener(paths);
+  else pendingFiles.push(...paths);
+});
+const commandListeners = new Set<(command: string) => void>();
+const pendingCommands: string[] = [];
+ipcRenderer.on("alder:command", (_event, command: string) => {
+  if (commandListeners.size) for (const callback of commandListeners) callback(command);
+  else pendingCommands.push(command);
+});
 contextBridge.exposeInMainWorld("alder", {
+  ready: () => ipcRenderer.invoke("alder:ready"),
+  performance: (event?: string, duration?: number) => ipcRenderer.invoke("alder:performance", event, duration),
   textWorkspaces: () => ipcRenderer.invoke("alder:text-workspaces"),
   chooseTextWorkspace: () => ipcRenderer.invoke("alder:choose-text-workspace"),
   scanTextWorkspace: (id: string, include: string, exclude: string) =>
@@ -80,7 +94,7 @@ contextBridge.exposeInMainWorld("alder", {
   upload: (
     path: string,
     name: string,
-    bytes: number[],
+    bytes: Uint8Array | number[],
     fields?: Record<string, string>,
   ) => ipcRenderer.invoke("alder:upload", path, name, bytes, fields),
   saveText: (name: string, text: string) =>
@@ -93,11 +107,10 @@ contextBridge.exposeInMainWorld("alder", {
   platform: process.platform,
   version,
   onOpenFiles: (callback: (paths: string[]) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, paths: string[]) =>
-      callback(paths);
-    ipcRenderer.on("alder:open-files", handler);
+    fileListener = callback;
+    queueMicrotask(() => { if (fileListener === callback && pendingFiles.length) callback(pendingFiles.splice(0)); });
     void ipcRenderer.invoke("alder:files-ready");
-    return () => ipcRenderer.removeListener("alder:open-files", handler);
+    return () => { if (fileListener === callback) fileListener = undefined; };
   },
   onCloseRequest: (callback: () => Promise<void>) => {
     const handler = (_event: Electron.IpcRendererEvent, id: string) => {
@@ -116,9 +129,11 @@ contextBridge.exposeInMainWorld("alder", {
     return () => ipcRenderer.removeListener("alder:flush-request", handler);
   },
   onCommand: (callback: (command: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, command: string) =>
-      callback(command);
-    ipcRenderer.on("alder:command", handler);
-    return () => ipcRenderer.removeListener("alder:command", handler);
+    commandListeners.add(callback);
+    queueMicrotask(() => {
+      if (commandListeners.size) for (const command of pendingCommands.splice(0))
+        for (const handler of commandListeners) handler(command);
+    });
+    return () => { commandListeners.delete(callback); };
   },
 });

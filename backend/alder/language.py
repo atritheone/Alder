@@ -129,8 +129,12 @@ def _wordnet():
 
 
 def capabilities() -> dict:
-    return {"language": "en", "offline": True, "spelling": _speller() is not None,
-            "wordnet": _wordnet() is not None, "lexicon": "curated + WordNet" if _wordnet() else "curated",
+    from importlib.util import find_spec
+    resource_root = Path(os.environ.get("ALDER_RESOURCES_DIR", Path(__file__).resolve().parents[2] / "resources"))
+    corpora = resource_root / "nltk_data" / "corpora"
+    wordnet = find_spec("nltk") is not None and any((corpora / name).exists() for name in ("wordnet", "wordnet.zip"))
+    return {"language": "en", "offline": True, "spelling": find_spec("spellchecker") is not None,
+            "wordnet": wordnet, "lexicon": "curated + WordNet" if wordnet else "curated",
             "rules": ["repetition", "concision", "spelling", "preferred-terms", "sentence-length", "sentence-openings", "punctuation", "brackets", "custom"],
             "ascendingDescending": "deferred"}
 

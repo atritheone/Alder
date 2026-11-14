@@ -1,12 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
-import ContextMenus from "./ContextMenu";
+import Startup from "./Startup";
 import "./styles.css";
 import "./controls.css";
-import "./structure.css";
-import "./equations.css";
-import "mathlive/fonts.css";
 if (new URLSearchParams(location.search).has("publication")) {
   (window as any).alderPublication = import("./PublicationRenderer").then(
     (module) => module.renderPublication,
@@ -14,7 +10,6 @@ if (new URLSearchParams(location.search).has("publication")) {
 } else
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
-      <App />
-      <ContextMenus />
+      <Startup />
     </React.StrictMode>,
   );

@@ -1,4 +1,5 @@
 import { formatInteger } from "./numberDisplay";
+import type { StartupIntent } from "./startupIntent";
 import { version as releaseVersion } from "../../package.json";
 import { prepareExport, type ExportProgress } from './documentExports';
 import { useTypingPointer } from "./useTypingPointer";
@@ -18,13 +19,15 @@ import DocumentReader from "./DocumentReader";
 import { useSpeechTransport } from "./useSpeechTransport";
 import { useSpeechJob } from "./useSpeechJob";
 import ResizeHandle from "./ResizeHandle";
-import VoiceManager from "./VoiceManager";
-import PronunciationManager from "./PronunciationManager";
+import { deferredComponent } from "./deferredComponent";
+const VoiceManager = deferredComponent(() => import("./VoiceManager"));
+const PronunciationManager = deferredComponent(() => import("./PronunciationManager"));
 import NativeMenu from "./NativeMenu";
 import MenuItems, { type MenuEntry } from "./MenuItems";
 import { ArrangementGlyph, WriteGlyph } from "./WorkspaceGlyphs";
 import AlderLogo from "./AlderLogo";
-import SettingsWindow, { type SettingsCategory } from "./SettingsWindow";
+import type { SettingsCategory } from "./SettingsWindow";
+const SettingsWindow = deferredComponent(() => import("./SettingsWindow"));
 import { useStoredPreference } from "./useStoredPreference";
 import { useProofreading } from "./useProofreading";
 import ProofreadingPanel from "./ProofreadingPanel";
@@ -103,11 +106,11 @@ import type { BookSearchGroup } from "./bookFind";
 import type { TextMatch } from "./findText";
 import { bookText, newChapter } from "./book";
 import Editor, { schema as editorSchema, type EditorHandle } from "./Editor";
-import DefinitionStudio from "./DefinitionStudio";
-import NarrationReview from "./NarrationReview";
-import StylesManager from "./StylesManager";
-import DocumentVersions from "./DocumentVersions";
-import DocumentTemplates from "./DocumentTemplates";
+const DefinitionStudio = deferredComponent(() => import("./DefinitionStudio"));
+const NarrationReview = deferredComponent(() => import("./NarrationReview"));
+const StylesManager = deferredComponent(() => import("./StylesManager"));
+const DocumentVersions = deferredComponent(() => import("./DocumentVersions"));
+const DocumentTemplates = deferredComponent(() => import("./DocumentTemplates"));
 import { DEFAULT_SPEECH_OPTIONS } from "./SpeechOptions";
 
 import DocumentTabs from "./DocumentTabs";
@@ -281,7 +284,7 @@ function savedNumber(key: string, fallback: number, min: number, max: number) {
     ? Math.max(min, Math.min(max, value))
     : fallback;
 }
-export default function App() {
+export default function App({ initialIntent }: { initialIntent?: StartupIntent } = {}) {
   const [ruler, toggleRuler] = useRuler();
   useTypingPointer();
   const {
@@ -579,6 +582,20 @@ export default function App() {
     },
     [flush, load, findSource, setError],
   );
+  const initialHandled = useRef(false);
+  useEffect(() => {
+    if (initialHandled.current || !initialIntent) return;
+    initialHandled.current = true;
+    void (async () => {
+      if (initialIntent.project) await load(initialIntent.project, initialIntent.fresh);
+      if (initialIntent.files) await openFiles(initialIntent.files);
+      for (const path of initialIntent.paths || []) {
+        const opened = await api<Project>("/api/projects/open", "POST", { path });
+        await rememberDocumentFile(opened.id, path);
+        await load(opened);
+      }
+    })().catch(cause => setError(String(cause.message || cause)));
+  }, [initialIntent, load, openFiles, setError]);
   useEffect(() => {
     const over = (e: DragEvent) => {
       if (e.dataTransfer?.types.includes("Files")) {
@@ -1005,7 +1022,7 @@ export default function App() {
       setSelected(project.clips[0]?.id || null);
   }, [project?.id, project?.clips.length, selected]);
   useEffect(() => {
-    if (!project) return;
+    if (!project || (detail !== "Narration" && !activeJob)) return;
     let cancelled = false;
     const get = async () => {
       try {
@@ -1066,7 +1083,7 @@ export default function App() {
   }, [speed, loop]);
   useEffect(() => {
     let cancelled = false;
-    if (!word.trim()) {
+    if (!word.trim() || !browserOpen) {
       setLexicon(null);
       return;
     }
@@ -1085,7 +1102,7 @@ export default function App() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [word, project?.id, project?.dictionary]);
+  }, [word, project?.id, project?.dictionary, browserOpen]);
   useEffect(
     () =>
       window.alder?.onCloseRequest(async () => {
@@ -1791,9 +1808,9 @@ export default function App() {
     window.addEventListener("keydown", switchWorkspace, true);
     return () => window.removeEventListener("keydown", switchWorkspace, true);
   }, [project, form, panel, newOpen]);
-  useEffect(
-    () =>
-      window.alder?.onCommand((command) => {
+  const initialCommandHandled = useRef(false);
+  useEffect(() => {
+      const handle = (command: string) => {
         if (command === "save") void run(saveProject);
         if (command === "new") newProject();
         if (command === "open") {
@@ -1802,9 +1819,13 @@ export default function App() {
         }
         if (command === "export") openPanel("export");
         if (command === "settings") openSettings();
-      }),
-    [project],
-  );
+      };
+      if (!initialCommandHandled.current && initialIntent?.command) {
+        initialCommandHandled.current = true;
+        handle(initialIntent.command);
+      }
+      return window.alder?.onCommand(handle);
+    }, [project]);
   const doExport = async (format: string) => {
     if (!project || exportController.current) return;
     const controller = new AbortController();

@@ -296,36 +296,10 @@ class SpeechService:
         self._qa_responses = None
         self._qa_stderr = None
         self._qa_health = None
-        for manifest in (self.root / "jobs").glob("*/manifest.json"):
-            try:
-                job = json.loads(manifest.read_text(encoding="utf-8"))
-                if job["id"] != manifest.parent.name:
-                    continue
-                if job["status"] not in TERMINAL:
-                    job["status"] = "interrupted"
-                    job["message"] = "Alder stopped before this narration finished. Resume to retain completed chunks."
-                for chunk in job["chunks"]:
-                    if chunk["status"] in ("generating", "checking"):
-                        chunk["status"] = "queued"
-                    if chunk["status"] == "ready":
-                        try:
-                            _wav_info(self._chunk_path(job, chunk))
-                        except (OSError, ValueError, wave.Error, EOFError):
-                            chunk["status"] = "queued"
-                            chunk.pop("audioUrl", None)
-                            chunk.pop("manualReview", None)
-                            job["status"] = "interrupted"
-                            job["message"] = "A saved audio chunk is missing or damaged. Resume to recover it."
-                if job["status"] == "ready" and not (manifest.parent / ("narration." + job["format"])).is_file():
-                    job["status"] = "interrupted"
-                    job["message"] = "Combined audio is missing. Resume to rebuild it from saved chunks."
-                self._jobs[job["id"]] = job
-                self._persist(job)
-            except (ValueError, KeyError, OSError):
-                continue  # Retain a damaged manifest on disk for recovery.
-        # OS voice discovery is refreshed once per application startup. Library
-        # renames/hides only re-read preferences; no manual rescan UI is needed.
-        self.voices(refresh=True)
+        from .speech_library import SpeechLibrary
+        self._library = SpeechLibrary(self.root / "jobs")
+        # Jobs recover on first access. Neither service construction nor voice
+        # discovery needs to read every manuscript or inspect saved audio.
         self._thread = threading.Thread(target=self._run, name="alder-speech-supervisor", daemon=True)
         self._thread.start()
 
@@ -625,11 +599,42 @@ class SpeechService:
 
     def list_jobs(self, project_id):
         with self._lock:
+            for identity in self._library.ids_for_project(project_id):
+                try:
+                    self._job(identity)
+                except (KeyError, ValueError, OSError):
+                    continue  # Keep damaged manifests available for recovery.
             return [self._public(j) for j in sorted(self._jobs.values(), key=lambda j: j["createdAt"], reverse=True) if j["projectId"] == project_id]
 
     def _job(self, job_id):
         if job_id not in self._jobs:
-            raise KeyError("Unknown narration job.")
+            job = self._library.load(job_id)
+            changed = False
+            if job["status"] not in TERMINAL:
+                job["status"] = "interrupted"
+                job["message"] = "Alder stopped before this narration finished. Resume to retain completed chunks."
+                changed = True
+            for chunk in job["chunks"]:
+                if chunk["status"] in ("generating", "checking"):
+                    chunk["status"] = "queued"
+                    changed = True
+                if chunk["status"] == "ready":
+                    try:
+                        _wav_info(self._chunk_path(job, chunk))
+                    except (OSError, ValueError, wave.Error, EOFError):
+                        chunk["status"] = "queued"
+                        chunk.pop("audioUrl", None)
+                        chunk.pop("manualReview", None)
+                        job["status"] = "interrupted"
+                        job["message"] = "A saved audio chunk is missing or damaged. Resume to recover it."
+                        changed = True
+            if job["status"] == "ready" and not (self.root / "jobs" / job_id / ("narration." + job["format"])).is_file():
+                job["status"] = "interrupted"
+                job["message"] = "Combined audio is missing. Resume to rebuild it from saved chunks."
+                changed = True
+            if changed:
+                self._persist(job)
+            self._jobs[job_id] = job
         return self._jobs[job_id]
 
     def get_job(self, job_id):

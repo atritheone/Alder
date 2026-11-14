@@ -11,6 +11,7 @@ import time
 
 from .models import ValidationError, create_project, now, text_document, uid, validate_project
 from .store import Store
+from .performance import span
 
 
 def imported_project(imported, name, staging):
@@ -98,12 +99,14 @@ class DocumentOpening:
             if self.importer is None:
                 from .publishing import import_document
             else: import_document = self.importer
-            imported = import_document(path)
+            with span("opening.parse"):
+                imported = import_document(path)
             with self.lock:
                 if job['cancel'].is_set(): return
                 job['status'] = 'collecting'
             staging = Store(job['directory'] / 'staged')
-            project = imported_project(imported, job['name'], staging)
+            with span("opening.validate"):
+                project = imported_project(imported, job['name'], staging)
             with self.lock:
                 if job['cancel'].is_set(): return
                 job.update(project=project, status='ready', touched=time.monotonic())
@@ -155,7 +158,8 @@ class DocumentOpening:
                     if asset['path'].split('.')[0] != hashlib.sha256(content).hexdigest():
                         raise ValidationError('An imported image failed its integrity check.')
                     self.store._atomic_bytes(destination / asset['path'], content)
-                saved = self.store.insert(project)
+                with span("opening.commit"):
+                    saved = self.store._insert_validated_many([project])[0]
             except Exception as error:
                 if destination.parent == (self.store.data_dir / 'assets').resolve(): shutil.rmtree(destination, ignore_errors=True)
                 job.update(status='failed', error=str(error)); self._cleanup(job)

@@ -30,7 +30,8 @@ import PlainTextEditor from "./PlainTextEditor";
 import { isPlainDocument } from "./plainTextTools";
 import { editorFileType } from "./documentCapabilities";
 import PageArrangement from "./PageArrangement";
-import PublicationPreview from "./PublicationPreview";
+import { deferredComponent } from "./deferredComponent";
+const PublicationPreview = deferredComponent(() => import("./PublicationPreview"));
 import { newChapter } from "./book";
 import ChapterDialog from "./ChapterDialog";
 import {

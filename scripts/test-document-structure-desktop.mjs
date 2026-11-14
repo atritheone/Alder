@@ -18,6 +18,7 @@ try {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("button", { name: /Word document/ }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   const editor = page.getByRole("textbox", {
     name: "Chapter text editor",

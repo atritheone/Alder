@@ -1,5 +1,6 @@
 import { api, upload } from "./api";
 import type { Project } from "./types";
+import { recordPerformance } from "./performance";
 
 export type OpeningProgress = { name: string; index: number; total: number; stage: string; cancellable: boolean };
 type OpeningOptions = { signal?: AbortSignal; progress?: (value: OpeningProgress) => void };
@@ -13,7 +14,9 @@ async function stagedDocument(file: File, options: OpeningOptions, progress: (st
   try {
     checkCancelled(options.signal);
     progress('Reading');
+    const uploadStarted = performance.now();
     job = await upload<OpeningJob>('/api/document-open-jobs/import', file);
+    recordPerformance('opening.upload', uploadStarted);
     for (;;) {
       checkCancelled(options.signal);
       if (job.status === 'failed') throw new Error(job.error || 'This document could not be opened.');
@@ -29,7 +32,9 @@ async function stagedDocument(file: File, options: OpeningOptions, progress: (st
     // abort must not leave a successfully committed document unacknowledged.
     options.signal?.removeEventListener('abort', cancel);
     progress('Opening', false);
+    const commitStarted = performance.now();
     const project = await api<Project>(`/api/document-open-jobs/${job.id}/open`, 'POST');
+    recordPerformance('opening.commit', commitStarted);
     committed = true;
     return project;
   } finally {
@@ -63,6 +68,7 @@ export async function openDocuments(
 ): Promise<Project | null> {
   let result: Project | null = null;
   for (const [index, file] of files.entries()) {
+    const openingStarted = performance.now();
     checkCancelled(options.signal);
     const progress = (stage: string, cancellable = true) => options.progress?.({ name: file.name, index: index + 1, total: files.length, stage, cancellable });
     progress('Preparing');
@@ -95,6 +101,7 @@ export async function openDocuments(
         archive || result.settings.documentKind === "txt",
       );
     await onOpen(result);
+    recordPerformance('opening.installed', openingStarted);
   }
   return result;
 }

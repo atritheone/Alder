@@ -29,7 +29,7 @@ export async function upload<T = any>(
     return window.alder.upload(
       path,
       file.name,
-      Array.from(new Uint8Array(await file.arrayBuffer())),
+      new Uint8Array(await file.arrayBuffer()),
       fields,
     );
   const form = new FormData();

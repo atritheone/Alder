@@ -1209,6 +1209,11 @@ button.danger {
   caret-color: #494949;
   overflow-wrap: anywhere;
 }
+/* Stop a stationary pointer's cursor change propagating through a manuscript's
+   inline decorations when it rests on empty space in the editor container. */
+.ProseMirror :where(p, h1, h2, h3, h4, h5, h6, pre, blockquote, li, td, th) {
+  cursor: text;
+}
 .ProseMirror p {
   margin: 0 0 12px;
 }
@@ -3701,7 +3706,7 @@ button.library-add-button:hover {
 }
 
 /* Hide the stationary mouse pointer during prose input, without rerendering editors. */
-html.alder-typing-pointer, html.alder-typing-pointer * { cursor: none !important; }
+.alder-typing-pointer { cursor: none !important; }
 /* Mail merge reuses the square document dialog and existing action controls. */
 .mail-merge-dialog { width: min(52rem, calc(100vw - 3rem)); }
 .merge-mapping { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .6rem 1.2rem; }

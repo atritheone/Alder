@@ -405,6 +405,8 @@ export type NativeMenuEntry = {
 declare global {
   interface Window {
     alder?: {
+      ready?: () => Promise<{ ready: boolean }>;
+      performance?: (event?: string, duration?: number) => Promise<{ version: number; run: string; platform: string; events: { event: string; ms: number; duration?: number }[] }>;
       setWindowLayout: (
         mode: "start" | "workspace",
         width?: number,
@@ -512,7 +514,7 @@ declare global {
       upload: (
         path: string,
         name: string,
-        bytes: number[],
+        bytes: Uint8Array | number[],
         fields?: Record<string, string>,
       ) => Promise<any>;
       saveText: (name: string, text: string) => Promise<string | null>;

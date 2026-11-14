@@ -2475,9 +2475,10 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         columnPlacementPlugin(),
         structureMarks(
           () => !blocked.current && !latest.current.rawMode,
+          () => latest.current.showStructure,
         ),
         structureGuides(() => ({
-          enabled: !blocked.current && !latest.current.rawMode,
+          enabled: !blocked.current && !latest.current.rawMode && latest.current.showStructure,
           layout: latest.current.pageLayout,
           pages: measuredPages.current,
           styles: latest.current.styles,
@@ -3193,7 +3194,6 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           ? cached.reconfigure({ plugins: v.state.plugins })
           : EditorState.create({ doc, plugins: v.state.plugins }),
       );
-      v.dispatch(v.state.tr.setSelection(v.state.selection));
       lastDocument.current = props.document;
       // Commit the new section canvas width before measuring snapshots. A
       // prop-driven document replacement otherwise measures against the old
@@ -3201,22 +3201,33 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       documentTick((version) => version + 1);
     }
   }, [props.document]);
+  const hadAnnotations = useRef(false);
   useLayoutEffect(() => {
     const v = view.current;
     if (v) {
       annotationSource.current =
-        !blocked.current && props.annotations
+        !blocked.current && props.annotations?.length
           ? (props.annotationText ?? projectText(v.state.doc).text)
           : null;
-      refreshEditorDecorations(v);
+      const hasAnnotations = Boolean(visibleAnnotations?.length);
+      if (hasAnnotations || hadAnnotations.current) refreshEditorDecorations(v);
+      hadAnnotations.current = hasAnnotations;
     }
   }, [visibleAnnotations, props.annotationText]);
+  const initialStyles = useRef(true);
   useLayoutEffect(() => {
+    if (initialStyles.current) { initialStyles.current = false; return; }
     if (view.current) refreshEditorDecorations(view.current);
-  }, [props.styles, props.headingStarts, props.pageLayout?.noteStarts, props.pageLayout?.noteOptions]);
+    if (view.current) refreshStructureGuides(view.current);
+  }, [props.styles, props.headingStarts, props.pageLayout?.noteStarts, props.pageLayout?.noteOptions, props.showStructure]);
+  const initialReading = useRef(true);
   useLayoutEffect(() => {
     const v = view.current;
     if (!v) return;
+    if (initialReading.current) {
+      initialReading.current = false;
+      if (!props.readingRange) return;
+    }
     refreshEditorDecorations(v);
   }, [props.readingRange, props.layoutVisible]);
   useLayoutEffect(() => {
@@ -3245,7 +3256,16 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       setPageInset(Math.max(0, (available - canvasWidth * layout.zoom) / 2));
     };
     centrePage();
-    const observer = new ResizeObserver(centrePage);
+    let width: number | undefined, frame = 0;
+    const observer = new ResizeObserver(entries => {
+      const next = entries[0]?.contentRect.width;
+      if (next === undefined) return;
+      if (width === undefined) { width = next; return; }
+      if (Math.abs(next - width) < 0.5) return;
+      width = next;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(centrePage);
+    });
     observer.observe(scroll, { box: "device-pixel-content-box" });
     window.addEventListener("resize", centrePage);
     // Chromium can expose a density such as 1.7500001 after a monitor change.
@@ -3261,6 +3281,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     resolution.addEventListener("change", densityChanged);
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", centrePage);
       resolution.removeEventListener("change", densityChanged);
     };

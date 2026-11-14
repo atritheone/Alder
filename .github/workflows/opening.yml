@@ -1,0 +1,51 @@
+name: Native startup and document opening
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  opening:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - name: Install locked developer dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install native Electron
+        run: node node_modules/electron/install.js
+      - name: Prepare isolated core runtime
+        shell: bash
+        run: python scripts/developer/prepare-opening-runtime.py --state "$RUNNER_TEMP/alder-opening-core"
+      - name: Build for the native OS
+        run: npm run build
+      - name: Check startup, import, and recovery boundaries
+        shell: bash
+        run: '"$PYTHON" -B -m pytest backend/tests/test_startup.py backend/tests/test_document_opening.py backend/tests/test_storage_recovery.py -q -p no:cacheprovider'
+      - name: Check bounded editor decorations and typing
+        run: npm exec vitest run -- frontend/src/structureMarks.test.ts frontend/src/useTypingPointer.test.ts frontend/src/editorSelectionRefresh.test.ts frontend/src/directTyping.test.ts --reporter=dot
+      - name: Native startup and TXT/DOCX opening
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node scripts/developer/benchmark-opening.mjs --runs 5 --settle-ms 10000 --max-core-ms 5000 --output "$RUNNER_TEMP/opening-results"
+            xvfb-run -a node scripts/developer/test-startup-lifecycle.mjs
+          else
+            node scripts/developer/benchmark-opening.mjs --runs 5 --settle-ms 10000 --max-core-ms 5000 --output "$RUNNER_TEMP/opening-results"
+            node scripts/developer/test-startup-lifecycle.mjs
+          fi
+      - name: Retain timings and failures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: opening-${{ matrix.os }}
+          path: ${{ runner.temp }}/opening-results/report.json

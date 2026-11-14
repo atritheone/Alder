@@ -307,10 +307,12 @@ export default function StartScreen({
   onOpen,
   onCreate,
   onOpenFiles,
+  opening = false,
 }: {
   onOpen: (p: Project) => void;
   onCreate: (p: Project, fromTemplate?: boolean) => void | Promise<void>;
   onOpenFiles: (files: File[]) => Promise<void>;
+  opening?: boolean;
 }) {
   const [mode, setMode] = useState<"home" | "new" | "open">("home");
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
@@ -375,11 +377,11 @@ export default function StartScreen({
           <p>Organic Language Engine</p>
         </div>
         <div className="start-actions">
-          <button onClick={() => setMode("new")}>
+          <button disabled={opening} onClick={() => setMode("new")}>
             <FilePlus2 size={20} />
             New
           </button>
-          <button onClick={() => setMode(mode === "open" ? "home" : "open")}>
+          <button disabled={opening} onClick={() => setMode(mode === "open" ? "home" : "open")}>
             <FolderOpen size={20} />
             Open
           </button>
@@ -387,7 +389,7 @@ export default function StartScreen({
         {mode === "open" && (
           <section className="start-open" aria-label="Open document">
             <div className="manager-actions">
-              <button disabled={busy} onClick={() => file.current?.click()}>
+              <button disabled={busy || opening} onClick={() => file.current?.click()}>
                 Open file…
               </button>
             </div>
@@ -398,7 +400,7 @@ export default function StartScreen({
                 data-context-label="Open"
                 className="project-list-item"
                 key={p.id}
-                disabled={busy}
+                disabled={busy || opening}
                 onClick={() =>
                   void run(async () =>
                     onOpen(await api<Project>(`/api/projects/${p.id}`)),
@@ -418,6 +420,7 @@ export default function StartScreen({
           type="file"
           multiple
           hidden
+          disabled={opening}
           onChange={(e) => {
             const selected = Array.from(e.target.files || []);
             e.target.value = "";

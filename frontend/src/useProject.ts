@@ -353,23 +353,28 @@ export function useProject() {
         return;
       }
       const manifest = restoreManifest.current;
-      const results = await Promise.allSettled(
-        manifest.ids.map((id) => api<Project>(`/api/projects/${id}`)),
-      );
-      if (cancelled) return;
-      if (serial.current === initialSerial && !current.current) {
-        const available: Project[] = [];
-        for (const result of results)
-          if (
-            result.status === "fulfilled" &&
-            result.value.settings.documentKind === "txt"
-          )
-            available.push(migrateBook(result.value));
-        for (const restored of available) remember(restored);
-        const active =
-          available.find((p) => p.id === manifest.active) || available.at(-1);
-        if (active) install(active);
+      const active = manifest.active || manifest.ids.at(-1);
+      const order = [active, ...manifest.ids.filter(id => id !== active)].filter((id): id is string => Boolean(id));
+      let first = true;
+      // Hydrate the active tab first. Limit inactive snapshots in flight so a
+      // restored session cannot starve opening or editing its visible document.
+      while (order.length) {
+        const ids = order.splice(0, first ? 1 : 2);
+        const results = await Promise.allSettled(ids.map(id => api<Project>(`/api/projects/${id}`)));
+        if (cancelled) return;
+        for (const result of results) {
+          if (result.status !== "fulfilled" || result.value.settings.documentKind !== "txt") continue;
+          const restored = migrateBook(result.value);
+          if (!opened.current.has(restored.id)) remember(restored);
+          if (serial.current === initialSerial && !current.current) install(restored);
+        }
+        first = false;
+        if (order.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
       }
+      setDocuments(previous => [...previous].sort((a, b) => {
+        const rank = (id: string) => { const index = manifest.ids.indexOf(id); return index < 0 ? Number.MAX_SAFE_INTEGER : index; };
+        return rank(a.id) - rank(b.id);
+      }));
       setRestoreDone(true);
     };
     void restore().catch(() => {

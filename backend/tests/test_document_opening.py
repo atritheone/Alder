@@ -87,7 +87,7 @@ def test_failure_and_storage_failure_leave_no_partial_project(opening, monkeypat
     opening.importer = lambda _: {'document': text_document('New'), 'assets': [{'id': 'new_image', 'name': 'new.png', 'data': base64.b64encode(b'image').decode()}]}
     job = opening.start('disk.docx', b'fixture')
     assert ready(opening, job['id'])['status'] == 'ready'
-    monkeypatch.setattr(opening.store, 'insert', lambda _: (_ for _ in ()).throw(OSError('Disk full')))
+    monkeypatch.setattr(opening.store, '_insert_validated_many', lambda _: (_ for _ in ()).throw(OSError('Disk full')))
     with pytest.raises(OSError, match='Disk full'): opening.commit(job['id'])
     assert opening.get(job['id'])['status'] == 'failed'
     assert not opening.store.list_projects() and not list(opening.root.iterdir())
