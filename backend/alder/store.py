@@ -34,6 +34,8 @@ class Store:
         self.db_path = self.data_dir / "alder.sqlite3"
         self._lock = RLock()
         self._version_metadata = ByteCache(4*1024*1024,32)
+        from .version_metadata import VersionMetadata
+        self._version_metadata_files=VersionMetadata(self.data_dir)
         with self.connection() as conn:
             # Check compatibility before DDL, journal-mode changes, or any write.
             # Version 1 is the only released schema; future migrations must take
@@ -145,6 +147,8 @@ class Store:
                 conn.commit()
             except sqlite3.IntegrityError as exc:
                 raise ConflictError("A project with this identity is already open.") from exc
+            for p,_ in prepared:
+                self._cache_versions(p['id'],{'revision':1,'sourceUpdatedAt':p['updatedAt'],'cursor':0,'rows':[{'sequence':0,'revision':1,'name':p['name'],'updatedAt':p['updatedAt']}]})
         return [p for p, _ in prepared]
 
     def update(self, project_id: str, project: dict, expected_revision: int, *, _base=None, _changes=None) -> dict:
@@ -189,7 +193,7 @@ class Store:
     def _update_locked(self, project_id, p, payload, expected_revision):
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT revision,cursor FROM projects WHERE id=?", (project_id,)).fetchone()
+            row = conn.execute("SELECT revision,cursor,updated_at FROM projects WHERE id=?", (project_id,)).fetchone()
             if row is None:
                 raise KeyError("Project does not exist.")
             if expected_revision != row["revision"]:
@@ -205,11 +209,11 @@ class Store:
                          (p["name"], p["revision"], p["updatedAt"], cursor, payload, project_id))
             with span('save.commit'):
                 conn.commit()
-            cached=self._version_metadata.get(project_id)
+            cached=self._version_metadata.get(project_id) or self._version_metadata_files.read(project_id,expected_revision,row['updated_at'])
             if cached and cached['revision']==expected_revision and cached['cursor']==row['cursor']:
                 rows=[{'sequence':cursor,'name':p['name'],'revision':p['revision'],'updatedAt':p['updatedAt']},
                       *(item for item in cached['rows'] if max(0,cursor-200)<=item['sequence']<cursor)]
-                self._version_metadata[project_id]={'revision':p['revision'],'cursor':cursor,'rows':rows}
+                self._cache_versions(project_id,{'revision':p['revision'],'sourceUpdatedAt':p['updatedAt'],'cursor':cursor,'rows':rows})
             return p
 
     def history_step(self, project_id: str, direction: int) -> dict:
@@ -233,10 +237,13 @@ class Store:
     def versions(self, project_id: str) -> list[dict]:
         with self._lock,self.connection() as conn:
             conn.execute('BEGIN')
-            current = conn.execute("SELECT cursor,revision FROM projects WHERE id=?", (project_id,)).fetchone()
+            current = conn.execute("SELECT cursor,revision,updated_at FROM projects WHERE id=?", (project_id,)).fetchone()
             if current is None:
                 raise KeyError("Project does not exist.")
             cached=self._version_metadata.get(project_id)
+            if not cached or cached['revision']!=current['revision']:
+                cached=self._version_metadata_files.read(project_id,current['revision'],current['updated_at'])
+                if cached:self._version_metadata[project_id]=cached
             if cached and cached['revision']==current['revision']:
                 self._version_metadata.move_to_end(project_id)
                 return [{**row,'current':row['sequence']==current['cursor']} for row in cached['rows']]
@@ -244,8 +251,12 @@ class Store:
                 "SELECT seq AS sequence, json_extract(snapshot,'$.name') AS name, "
                 "json_extract(snapshot,'$.revision') AS revision, json_extract(snapshot,'$.updatedAt') AS updatedAt "
                 "FROM history WHERE project_id=? ORDER BY seq DESC LIMIT 201", (project_id,))]
-            self._version_metadata[project_id]={'revision':current['revision'],'cursor':current['cursor'],'rows':rows}
+            self._cache_versions(project_id,{'revision':current['revision'],'sourceUpdatedAt':current['updated_at'],'cursor':current['cursor'],'rows':rows})
             return [{**row,'current':row['sequence']==current['cursor']} for row in rows]
+
+    def _cache_versions(self, identity, value):
+        self._version_metadata[identity]=value
+        self._version_metadata_files.write(identity,value)
 
     def recover_version(self, project_id: str, sequence: int) -> dict:
         with self.connection() as conn:
