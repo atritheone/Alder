@@ -29,6 +29,7 @@ def include(relative):
     parts=relative.parts;name=relative.name.lower()
     if name.startswith('.') or name in ('installer.nsi','alder-icon-source.png'):return False
     if any(p in ('tests','test','fixtures','__pycache__','node_modules','.git') for p in parts):return False
+    if any(p.lower().endswith('.egg-info') for p in parts):return False
     if name.startswith(('test_','test-','conftest.')) or '.test.' in name or '.spec.' in name:return False
     if relative.as_posix().startswith('electron/native/windows-menu/build/'):return False
     return not name.endswith(('.pyc','.pyo','.map'))
@@ -49,6 +50,8 @@ def prepare(output,node,npm):
         package=json.loads((root/'package.json').read_text())
         for name in TEST_DEPS:package['devDependencies'].pop(name,None)
         package['scripts']={key:value for key,value in package['scripts'].items() if key in ('build','typecheck')}
+        # Debug maps are useful in development but are not application resources.
+        package['build']['files'].append('!**/*.map')
         (root/'package.json').write_text(json.dumps(package,indent=2)+'\n',encoding='utf-8')
         # Recompute reachability from the existing pinned lock, without resolving new versions.
         subprocess.run([str(node),str(npm),'prune','--package-lock-only','--offline','--ignore-scripts','--no-audit','--no-fund'],cwd=root,check=True)

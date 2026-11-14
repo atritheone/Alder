@@ -1,14 +1,14 @@
-# Agent setup entry point for Alder 0.13
+# Agent setup entry point for Alder 0.14
 
 These instructions are for the coding agent doing the work. The user only needs
 to ask to install or update Alder; do not hand routine terminal work back to them.
-This repository contains **0.13**. If Alder is already installed, follow the
+This repository contains **0.14**. If Alder is already installed, follow the
 [agent update runbook](docs/setup/updating.md) first. Check the old and new versions
 before updating the existing managed installation:
 
 ```powershell
-.\update.ps1 --check --expect-version 0.13 --json
-.\update.ps1 --expect-version 0.13 --json
+.\update.ps1 --check --expect-version 0.14 --json
+.\update.ps1 --expect-version 0.14 --json
 ```
 
 On Linux or Mac, use `bash ./update.sh` with the same options. Close Alder normally
@@ -18,7 +18,7 @@ verification and preserve a compatible previous version; they never silently
 create a fresh install. Older installer/portable copies have a separate transition
 in the update guide. The commands below are for a **first installation**.
 
-0.13 accepts older document compatibility 1 and uses compatibility 2. Preserve a
+0.14 accepts older document compatibility 1 and uses compatibility 2. Preserve a
 verified pre-update data backup: retaining an older application does not make it
 safe to reopen newly saved documents with it. The update report explicitly states
 whether automatic rollback is compatible. Fresh installs use compatibility 2.
@@ -29,12 +29,12 @@ data and speech models. Internet access and roughly 45 GiB of free workspace are
 required; setup checks the actual disk and install destination before large work.
 The repository can be read-only. Nothing is generated or patched in it.
 
-For 0.13, inspect the `features` report: all targets provision the local spelling
+For 0.14, inspect the `features` report: all targets provision the local spelling
 and grammar rules; Windows x64, Linux x64 and Apple Silicon also provision the
 experimental advanced-review model/runtime. Intel Mac is rules-only. Windows
 requires Visual Studio C++ Build Tools and a Windows SDK to compile its native
 menu module; Linux and Mac exclude that module. See the
-[0.13 update prerequisites](docs/setup/updating.md#013-resources-and-prerequisites)
+[0.14 update prerequisites](docs/setup/updating.md#014-resources-and-prerequisites)
 and [Windows setup](docs/setup/windows.md). No global Java or Python is needed.
 
 Windows x64 (PowerShell):
@@ -87,3 +87,8 @@ Use the test-free release download for end-user installations. Developer tests,
 benchmarks and qualification tooling stay in the development repository. Normal
 install/update checks only payload integrity, matching versions and desktop launch;
 do not download or run developer test suites for the user.
+
+If the user provided the development checkout, preserve it and obtain the matching
+published `Alder-0.14-source.zip` asset separately. Execute this runbook from its
+extracted source. GitHub's automatic source archives contain developer files.
+Do not substitute an older release when the requested asset is unavailable.

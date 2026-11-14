@@ -7,12 +7,13 @@ import { desktopExecutable } from "../desktop-paths.mjs";
 
 const output = fs.mkdtempSync(path.join(os.tmpdir(), "alder-startup-lifecycle-"));
 const results = [];
+const packaged = process.argv.includes("--packaged");
 async function launch(name) {
   const profile = path.join(output, name);
   const env = { ...process.env, ALDER_DATA_DIR: path.join(profile, "data") };
   for (const key of ["PYTHONHOME", "PYTHONPATH", "ELECTRON_RUN_AS_NODE"]) delete env[key];
-  const app = await electron.launch({ executablePath: desktopExecutable(),
-    args: [".", "--headless-test", `--user-data-dir=${path.join(profile, "chromium")}`], env, timeout: 60000 });
+  const app = await electron.launch({ executablePath: desktopExecutable(packaged),
+    args: [...(packaged ? [] : ["."]), "--headless-test", `--user-data-dir=${path.join(profile, "chromium")}`], env, timeout: 60000 });
   await app.evaluate(() => {
     const original = globalThis.fetch;
     globalThis.holdStartupHealth = true;
@@ -59,10 +60,22 @@ try {
     const reopened = app.waitForEvent("window");
     await app.evaluate(({ app }) => app.emit("activate"));
     page = await reopened;
-    await expect(page.getByRole("textbox", { name: "TXT text editor", exact: true }))
-      .toContainText("A document created before core readiness retains its edits.");
-    await page.evaluate(() => window.alder.ready());
-    results.push("Mac window close, backend shutdown, activation, and saved-session restore");
+  } else {
+    await app.close(); app = null;
+    ({ app, page } = await launch("immediate-new"));
+    await app.evaluate(() => { globalThis.holdStartupHealth = false; });
   }
+  // Reopening deliberately shows Start. The saved workspace loads only after
+  // an explicit New/Open action, including on Mac Dock activation.
+  await expect(page.locator(".start-screen")).toBeVisible();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.locator(".project-list-item")).toHaveCount(1);
+  await page.locator(".project-list-item").click();
+  await expect(page.getByRole("textbox", { name: "TXT text editor", exact: true }))
+    .toContainText("A document created before core readiness retains its edits.");
+  await page.evaluate(() => window.alder.ready());
+  results.push(process.platform === "darwin"
+    ? "Mac window close, backend shutdown, activation, and explicit saved-document reopen"
+    : "Application restart, start screen, and explicit saved-document reopen");
   console.log(JSON.stringify({ status: "passed", platform: process.platform, checks: results }));
 } finally { await app?.close(); }

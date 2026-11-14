@@ -26,22 +26,11 @@ try {
     }
   });
   await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("button", { name: "Book Chapters & pages" }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(
     page.getByRole("textbox", { name: "Chapter text editor", exact: true }),
   ).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          [...document.fonts].filter(
-            (font) =>
-              font.family.replaceAll('"', "") === "Liberation Serif" &&
-              font.status === "loaded",
-          ).length,
-      ),
-    )
-    .toBe(4);
   await expect(
     page.getByRole("combobox", { name: "Font family", exact: true }).first(),
   ).toHaveValue("Cambria");
@@ -81,6 +70,19 @@ try {
   await expect(
     page.getByRole("combobox", { name: "Font family", exact: true }).first(),
   ).toHaveAttribute("title", /unavailable/);
+  // Fallback faces load on demand when a document actually needs them.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          [...document.fonts].filter(
+            (font) =>
+              font.family.replaceAll('"', "") === "Liberation Serif" &&
+              font.status === "loaded",
+          ).length,
+      ),
+    )
+    .toBe(4);
   await expect
     .poll(() =>
       page.evaluate(

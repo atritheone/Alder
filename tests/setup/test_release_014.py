@@ -1,4 +1,4 @@
-"""Release metadata, complete source copies, and 0.12 update compatibility."""
+"""Release metadata, complete source copies, and earlier-release update compatibility."""
 from pathlib import Path
 import sys
 import tempfile
@@ -13,12 +13,12 @@ from install import executable
 from updates import update_plan
 
 
-class Release013Tests(unittest.TestCase):
+class Release014Tests(unittest.TestCase):
     def test_release_metadata_and_external_workspace_assets(self):
         with tempfile.TemporaryDirectory() as directory:
             state=Path(directory);own_state(state)
             workspace=workspace_copy(ROOT,state,source_fingerprint(ROOT))
-            self.assertEqual(validate_metadata(workspace)['version'],'0.13.0')
+            self.assertEqual(validate_metadata(workspace)['version'],'0.14.0')
             for name in ('THIRD-PARTY-NOTICES.md','docs/sitka-provenance.md',
                          'frontend/src/citationAssets/apa.csl',
                          'frontend/src/equationAssets/OFL.txt',
@@ -31,20 +31,20 @@ class Release013Tests(unittest.TestCase):
 
     def test_update_from_both_released_compatibility_levels_on_every_target(self):
         for target in ('win32-x64','linux-x64','darwin-arm64','darwin-x64'):
-            for compatibility in (1,2):
+            for old_version,compatibility in (('0.12.0',1),('0.12.0',2),('0.13.0',2)):
                 with self.subTest(target=target,compatibility=compatibility),tempfile.TemporaryDirectory() as directory:
                     root=Path(directory);app=root/'versions/old'
                     exe=executable(app,target);exe.parent.mkdir(parents=True);exe.write_bytes(b'fixture')
                     write_json(root/'.alder-owned.json',{'owner':'Alder repository installation'})
                     write_json(root/'files.json',inventory(app))
                     write_json(root/'active.json',{'directory':'versions/old','target':target,
-                        'version':'0.12.0','dataCompatibility':compatibility,
+                        'version':old_version,'dataCompatibility':compatibility,
                         'inventory':'files.json','fingerprint':'previous-source'})
                     before=inventory(root)
-                    plan=update_plan(ROOT,root,target,'new-source','0.13')
+                    plan=update_plan(ROOT,root,target,'new-source','0.14')
                     self.assertEqual(plan['status'],'update-available')
-                    self.assertEqual(plan['installedRelease'],'0.12')
-                    self.assertEqual(plan['repositoryRelease'],'0.13')
+                    self.assertEqual(plan['installedRelease'],old_version[:-2])
+                    self.assertEqual(plan['repositoryRelease'],'0.14')
                     self.assertEqual(plan['dataMigration'],compatibility==1)
                     self.assertEqual(plan['automaticRollbackCompatible'],compatibility==2)
                     self.assertEqual(inventory(root),before)

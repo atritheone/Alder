@@ -17,10 +17,44 @@ import cli
 import updates
 from common import SetupError, inventory, read_json, write_json
 from doctor import validate_metadata
-from install import activate, rollback, integrations
+from install import activate, rollback, integrations, restore_activation
 
 
 class WindowsLauncherTests(unittest.TestCase):
+    def test_legacy_name_is_retired_only_when_owned_and_unchanged(self):
+        from contextlib import nullcontext
+        from common import digest
+        for conflict in ('none','unowned-destination','modified-legacy'):
+            with self.subTest(conflict=conflict),tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);menu=root/'profile/Microsoft/Windows/Start Menu/Programs'
+                menu.mkdir(parents=True)
+                old=menu/'Alder (local).lnk';old.write_bytes(b'owned old shortcut')
+                new=menu/'Alder.lnk'
+                write_json(root/'integrations.json',[{'path':str(old),'sha256':digest(old)}])
+                if conflict=='unowned-destination':new.write_bytes(b'unrelated shortcut')
+                if conflict=='modified-legacy':old.write_bytes(b'customised shortcut')
+                before=inventory(menu)
+                registry=SimpleNamespace(CreateKey=lambda *a:nullcontext(object()),SetValueEx=MagicMock(),HKEY_CURRENT_USER=0,REG_SZ=1)
+                def create(_args,**kwargs):
+                    payload=json.loads(kwargs['env']['ALDER_SHORTCUT_JSON'])
+                    Path(payload['shortcut']).write_bytes(payload['exe'].encode())
+                active={'target':'win32-x64','directory':'versions/current','description':'Alder','version':'0.14.0'}
+                with patch.dict('os.environ',{'APPDATA':str(root/'profile')}),patch.dict(sys.modules,{'winreg':registry}),patch('install.subprocess.run',side_effect=create):
+                    if conflict!='none':
+                        with self.assertRaises(SetupError):integrations(root,active)
+                        self.assertEqual(inventory(menu),before)
+                    else:
+                        self.assertEqual(integrations(root,active),str(new))
+                        self.assertFalse(old.exists())
+                        self.assertEqual(new.read_bytes(),str(root/'versions/current/Alder.exe').encode())
+                        self.assertEqual(read_json(root/'integrations.json'),[{'path':str(new),'sha256':digest(new)}])
+                        previous={**active,'version':'0.13.0','directory':'versions/previous','launcher':str(old)}
+                        restore_activation(root,previous,None)
+                        self.assertEqual(read_json(root/'active.json')['launcher'],str(new))
+                        self.assertEqual(read_json(root/'active.json')['version'],'0.13.0')
+                        self.assertEqual(new.read_bytes(),str(root/'versions/previous/Alder.exe').encode())
+                        self.assertFalse(old.exists())
+
     def test_owned_original_launcher_follows_the_current_managed_version(self):
         from contextlib import nullcontext
         from common import digest
@@ -40,7 +74,7 @@ class WindowsLauncherTests(unittest.TestCase):
                                      HKEY_CURRENT_USER=0,REG_SZ=1)
             with patch.dict('os.environ',{'APPDATA':str(root/'profile')}),patch.dict(sys.modules,{'winreg':registry}),patch('install.subprocess.run',side_effect=create_shortcut):
                 launcher=integrations(root,active)
-                self.assertEqual(launcher,str(menu/'Alder (local).lnk'))
+                self.assertEqual(launcher,str(menu/'Alder.lnk'))
                 self.assertEqual({row['shortcut'] for row in calls},{str(original),launcher})
                 self.assertTrue(all(row['exe']==str(root/'versions/current/Alder.exe') for row in calls))
                 self.assertEqual({row['path'] for row in read_json(root/'integrations.json')},{str(original),launcher})
@@ -116,12 +150,14 @@ class UpdateTests(unittest.TestCase):
         self.active['fingerprint']=self.fingerprint;write_json(self.install/'active.json',self.active)
         self.assertEqual(self.plan()['status'],'current')
 
-    def test_012_to_013_preserves_previous_installation_during_preflight(self):
-        self.active['version']='0.12.0';write_json(self.install/'active.json',self.active)
+    def test_013_to_014_preserves_previous_installation_during_preflight(self):
+        self.active.update(version='0.13.0',dataCompatibility=2);write_json(self.install/'active.json',self.active)
         before=inventory(self.install)
-        plan=self.plan(expected_version='0.13')
-        self.assertEqual(plan['installedRelease'],'0.12')
-        self.assertEqual(plan['repositoryRelease'],'0.13')
+        plan=self.plan(expected_version='0.14')
+        self.assertEqual(plan['installedRelease'],'0.13')
+        self.assertEqual(plan['repositoryRelease'],'0.14')
+        self.assertFalse(plan['dataMigration'])
+        self.assertTrue(plan['automaticRollbackCompatible'])
         self.assertEqual(plan['status'],'update-available')
         self.assertEqual(inventory(self.install),before)
 

@@ -1,0 +1,36 @@
+name: Setup and release download boundaries
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  setup:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.21.0
+      - name: Check installation and update transactions
+        run: python -B -m unittest discover -s tests/setup -q
+      - name: Build and audit the minimal end-user source download
+        shell: bash
+        run: |
+          python -B - <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+          node = Path(subprocess.check_output(['node', '-p', 'process.execPath'], text=True).strip())
+          npm = node.parent / 'node_modules/npm/bin/npm-cli.js' if sys.platform == 'win32' else node.parent.parent / 'lib/node_modules/npm/bin/npm-cli.js'
+          output = Path(os.environ['RUNNER_TEMP']) / 'alder-download'
+          subprocess.run([sys.executable, '-B', 'scripts/developer/prepare-download.py', '--output', str(output), '--node', str(node), '--npm-cli', str(npm)], check=True)
+          version = json.loads(Path('package.json').read_text())['version']
+          label = version.removesuffix('.0')
+          subprocess.run([sys.executable, '-B', 'scripts/developer/verify-download.py', str(output / f'Alder-{label}-source.zip')], check=True)
+          PY

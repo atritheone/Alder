@@ -71,4 +71,5 @@ def desktop(workspace,app,target,node,env,logs,full=True):
     if full:
         run([node,'scripts/test-desktop-lifecycle.mjs','--packaged','--features'],workspace,environment,logs,'installed-lifecycle',timeout=600)
         run([node,'scripts/test-fonts-desktop.mjs','--packaged'],workspace,environment,logs,'installed-fonts',timeout=120)
+        run([node,'scripts/developer/test-startup-lifecycle.mjs','--packaged'],workspace,environment,logs,'installed-startup',timeout=180)
     return {'status':'passed','lifecycle':bool(full)}

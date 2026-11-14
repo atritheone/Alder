@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 import subprocess
+import time
 
 SOURCE=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(SOURCE/'scripts/setup'))
@@ -27,7 +28,9 @@ def main():
                  allow_experimental=args.allow_experimental)
     own_state(state)
     with operation_lock(state):
+        (state/'release-validation.json').unlink(missing_ok=True)
         fingerprint=source_fingerprint(SOURCE);env=environment(state)
+        env['ALDER_DATA_DIR']=str(state/'scratch'/f'release-data-{time.time_ns()}')
         node,npm=node_runtime(SOURCE,state,target,args.offline)
         import os
         env['PATH']=str(node.parent)+os.pathsep+env.get('PATH','')

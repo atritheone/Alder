@@ -6,18 +6,18 @@ Work on and push to `main`. This repository must not have other local or origin
 branches. Do not create feature branches. Preserve any unmerged history in a
 verified archive outside the repository before removing obsolete branches.
 
-## Updating an existing installation (usual 0.13 workflow)
+## Updating an existing installation (usual 0.14 workflow)
 
-Read docs/setup/updating.md. Refer to this release as 0.13; package.json retains its required three-part version;
+Read docs/setup/updating.md. Refer to this release as 0.14; package.json retains its required three-part version;
 never edit that version or its lockfile to make an update work. Use update.ps1 on
-Windows or bash update.sh on Linux/macOS with `--check --expect-version 0.13
+Windows or bash update.sh on Linux/macOS with `--check --expect-version 0.14
 --json` first. Identify the existing managed installation and cache, preserve
 custom --install-dir/--state-dir and ALDER_DATA_DIR settings, and resolve multiple
 installations explicitly. A missing installation is not permission to create a
 new one or overwrite a legacy installer/portable copy; follow the documented
 transition for those copies.
 
-For 0.13, inspect the preflight `features` report. All targets require the local
+For 0.14, inspect the preflight `features` report. All targets require the local
 spelling/grammar pack. Windows x64, Linux x64 and Apple Silicon also require the
 pinned advanced proofreading runtime/model; Intel Mac explicitly has rules only.
 Windows builds require Visual Studio C++ Build Tools and a complete Windows SDK
@@ -25,7 +25,7 @@ for the native menu module; resolve that prerequisite only on Windows. Linux and
 Mac must not build or install the Windows module. See the update runbook for
 downloads, verification and platform limitations.
 
-0.13 uses document compatibility 2 and accepts forward migration from 1. Inspect
+0.14 uses document compatibility 2 and accepts forward migration from 1. Inspect
 dataMigration and automaticRollbackCompatible in preflight. Back up the complete
 data folder before first normal launch; automatic rollback to compatibility 1 is
 blocked after the upgrade. Do not overwrite newer work with a backup or bypass
@@ -66,3 +66,11 @@ End-user downloads exclude developer tests and test-only dependencies. Do not fe
 them as installation prerequisites. Normal install/update runs integrity, version
 and launch checks only. Full regression/feature qualification belongs to developers
 using scripts/developer/validate-release.py in the development checkout.
+
+For an end user given the development checkout, obtain the matching published
+`Alder-0.14-source.zip` release asset in a separate folder and run setup/update
+from that extracted source. Preserve the checkout. Do not install test dependencies
+from its development package manifest or use GitHub's automatic source archives.
+If the matching release asset is unavailable, report that fact rather than using
+another version. A maintainer may test a locally prepared release candidate before
+publication, as part of the developer release procedure.

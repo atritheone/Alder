@@ -18,7 +18,7 @@
   <a href="#start-writing">Start writing</a> &middot;
   <a href="#listen-to-your-writing">Listen</a> &middot;
   <a href="#install-alder">Install</a> &middot;
-  <a href="#update-to-alder-013">Update to 0.13</a> &middot;
+  <a href="#update-to-alder-014">Update to 0.14</a> &middot;
   <a href="#updates-and-help">Updates and help</a> &middot;
   <a href="LICENCE.md">MIT Licence</a>
 </p>
@@ -28,6 +28,11 @@ Alder is an **Organic Language Engine (OLE)**, an application software used for 
 Alder is named after **Dr. Alder Wright**.
 
 ## Start writing
+
+Work directly with plain-text files in the dedicated TXT editor, or use formatted
+documents and books for page layout and publishing. TXT tools include folder
+workspaces, find and replace, comparison, column editing and file monitoring.
+Native text saves preserve the file's encoding and line endings.
 
 Create a book, essay, or blank document and write in **Write**. Text flows across
 pages as you type. Use the **Book** navigator to add and reorder chapters, and
@@ -102,7 +107,7 @@ GPU support; Mac acceleration has not yet been validated.
 
 ## Install Alder
 
-Download **Alder-0.13-source.zip** from [Releases](https://github.com/atritheone/Alder/releases)
+Download **Alder-0.14-source.zip** from [Releases](https://github.com/atritheone/Alder/releases)
 and extract it on the machine where you want to use Alder.
 You can ask Codex or another coding agent to install it, or use the commands below
 yourself. You do not need to edit any files, fill in package details, or install
@@ -123,8 +128,8 @@ platform icons, and dependency information.
 
 | Version | Machine requirements and current status |
 | --- | --- |
-| Alder Organic Language Engine for Windows | Windows x64. Installation and application checks have passed on the Windows development machine using fresh setup resources. |
-| Alder Organic Language Engine for Linux | Linux x64 with glibc 2.35 or newer and a graphical desktop. An earlier release passed installation checks on Ubuntu 24.04 under WSL/WSLg. Full native application validation for 0.13 remains outstanding. |
+| Alder Organic Language Engine for Windows | Windows x64. Installation and application checks run on the Windows development machine; see the platform validation record for release-specific evidence. |
+| Alder Organic Language Engine for Linux | Linux x64 with glibc 2.35 or newer and a graphical desktop. An earlier release passed installation checks on Ubuntu 24.04 under WSL/WSLg. Full native application validation for 0.14 remains outstanding. |
 | Alder Organic Language Engine for Mac | macOS 14 or newer. Apple Silicon setup is provided but still needs testing on a Mac. Intel Mac setup is experimental and requires additional time and disk space. |
 
 ### Ask your coding agent
@@ -172,7 +177,7 @@ and other installation options.
 
 After installation, open Alder using the launcher reported by setup:
 
-- **Windows:** **Alder (local)** in the Start menu.
+- **Windows:** **Alder** in the Start menu.
 - **Linux:** **Alder** in your application menu, or `~/.local/bin/alder`.
 - **Mac:** **Alder.app** in your home folder's **Applications** folder
   (`~/Applications/Alder.app`).
@@ -181,9 +186,9 @@ You do not need a terminal or the repository to open the installed application.
 Keep access to the matching repository version and setup resources for checking,
 repairing, or updating your installation.
 
-## Update to Alder 0.13
+## Update to Alder 0.14
 
-This repository contains **Alder 0.13**. Use **Alder-0.13-source.zip**, the test-free source download,
+This repository contains **Alder 0.14**. Use **Alder-0.14-source.zip**, the test-free source download,
 from [Releases](https://github.com/atritheone/Alder/releases) for installation and
 updates. It contains the required source, tools, assets, licences and agent
 instructions, without developer tests or test-only dependencies. Extract it and
@@ -197,10 +202,11 @@ backs up your data, runs the update, and verifies the result. You do not need to
 edit files or run terminal commands yourself. Existing verified resources are
 reused, and a compatible previous version is retained for rollback.
 
-The 0.13 update expands document editing, review, layout, publishing and local
-sentence revision. It also updates the document format: your agent backs up your
-data before upgrading, and checks whether returning to the previous version is
-compatible. Keep that backup; older versions cannot safely edit the new format.
+The 0.14 update adds a dedicated plain-text editor and file tools, faster startup,
+more efficient document and narration operations, and more conservative local
+sentence revisions. It retains document compatibility 2 from 0.13. Your agent
+backs up your data and checks compatibility before updating. Updates from older
+compatibility-1 releases still require forward migration; keep the backup.
 
 The update includes local spelling and grammar resources. Your agent also
 checks the C++ build tools needed for Windows' native menus; Linux and Mac do not
@@ -214,7 +220,7 @@ Alder first. For a first installation, follow [Install Alder](#install-alder).
 
 ## Updates and help
 
-For version 0.13, follow the [update guide](docs/setup/updating.md) or give your
+For version 0.14, follow the [update guide](docs/setup/updating.md) or give your
 agent the request above. Obtain the new release download before updating; setup
 does not fetch or alter your repository for you. Close Alder before maintenance
 and keep backups of your projects. The update scripts include verification, so a

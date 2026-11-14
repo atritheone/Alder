@@ -1,29 +1,34 @@
-# Agent runbook: update Alder to 0.13
+# Agent runbook: update Alder to 0.14
 
 **Audience: the coding agent performing the update.** The user's request is simply
 "Update Alder." Carry out the procedure; do not give the user a list of terminal
-commands or ask them to edit the repository. Refer to this release as **0.13**. The package metadata retains the required
+commands or ask them to edit the repository. Refer to this release as **0.14**. The package metadata retains the required
 three-part version internally. It contains all required metadata, icons, checksums and
 dependency locks. A missing or inconsistent item is a repository defect, not
 permission to invent it.
 
 ## 1. Establish the source and installation
 
-Read `AGENTS.md` and `SETUP.md`. Use the obtained 0.13 repository or archive as
+Read `AGENTS.md` and `SETUP.md`. Use the obtained 0.14 repository or archive as
 read-only source. Do not reset, patch, or change dependency pins in the checkout.
 If the available checkout is not the requested release, obtain the correct
 published repository revision in a separate folder; preserve any existing local
 edits. Do not assume a tag name or fabricate a release reference.
 
+For end-user updates, use the named `Alder-0.14-source.zip` release asset. If the
+user supplied a development checkout, preserve it and obtain the matching asset
+in a separate folder. Do not fetch its developer dependencies or run its test
+tools. An unpublished release candidate is tested locally by its maintainer.
+
 Use the user's normal desktop account on the native OS. Run the applicable entry
 point from this checkout, without Administrator/root elevation:
 
 ```powershell
-.\update.ps1 --check --expect-version 0.13 --json
+.\update.ps1 --check --expect-version 0.14 --json
 ```
 
 ```sh
-bash ./update.sh --check --expect-version 0.13 --json
+bash ./update.sh --check --expect-version 0.14 --json
 ```
 
 `update.ps1` and `update.sh` forward to `setup update`. The check reports
@@ -33,7 +38,7 @@ ownership, target architecture, version order and data compatibility. It does
 not build or activate anything or run feature checks. It may provision the pinned
 private Python bootstrap if absent; no global Node/Python is needed.
 
-### 0.13 resources and prerequisites
+### 0.14 resources and prerequisites
 
 Inspect `features` in the preflight report before provisioning. The release retains
 local spelling/grammar checks and the Windows C++ menu module:
@@ -63,24 +68,25 @@ on Linux or Mac; their existing native OS prerequisites still apply.
 
 Allow about 240 MiB for the rules archive and 2.55 GiB for the model download,
 plus runtime dependencies, extraction, cache and application copies. An existing
-0.12 cache can reuse matching resources, but cannot reuse an older assembled app.
+0.13 cache can reuse matching resources, but cannot reuse an older assembled app.
 Budget Windows Build Tools/SDK
 space separately from Alder's working-space check. Do not use `--offline` for a
-first 0.13 build: it requires an already assembled app for this exact revision
+first 0.14 build: it requires an already assembled app for this exact revision
 and the corresponding verified caches. Reuse the existing state directory online
 to retain compatible downloads.
 
 Interpret the check:
 
-For 0.13, also inspect `previousDataCompatibility`, `dataCompatibility`,
+For 0.14, also inspect `previousDataCompatibility`, `dataCompatibility`,
 `dataMigration` and `automaticRollbackCompatible`. This release uses document
-compatibility **2** and explicitly accepts compatibility **1** installations.
-Older 0.12 copies may report either level. Version-1 project snapshots are migrated
+compatibility **2**, unchanged from 0.13, and explicitly accepts compatibility
+**1** installations. The usual 0.13-to-0.14 update reports `dataMigration: false`
+and `automaticRollbackCompatible: true`. Older 0.12 copies may report either level. Version-1 project snapshots are migrated
 deterministically on read, preserving authored text, and saved in the new format
 on subsequent edits. The SQLite container and `.alder` archive container remain
 version 1; do not edit those numbers manually.
 
-Create and verify the full data backup before the first normal 0.13 launch.
+Create and verify the full data backup before the first normal 0.14 launch.
 Preserve templates, personal vocabulary, linked-file records, comments, revisions,
 assets, narration jobs, settings and history as well as the database. If preflight
 reports `dataMigration: true`, a previous application payload is retained but
@@ -115,11 +121,11 @@ requirements. It must still target the same managed installation.
 Examples with placeholder locations (substitute discovered absolute paths):
 
 ```powershell
-.\update.ps1 --check --expect-version 0.13 --state-dir "D:\AlderSetup" --install-dir "D:\Apps\AlderLocal" --json
+.\update.ps1 --check --expect-version 0.14 --state-dir "D:\AlderSetup" --install-dir "D:\Apps\AlderLocal" --json
 ```
 
 ```sh
-bash ./update.sh --check --expect-version 0.13 --state-dir "/disk/AlderSetup" --install-dir "/disk/AlderInstall" --json
+bash ./update.sh --check --expect-version 0.14 --state-dir "/disk/AlderSetup" --install-dir "/disk/AlderInstall" --json
 ```
 
 ## 2. Preserve the user's work
@@ -138,6 +144,16 @@ launcher may set a different `ALDER_DATA_DIR`.
 | Windows | `%LOCALAPPDATA%\Alder` |
 | Linux | `$XDG_DATA_HOME/Alder`, normally `~/.local/share/Alder` |
 | Mac | `~/Library/Application Support/Alder` |
+
+Also identify and back up Electron's desktop profile. It holds local preferences,
+native-file bindings (`document-files.json`) and folder workspace registrations
+(`text-workspaces.json`). `ALDER_DATA_DIR` redirects backend data only; it does
+not redirect this profile. Check the existing launcher's `--user-data-dir` option
+first. Otherwise inspect `%APPDATA%\\Alder` on Windows, the Alder/alder folder
+under `$XDG_CONFIG_HOME` (normally `~/.config`) on Linux, or
+`~/Library/Application Support/Alder` on Mac. Preserve the existing folder's
+actual spelling. On Mac the default profile and backend data may share a folder;
+back it up once. Do not create a guessed profile if none exists.
 
 Create a timestamped backup of the closed application's data outside the checkout,
 application payload, and caches. Preserve all files, including SQLite sidecars,
@@ -158,11 +174,11 @@ than creating an empty one or guessing another path. Preserve any custom
 Run the same entry point and path/version options, removing only `--check`:
 
 ```powershell
-.\update.ps1 --expect-version 0.13 --json
+.\update.ps1 --expect-version 0.14 --json
 ```
 
 ```sh
-bash ./update.sh --expect-version 0.13 --json
+bash ./update.sh --expect-version 0.14 --json
 ```
 
 If Windows blocks the local script, a process-scoped invocation is available:
@@ -201,14 +217,14 @@ Reports and logs stay in the external state folder; do not upload them automatic
 
 Confirm the selected launcher points to the reported version. Where available,
 open the app normally and confirm the user's projects appear, without editing
-them. Use **Alder (local)** on Windows, **Alder** in the Linux application menu, or
+them. Use **Alder** on Windows, **Alder** in the Linux application menu, or
 `~/Applications/Alder.app` on Mac. Report any user-visible confirmation that could
 not be performed separately from the automated checks.
 
-Use release labels such as **0.13** in user-facing messages. Preflight exposes
+Use release labels such as **0.14** in user-facing messages. Preflight exposes
 `installedRelease` and `repositoryRelease` for this purpose; `installedVersion`,
 `repositoryVersion` and completion `version` retain machine-readable package versions.
-Give the user a short outcome: old â†’ new release, launcher, backup location, and
+Give the user a short outcome: old to new release, launcher, backup location, and
 remaining limitations. Do not hand off routine commands for the user to execute.
 
 Include advanced review's experimental quality status, Intel Mac's rules-only
@@ -217,7 +233,7 @@ describe a model smoke test as comprehensive proofreading quality validation.
 
 ## Retry and rollback
 
-The word-processing schema update declares compatibility level **2** and a
+This release retains document compatibility level **2** from 0.13 and a
 supported forward migration from level **1**. Preflight reports `dataMigration`
 and `automaticRollbackCompatible`. Old project snapshots are migrated on a
 validated copy when opened; saving writes schema 2. The pre-update backup remains
@@ -257,7 +273,7 @@ updater at those folders. Complete this transition instead:
    original data location and confirm projects/reference voices remain available.
    Prefer Alder's `.alder` import for portable project recovery; never hand-edit
    SQLite contents to make a migration appear successful.
-5. Leave the old copy available and tell the user which launcher now runs 0.13.
+5. Leave the old copy available and tell the user which launcher now runs 0.14.
    Removing the old copy is optional follow-up work; do not uninstall it as part
    of this update unless separately requested. Subsequent updates use update.ps1
    or update.sh against the managed root.

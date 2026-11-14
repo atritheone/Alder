@@ -23,6 +23,7 @@ def verify(archive):
                 assert not path.is_absolute() and '..' not in path.parts and '\\' not in name and ':' not in name, name
                 roots.add(path.parts[0])
                 assert not {'tests', 'test', 'fixtures', 'developer', 'node_modules', '.git', '__pycache__'} & set(path.parts), name
+                assert not any(part.lower().endswith('.egg-info') for part in path.parts), name
                 assert not path.name.startswith(('test_', 'test-', 'conftest.')), name
                 assert '.test.' not in path.name and '.spec.' not in path.name, name
             assert len(roots) == 1, 'Expected one source root'
@@ -35,6 +36,7 @@ def verify(archive):
         package = json.loads((root / 'package.json').read_text())
         assert manifest['version'] == package['version'], 'Release metadata mismatch'
         assert set(package['scripts']) == {'build', 'typecheck'}, 'Unexpected npm entry points'
+        assert '!**/*.map' in package['build']['files'], 'Application debug maps must be excluded'
         lock = json.loads((root / 'package-lock.json').read_text())
         assert not any(any(part in name for part in ('vitest', 'playwright', 'jsdom', 'prettier'))
                        for name in lock['packages']), 'Test-only npm dependency'

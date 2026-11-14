@@ -5,7 +5,7 @@ validation distributions; other distributions need equivalent libraries and nati
 acceptance. Run setup from a normal graphical desktop account, never root.
 
 For an existing installation, follow the [agent update runbook](updating.md) with
-`bash update.sh --check --expect-version 0.13 --json`. The update provisions local
+`bash update.sh --check --expect-version 0.14 --json`. The update provisions local
 spelling/grammar rules and the experimental advanced-review CPU model using pinned
 Linux wheels. It reuses Alder's private Java/Python; no Windows C++ module or Visual
 Studio tools are used. Developers qualify the rules/model before release; normal installation only checks integrity and launch.

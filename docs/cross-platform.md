@@ -27,6 +27,76 @@ an existing common-resource bundle. Dependencies are fetched and checked locally
 
 ## Validation status
 
+### Version 0.14 release validation (14-15 November 2026)
+
+Desktop/backend metadata and the agent installation/update guides now identify
+0.14. Document compatibility remains 2, as in 0.13; older compatibility-1 copies
+retain the explicit forward migration and rollback restriction. Dependency pins,
+platform icons and platform-specific proofreading/native-menu requirements are
+unchanged. The Windows application and Start menu name is now Alder; an unchanged,
+owned older shortcut is migrated without overwriting unowned or customised entries.
+
+The 63-test setup suite passed on Windows and Ubuntu/WSL, with three platform/tool
+skips on each. It covers the usual 0.13-to-0.14 transition and older compatibility
+levels on all four target policies. The Windows and Linux update wrappers also
+passed against isolated 0.13 installations using the minimal source archive,
+reporting no data migration and compatible rollback without changing the fixtures.
+Preflight against this machine's existing managed 0.13 installation also passed.
+
+On Windows x64, 766 frontend tests and 3,036 backend tests passed, including 19
+backend subtests. The packaged application passed startup/early-close, save/quit,
+backend shutdown, fonts, publishing, CPU speech synthesis and recognition, audio
+export, system voices, proofreading, document migration and sentence-revision
+checks. Three outdated speech test wrappers were corrected to forward the new
+dirty-item argument; their recovery assertions were retained. The font check now
+opens a document requiring the on-demand fallback before checking all four faces.
+
+A subsequent installation-check fix gives smoke launches a separate desktop
+profile as well as separate backend data. The developer smoke check passed with
+hash evidence that the user's data/profile were unchanged. Application source and
+dependencies were unchanged by this check-only fix. The agent backup guide now
+also identifies desktop preferences, native-file bindings and workspace records.
+
+The minimal source archive passed its checksum, per-file manifest, test/dependency
+exclusions and all four targets' metadata checks. The old managed Windows app was
+uninstalled and 0.14 installed fresh from that archive, reusing verified downloads.
+Installed integrity/version/launch verification passed with no previous activation.
+The installed app passed UTF-8/UTF-16 and large TXT opening, DOCX formatting and
+large-document opening, damaged-DOCX refusal, and native text saving with exact
+byte/encoding/line-ending preservation and external-change protection. These
+developer probes used disposable profiles and synthetic documents.
+
+The installed audit confirmed the Alder launcher/registration name and exclusion
+of Alder tests, test-only dependencies, application debug maps and generated
+Chatterbox package metadata. All 4,837 existing backend-data files and 100 desktop
+profile files matched their verified pre-install backups. The 564 application code
+and asset files in the minimal source match the developer-qualified build. This is
+a fresh application installation on the development host, not a clean-machine
+download test. The owner completed personal Windows acceptance on 15 November
+and approved the 0.14 release after the page-number follow-up below.
+
+On 15 November, a CSS-only follow-up corrected the Write page-number field after
+its input type changed to support grouped numbers. Its text now has space to render
+and its transparent background matches the surrounding panel. The refreshed minimal
+archive passed its audit and updated the local 0.14 installation successfully,
+retaining the previous build. Installed checks passed for single-digit, multi-digit
+and grouped values at 100%, 125% and 150% zoom, Enter/arrow-key page navigation,
+and the transparent background. User data and the desktop profile matched the
+verified pre-update backup. The full regression counts above are from 14 November;
+this stylesheet-only follow-up used targeted rendering/navigation checks.
+
+Before publication, the startup lifecycle check was aligned with the documented
+start-screen-first behaviour: Mac activation must show Start, then reopen the
+saved document through Open. The same saved-text check now also covers a full
+restart on Windows/Linux. The corrected check passed against the approved Windows
+installation; it changes developer verification only, not the release payload.
+
+Full native 0.14 Linux/Mac installation acceptance is separate from source and
+preflight checks. Intel Mac remains experimental and rules-only; advanced-review
+editorial quality remains experimental on model-enabled targets. Historical native
+startup/operations evidence is recorded in the respective feature guides and is
+not a substitute for a complete native installation of this release.
+
 ### Version 0.13 release checks (11 November 2026)
 
 The package, backend and application UI identify this release as 0.13. The

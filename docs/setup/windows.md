@@ -10,9 +10,9 @@ x64 libraries and resource compiler before provisioning. Packaged Alder includes
 the compiled module; running an installed release does not require build tools.
 
 For an existing installation, follow the [agent update runbook](updating.md)
-using `update.ps1 --check --expect-version 0.13 --json` before the update. An
+using `update.ps1 --check --expect-version 0.14 --json` before the update. An
 older Alder installation can run without these tools but needs them to build
-0.13 from source. If `ALDER_PREREQUISITE` reports missing tools, obtain the official
+0.14 from source. If `ALDER_PREREQUISITE` reports missing tools, obtain the official
 [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/)
 installer or modify the existing installation in Visual Studio Installer. Select
 **Desktop development with C++**, its x64 MSVC tools and a Windows 10/11 SDK.
@@ -30,7 +30,7 @@ separately. Developers qualify its rules/model before release; installation does
 Run `./setup.ps1 doctor`, then `./setup.ps1 install` from the repository. The source
 is copied into private state without edits. Default state is
 `%LOCALAPPDATA%/AlderSetup`; the application is in
-`%LOCALAPPDATA%/Programs/AlderLocal`. The Start menu entry is **Alder (local)** and
+`%LOCALAPPDATA%/Programs/AlderLocal`. The Start menu entry is **Alder** and
 Windows Settings receives a per-user uninstall entry. Existing Alder installations
 and project data are not overwritten.
 

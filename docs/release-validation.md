@@ -1,7 +1,7 @@
 # Developer release qualification and end-user downloads
 
 The development repository contains regression tests and qualification tools.
-End users receive `Alder-0.13-source.zip`, built by
+End users receive `Alder-0.14-source.zip`, built by
 `scripts/developer/prepare-download.py`; do not distribute the development checkout
 as the recommended installation package. GitHub's automatic source archives are
 developer checkouts, not the named end-user asset.

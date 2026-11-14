@@ -57,16 +57,15 @@ def integrations(root,active):
     elif target.startswith('darwin'):
         paths=[Path.home()/'Applications/Alder.app']
     else:
-        paths=[Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Alder (local).lnk']
+        paths=[Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Alder.lnk']
     existing=read_json(root/'integrations.json') if (root/'integrations.json').exists() else []
     owned={x['path']:x for x in existing}
+    retired=[]
     if target.startswith('win32'):
-        # Older managed releases used this name. Keep updating that owned entry
-        # as well as the current launcher, so the user's usual shortcut cannot
-        # silently continue opening the retained previous application.
-        legacy=Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Alder.lnk'
-        if str(legacy) in owned:paths.append(legacy)
-    for p in paths:
+        legacy=paths[0].with_name('Alder (local).lnk')
+        if str(legacy) in owned:retired.append(legacy)
+    # Validate both the new destination and the owned old name before touching either.
+    for p in paths+retired:
         if (p.exists() or p.is_symlink()) and str(p) not in owned:
             raise SetupError('ALDER_INTEGRATION',f'An existing unowned launcher would be replaced: {p}. Move or rename your existing launcher before retrying; do not edit the repository.')
         if str(p) in owned and (p.exists() or p.is_symlink()):
@@ -106,9 +105,13 @@ def integrations(root,active):
         python=Path(sys.executable)
         command=subprocess.list2cmdline([str(python),'-B',str(root/'management/maintenance.py'),'uninstall','--install-dir',str(root)])
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Uninstall\AlderRepository') as key:
-            for n,v in [('DisplayName','Alder (local)'),('DisplayVersion',active['version']),('Publisher','Alder'),('Comments',active['description']),('DisplayIcon',str(exe)),('InstallLocation',str(root)),('UninstallString',command)]:winreg.SetValueEx(key,n,0,winreg.REG_SZ,v)
+            for n,v in [('DisplayName','Alder'),('DisplayVersion',active['version']),('Publisher','Alder'),('Comments',active['description']),('DisplayIcon',str(exe)),('InstallLocation',str(root)),('UninstallString',command)]:winreg.SetValueEx(key,n,0,winreg.REG_SZ,v)
     from common import digest
     records=[{'path':str(p),**({'link':os.readlink(p)} if p.is_symlink() else {'sha256':digest(p)})} for p in paths]
+    # Record the new launcher before retiring the unchanged, owned old shortcut.
+    if retired:
+        write_json(root/'integrations.json',records+[owned[str(p)] for p in retired])
+        for p in retired:p.unlink(missing_ok=True)
     write_json(root/'integrations.json',records)
     return str(paths[0])
 
@@ -116,7 +119,8 @@ def integrations(root,active):
 def restore_activation(root, active, previous):
     """Restore launcher and both records after failed activation/verification."""
     root=Path(root)
-    integrations(root,active)
+    launcher=integrations(root,active)
+    if active['target'].startswith('win32'):active={**active,'launcher':launcher}
     write_json(root/'active.json',active)
     if previous is None:(root/'previous.json').unlink(missing_ok=True)
     else:write_json(root/'previous.json',previous)
@@ -163,7 +167,9 @@ def rollback(root):
         raise SetupError('ALDER_MIGRATION','Automatic rollback across application versions is disabled: database compatibility must be established by the maintainer. Your data has not been changed.')
     if not verify_inventory(root/previous['directory'],read_json(root/previous['inventory'])):
         raise SetupError('ALDER_HASH','Previous installation failed integrity verification.')
-    integrations(root,previous);write_json(root/'active.json',previous);write_json(root/'previous.json',current)
+    launcher=integrations(root,previous)
+    if previous['target'].startswith('win32'):previous={**previous,'launcher':launcher}
+    write_json(root/'active.json',previous);write_json(root/'previous.json',current)
     return previous
 
 

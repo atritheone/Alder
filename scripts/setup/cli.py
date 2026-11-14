@@ -240,7 +240,7 @@ def main(argv=None):
     parser.add_argument('--state-dir',type=Path,default=state_default())
     parser.add_argument('--install-dir',type=Path,help='Existing managed root for update; application destination for install.')
     parser.add_argument('--check',action='store_true',help='Update only: report installed/repository versions without building or activating.')
-    parser.add_argument('--expect-version',help='Update only: require this release, for example 0.13 (equivalent to package version 0.13.0).')
+    parser.add_argument('--expect-version',help='Update only: require this release, for example 0.14 (equivalent to package version 0.14.0).')
     parser.add_argument('--offline',action='store_true')
     parser.add_argument('--json',action='store_true')
     parser.add_argument('--noninteractive',action='store_true',help='Setup never prompts for credentials or runs elevated prerequisites.')

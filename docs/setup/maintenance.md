@@ -3,9 +3,9 @@
 Agent reference: perform these operations for the user and report the outcome.
 Do not ask the user to run the commands or supply repository metadata.
 
-For the usual 0.13 upgrade, start with the [update guide](updating.md) and the
+For the usual 0.14 upgrade, start with the [update guide](updating.md) and the
 dedicated `update.ps1` / `update.sh` scripts. `--check` reports the existing and
-target versions before building; `--expect-version 0.13` prevents using the wrong
+target versions before building; `--expect-version 0.14` prevents using the wrong
 repository. Preserve your original custom paths and back up your data before updating.
 
 Use `setup.ps1` on Windows or `bash setup.sh` on Unix with the following commands:
@@ -26,7 +26,7 @@ Setup operations use an OS lock. Close Alder before activation/maintenance; setu
 does not kill the user's app. Re-running an interrupted command revalidates cached
 work instead of trusting directory existence alone.
 
-Updates accept only explicitly declared forward migrations. 0.13 supports
+Updates accept only explicitly declared forward migrations. 0.14 supports
 document compatibility 1 to 2; other incompatible changes stop. Setup never assumes
 an older binary can open newer documents. A pre-update verified data backup is
 required before normal launch; automatic rollback from compatibility 2 to 1 is

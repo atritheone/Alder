@@ -5,7 +5,7 @@ user on macOS 14 or newer. The native Apple Silicon adapter uses pinned native w
 Command Line Tools with `xcode-select --install` when doctor requests them.
 
 For an existing installation, follow the [agent update runbook](updating.md) with
-`bash update.sh --check --expect-version 0.13 --json`. The update provisions local
+`bash update.sh --check --expect-version 0.14 --json`. The update provisions local
 spelling/grammar rules on both Mac architectures and the experimental advanced
 CPU model on Apple Silicon. Intel Mac has rules only; do not install an unpinned
 inference runtime to override that restriction. Neither Mac target builds or

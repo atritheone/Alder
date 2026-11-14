@@ -3453,10 +3453,12 @@ input[type="range"]:disabled {
 .alder-app .browser {
   background: transparent;
 }
-.page-navigation input[type="number"] {
+.page-navigation input[role="spinbutton"] {
   box-sizing: content-box;
   min-width: 1ch;
   padding: 2px 3px;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
   appearance: textfield;
 }
 .page-navigation input[type="number"]::-webkit-inner-spin-button,

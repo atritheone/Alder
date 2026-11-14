@@ -25,7 +25,9 @@ delete env.PYTHONPATH;
 if (packaged) delete env.ALDER_RESOURCES_DIR;
 fs.mkdirSync(path.dirname(result), { recursive: true });
 fs.rmSync(result, { force: true });
+const profile = fs.mkdtempSync(path.resolve("work/developer-desktop-profile-"));
 const args = packaged ? ["--smoke-test"] : [".", "--smoke-test"];
+args.push(`--user-data-dir=${profile}`);
 const child = spawn(executable, args, {
   env,
   windowsHide: true,

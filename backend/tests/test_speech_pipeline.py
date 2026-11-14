@@ -433,9 +433,9 @@ def test_cancelling_job_is_not_rescheduled(service, monkeypatch):
 def test_failed_manifest_does_not_kill_scheduler(service, monkeypatch):
     original = service._persist
     fail = {'enabled': False}
-    def persist(job):
+    def persist(job, dirty_ids=None):
         if fail['enabled']: raise OSError('disk full')
-        original(job)
+        original(job, dirty_ids)
     monkeypatch.setattr(service, '_persist', persist)
     with service._lock:
         job = submit(service)
@@ -624,9 +624,9 @@ def test_interactive_recovers_automatically_without_failed_state(service, monkey
         if len(service.checked) < good_on:
             result['transcript'] = 'Wrong output.'
         return result
-    def record(job):
+    def record(job, dirty_ids=None):
         states.append(job['status'])
-        persist(job)
+        persist(job, dirty_ids)
     monkeypatch.setattr(service, '_invoke_worker', generate)
     monkeypatch.setattr(service, '_invoke_qa_worker', check)
     monkeypatch.setattr(service, '_persist', record)
