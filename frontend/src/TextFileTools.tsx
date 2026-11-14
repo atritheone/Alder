@@ -41,9 +41,11 @@ export default function TextFileTools({
   } | null>(null);
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     if (project.settings.documentKind === "txt" && info?.format === "txt")
       void api<{ revision: number; digest: string }>(
         `/api/projects/${project.id}/txt-file-fingerprint`,
+        'GET', undefined, controller.signal,
       )
         .then((value) => {
           if (!cancelled && value.revision === project.revision)
@@ -58,8 +60,11 @@ export default function TextFileTools({
     else setFingerprint(null);
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [project.id, project.revision, info?.digest, info?.format]);
+    // Expected bytes depend on the saved project revision/format. A new disk
+    // digest changes the comparison, not those bytes; reuse that fingerprint.
+  }, [project.id, project.revision, info?.format]);
   const dirty =
     info?.format === "txt" && fingerprint
       ? fingerprint.digest !== info.digest
