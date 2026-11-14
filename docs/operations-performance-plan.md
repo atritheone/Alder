@@ -8,6 +8,8 @@ Implementation is now recorded in
 [operations-performance-implementation.md](operations-performance-implementation.md), including
 delivered changes, native checks, repeated measurements and unmet/deferred gates.
 The investigation and sequence below preserve the original planning evidence.
+The subsequent full-plan follow-through is recorded in
+[operations-performance-completion.md](operations-performance-completion.md).
 
 ## Objective and priorities
 

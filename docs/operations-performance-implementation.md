@@ -1,5 +1,9 @@
 # Operating performance implementation record
 
+The initial delivery below is superseded by the continued execution and evidence
+in [operations-performance-completion.md](operations-performance-completion.md).
+Its remaining-work section records the state before that follow-through.
+
 Release 0.13, 14 November 2026. This records execution of
 [the operating performance plan](operations-performance-plan.md). Work is on
 `main`; package versions, dependency locks, document compatibility, database
