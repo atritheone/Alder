@@ -27,7 +27,7 @@ jobs:
         run: node node_modules/electron/install.js
       - name: Prepare isolated core runtime
         shell: bash
-        run: python scripts/developer/prepare-opening-runtime.py --state "$RUNNER_TEMP/alder-opening-core"
+        run: python scripts/developer/prepare-opening-runtime.py --native-audio --state "$RUNNER_TEMP/alder-opening-core"
       - name: Build for the native OS
         run: npm run build
       - name: Check startup, import, and recovery boundaries
@@ -40,7 +40,7 @@ jobs:
         shell: bash
         run: |
           "$PYTHON" -B -m pytest backend/tests/test_version_metadata_cache.py backend/tests/test_speech_operating_state.py backend/tests/test_speech_pipeline.py -q -k 'metadata or summaries or dirty or event or cancel or review or resume or staged or intact or corrupt' -p no:cacheprovider
-          "$PYTHON" -B scripts/verify-system-voices.py --output "$RUNNER_TEMP/native-voice-results"
+          "$PYTHON" -B scripts/verify-system-voices.py --ffmpeg "$FFMPEG" --output "$RUNNER_TEMP/native-voice-results"
       - name: Check bounded editor decorations and typing
         run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
       - name: Native startup and TXT/DOCX opening

@@ -30,7 +30,9 @@ if (!baseline) {
   fs.mkdirSync(baseline, { recursive: true });
   const archive = path.join(output, "baseline.tar");
   run("git", ["archive", "7226aea", "--output", archive]);
-  run("tar", ["-xf", archive, "-C", baseline]);
+  // Relative paths also work with Git Bash's GNU tar, which otherwise treats
+  // a Windows drive-letter colon as a remote archive separator.
+  run("tar", ["-xf", "baseline.tar", "-C", "baseline"], output);
   fs.symlinkSync(
     path.resolve("node_modules"),
     path.join(baseline, "node_modules"),

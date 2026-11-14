@@ -97,8 +97,10 @@ export function useProofreading(
     project?.settings.ignoredRules,
     project?.dictionary,
   ]);
-  const context = useMemo(() => project ? proofreadingContext(project) : undefined,
-    [project?.language, project?.dictionary, project?.ideas, project?.settings]);
+  const context = useMemo(
+    () => (project ? proofreadingContext(project) : undefined),
+    [project?.language, project?.dictionary, project?.ideas, project?.settings],
+  );
   const revisions = useSentenceRevisions(
     text,
     targetId,
@@ -137,25 +139,31 @@ export function useProofreading(
     setError("");
     const source = text;
     const target = targetId;
+    let publishedSequence = -1;
     const publish = (job: ProofreadingResult) => {
       if (
         !disposed &&
         snapshot.current.targetId === target &&
         snapshot.current.text === source
-      )
+      ) {
+        if (job.sequence === publishedSequence) return;
+        publishedSequence = job.sequence;
         setResult({
           ...job,
           sourceText: source,
           localConfiguration:
             configuration + projectRules + selectedRange + languages,
         });
+      }
     };
     const poll = async () => {
       if (disposed || !jobId) return;
       try {
         const job = await api<ProofreadingResult>(
           `/api/proofreading/jobs/${jobId}`,
-          "GET", undefined, controller.signal,
+          "GET",
+          undefined,
+          controller.signal,
         );
         publish(job);
         if (!disposed && ["queued", "running"].includes(job.status))

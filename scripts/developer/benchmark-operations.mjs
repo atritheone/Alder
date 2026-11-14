@@ -17,6 +17,10 @@ const { values } = parseArgs({
     root: { type: "string", default: "." },
     trace: { type: "boolean", default: false },
     cpu: { type: "boolean", default: false },
+    rules: { type: "string", default: "on" },
+    revisions: { type: "string", default: "on" },
+    voice: { type: "string", default: "off" },
+    export: { type: "boolean", default: false },
   },
 });
 const resources = path.resolve(
@@ -43,6 +47,12 @@ const generated = spawnSync(
 );
 if (generated.status !== 0) throw Error(generated.stderr);
 const runs = Number(values.runs);
+if (
+  !["on", "off"].includes(values.rules) ||
+  !["on", "off"].includes(values.revisions) ||
+  !["off", "cold", "warm"].includes(values.voice)
+)
+  throw Error("Invalid diagnostic factors.");
 if (!Number.isInteger(runs) || runs < 1 || runs > 10)
   throw Error("Choose 1 to 10 independent runs.");
 const report = {
@@ -54,6 +64,13 @@ const report = {
     memoryGiB: os.totalmem() / 1024 ** 3,
   },
   settleMs: Number(values.settle),
+  factors: {
+    rules: values.rules,
+    revisions: values.revisions,
+    voice: values.voice,
+    export: values.export,
+  },
+  diagnostic: values.rules === "off" || values.revisions === "off",
   status: "running",
   scenarios: [],
 };
@@ -102,25 +119,70 @@ for (const filename of cases
       await page.evaluate(() => {
         globalThis.__alderOperationTimings = { enabled: true, events: [] };
       });
-    await app.evaluate(() => {
-      const original = globalThis.fetch;
-      globalThis.unsolicitedPrepare = 0;
-      globalThis.saveTraffic = [];
-      globalThis.fetch = async (...args) => {
-        const url = String(args[0]),
-          started = performance.now();
-        if (url.endsWith("/api/speech/prepare"))
-          globalThis.unsolicitedPrepare++;
-        const response = await original(...args);
-        if (args[1]?.method === "PUT" && /\/api\/projects\/[^/]+$/.test(url))
-          globalThis.saveTraffic.push({
-            requestCharacters: args[1].body?.length,
-            responseBytes: Number(response.headers.get("content-length")),
-            headersMs: performance.now() - started,
-          });
-        return response;
-      };
-    });
+    await app.evaluate(
+      (_, factors) => {
+        const original = globalThis.fetch;
+        const diagnostics = new Map();
+        globalThis.unsolicitedPrepare = 0;
+        globalThis.saveTraffic = [];
+        globalThis.fetch = async (...args) => {
+          const url = String(args[0]),
+            started = performance.now();
+          if (url.endsWith("/api/speech/prepare"))
+            globalThis.unsolicitedPrepare++;
+          if (url.endsWith("/api/proofreading/check")) {
+            const request = JSON.parse(args[1].body);
+            if (
+              request.revision
+                ? factors.revisions === "off"
+                : factors.rules === "off"
+            ) {
+              const id = "diagnostic-" + diagnostics.size;
+              const result = {
+                id,
+                targetId: request.targetId,
+                status: "completed",
+                stage: "done",
+                message: "Diagnostic attribution only",
+                sequence: 1,
+                annotations: [],
+                warnings: [],
+                truncated: false,
+                sentences: 0,
+                words: 0,
+                readingSeconds: 0,
+                sourceHash: "diagnostic",
+                configurationHash: "diagnostic",
+                range: request.range || { start: 0, end: request.text.length },
+                coverage: {
+                  totalBlocks: 0,
+                  checkedBlocks: 0,
+                  advancedBlocks: 0,
+                  skippedBlocks: 0,
+                },
+              };
+              diagnostics.set(id, result);
+              return new Response(JSON.stringify(result));
+            }
+          }
+          if (url.includes("/api/proofreading/jobs/diagnostic-"))
+            return new Response(
+              JSON.stringify(
+                diagnostics.get(new URL(url).pathname.split("/").at(-1)) || {},
+              ),
+            );
+          const response = await original(...args);
+          if (args[1]?.method === "PUT" && /\/api\/projects\/[^/]+$/.test(url))
+            globalThis.saveTraffic.push({
+              requestCharacters: args[1].body?.length,
+              responseBytes: Number(response.headers.get("content-length")),
+              headersMs: performance.now() - started,
+            });
+          return response;
+        };
+      },
+      { rules: values.rules, revisions: values.revisions },
+    );
     await page
       .locator(".start-screen input[type=file]")
       .setInputFiles(path.join(output, "fixtures", filename));
@@ -129,6 +191,19 @@ for (const filename of cases
       .filter({ hasText: "ALDER_OPEN_BEGIN" })
       .first();
     await editor.waitFor({ state: "visible", timeout: 60000 });
+    if (values.voice !== "off") {
+      await page.evaluate(() => {
+        const started = performance.now();
+        globalThis.operatingVoice = window.alder
+          .request("POST", "/api/speech/prepare", { voiceId: "default" })
+          .then(
+            () => ({ status: "passed", ms: performance.now() - started }),
+            (error) => ({ status: "failed", error: String(error) }),
+          );
+      });
+      if (values.voice === "warm")
+        sample.voice = await page.evaluate(() => globalThis.operatingVoice);
+    }
     await page.waitForTimeout(Number(values.settle));
     let cdp;
     if (values.cpu) {
@@ -168,6 +243,24 @@ for (const filename of cases
       ).observe({ type: "longtask" });
     });
     const before = await snapshot();
+    if (values.export)
+      await page.evaluate(() => {
+        const started = performance.now();
+        globalThis.operatingExport = window.alder
+          .request(
+            "POST",
+            `/api/projects/${localStorage.getItem("alder.project")}/export`,
+            { format: "pdf" },
+          )
+          .then(
+            (result) => ({
+              status: "passed",
+              ms: performance.now() - started,
+              sourceRevision: result.sourceRevision,
+            }),
+            (error) => ({ status: "failed", error: String(error) }),
+          );
+      });
     await editor.focus();
     await page.keyboard.press(
       process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
@@ -210,7 +303,15 @@ for (const filename of cases
     sample.unsolicitedPrepare = await app.evaluate(
       () => globalThis.unsolicitedPrepare,
     );
-    expect(sample.unsolicitedPrepare).toBe(0);
+    expect(sample.unsolicitedPrepare).toBe(values.voice === "off" ? 0 : 1);
+    if (values.voice !== "off") {
+      sample.voice = await page.evaluate(() => globalThis.operatingVoice);
+      expect(sample.voice.status).toBe("passed");
+    }
+    if (values.export) {
+      sample.export = await page.evaluate(() => globalThis.operatingExport);
+      expect(sample.export.status).toBe("passed");
+    }
     sample.renderer = await page.evaluate(() => ({
       inputToTwoFramesMs: globalThis.operatingInputs,
       longTasks: globalThis.operatingLongTasks,

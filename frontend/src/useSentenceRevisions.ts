@@ -4,6 +4,7 @@ import type { Annotation } from "./types";
 import { rebaseRevisions } from "./sentenceRevisions";
 
 type Result = {
+  sequence: number;
   id: string;
   status: string;
   annotations: Annotation[];
@@ -39,42 +40,52 @@ export function useSentenceRevisions(
     let disposed = false;
     const controller = new AbortController();
     let job: string | undefined;
+    let sequence = -1;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const result = await api<Result>(`/api/proofreading/jobs/${job}`, "GET", undefined, controller.signal);
+        const result = await api<Result>(
+          `/api/proofreading/jobs/${job}`,
+          "GET",
+          undefined,
+          controller.signal,
+        );
         if (disposed) return;
-        setState((previous) => {
-          const retained =
-            (range !== null || ["running", "queued"].includes(result.status)) &&
-            previous.targetId === targetId &&
-            previous.configuration === configuration
-              ? rebaseRevisions(
-                  previous.annotations,
-                  previous.text,
-                  text,
-                  previous.languages,
-                  languages,
-                ).filter(
-                  (a) => !range || a.end <= range.start || a.start >= range.end,
-                )
-              : [];
-          const byRange = new Map(
-            retained.map((a) => [`${a.start}:${a.end}`, a]),
-          );
-          result.annotations.forEach((a) =>
-            byRange.set(`${a.start}:${a.end}`, a),
-          );
-          return {
-            text,
-            targetId,
-            configuration,
-            languages,
-            annotations: [...byRange.values()],
-            status: result.warnings.join(" ") || result.message,
-            busy: ["running", "queued"].includes(result.status),
-          };
-        });
+        if (result.sequence !== sequence)
+          setState((previous) => {
+            const retained =
+              (range !== null ||
+                ["running", "queued"].includes(result.status)) &&
+              previous.targetId === targetId &&
+              previous.configuration === configuration
+                ? rebaseRevisions(
+                    previous.annotations,
+                    previous.text,
+                    text,
+                    previous.languages,
+                    languages,
+                  ).filter(
+                    (a) =>
+                      !range || a.end <= range.start || a.start >= range.end,
+                  )
+                : [];
+            const byRange = new Map(
+              retained.map((a) => [`${a.start}:${a.end}`, a]),
+            );
+            result.annotations.forEach((a) =>
+              byRange.set(`${a.start}:${a.end}`, a),
+            );
+            return {
+              text,
+              targetId,
+              configuration,
+              languages,
+              annotations: [...byRange.values()],
+              status: result.warnings.join(" ") || result.message,
+              busy: ["running", "queued"].includes(result.status),
+            };
+          });
+        sequence = result.sequence;
         if (["running", "queued"].includes(result.status))
           timer = setTimeout(poll, 250);
       } catch (error) {
