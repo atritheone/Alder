@@ -73,8 +73,8 @@ try {
       ({ app }) => `${app.getPath("userData")}/document-files.json`,
     );
     const editor = page.locator(".cm-content[contenteditable=true]");
-    await expect(editor).toBeVisible();
-    await expect(page.locator(".save-status")).toHaveText("Saved");
+    await expect(editor).toBeVisible({ timeout: 60000 });
+    await expect(page.locator(".save-status")).toHaveText("Saved", { timeout: 30000 });
     await page.waitForTimeout(3000);
     await editor.focus();
     await page.keyboard.press(
