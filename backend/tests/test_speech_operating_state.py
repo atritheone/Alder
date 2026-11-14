@@ -30,8 +30,9 @@ def test_job_summaries_use_derived_index_without_hydrating_recordings(tmp_path):
     cold=SpeechLibrary(tmp_path/'jobs');assert cold.ids_for_project('p')==['fixture']
     assert cold.rows['fixture']['summary']==rows[0]
 
-def test_inactive_durable_recordings_are_evicted_without_touching_active_or_inflight(tmp_path):
+def test_inactive_durable_recordings_are_evicted_without_touching_active_or_inflight(tmp_path,monkeypatch):
     import time
+    monkeypatch.setattr('alder.speech_pipeline.time.monotonic',lambda:1_000_000.)
     s,_=fixture(tmp_path);now=time.monotonic();s._access={};s._inflight=set();s._assembling=set()
     s._maintenance_at=0;s._last_work=now
     for i in range(40):
@@ -47,17 +48,23 @@ def test_inactive_durable_recordings_are_evicted_without_touching_active_or_infl
     s._library=SpeechLibrary(tmp_path/'jobs');assert s._job(retired)['id']==retired
     assert (tmp_path/'jobs'/retired/'manifest.json').is_file()
 
-def test_backend_preparation_is_shared_bounded_and_retryable(tmp_path):
+def test_backend_preparation_is_shared_bounded_and_retryable(tmp_path,monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import Future
     import pytest
     s,_=fixture(tmp_path);s._preparations={};s.policy=None;s.runtime={}
-    s._voice=lambda identity:{'hash':identity};started=threading.Event();release=threading.Event();calls=[]
+    s._voice=lambda identity:{'hash':identity};started=threading.Event();release=threading.Event();joined=threading.Event();calls=[]
+    class ObservedFuture(Future):
+        def result(self,*args,**kwargs):
+            joined.set();return super().result(*args,**kwargs)
+    monkeypatch.setattr('alder.speech_pipeline.Future',ObservedFuture)
     def prepare(identity,voice):
         calls.append(identity);started.set();assert release.wait(2);return {'ready':True}
     s._prepare_voice=prepare
     with ThreadPoolExecutor(4) as pool:
         first=pool.submit(s.prepare,'one');assert started.wait(1)
         duplicate=pool.submit(s.prepare,'one');second=pool.submit(s.prepare,'two')
+        assert joined.wait(1)
         # Synchronise the second owner without imposing sleep on the application.
         import time
         deadline=time.monotonic()+1
