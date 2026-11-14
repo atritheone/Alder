@@ -134,6 +134,11 @@ it("applies compact save replies to their request snapshot while coalescing newe
   expect(project.project?.revision).toBe(3);
   expect(project.saveState).toBe("Saved");
   expect(initial.name).toBe("Before");
+  await act(async () => project.change(draft => { draft.name = "Temporary"; }));
+  await act(async () => project.change(draft => { draft.name = "Latest edit"; }));
+  await act(async () => project.flush());
+  expect(submitted).toHaveLength(2);
+  expect(project.saveState).toBe("Saved");
   await act(async () => root.unmount());
   vi.mocked(api).mockReset();
   vi.unstubAllGlobals();

@@ -1,6 +1,7 @@
 from copy import deepcopy
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -17,6 +18,37 @@ def finish(service, identifier, timeout=3):
             return job
         time.sleep(.01)
     raise AssertionError('Check did not finish')
+
+
+def test_superseded_revision_preparation_is_skipped_and_does_not_hold_job_lock(service, monkeypatch):
+    queued, prepared, reviewed = [], [], []
+    monkeypatch.setattr(service.resources, 'capabilities', lambda: {'model':{'available':True}})
+    monkeypatch.setattr(service.advanced_pool, 'submit', lambda fn,*args: queued.append((fn,args)))
+    def passages(text, *_args):
+        prepared.append(text)
+        # Job observation/cancellation must remain available during preparation.
+        with ThreadPoolExecutor(1) as observer:
+            assert observer.submit(service.get, latest['id']).result(timeout=1)['status']=='running'
+        yield {'start':0,'text':text,'eligible':True,'language':'en-GB'}
+    monkeypatch.setattr('alder.proofreading.service.revision_passages', passages)
+    monkeypatch.setattr(service, '_advanced', lambda *args: reviewed.append(args))
+    first = service.start({'text':'Old sentence.','targetId':'same:revision','revision':True})
+    latest = service.start({'text':'Latest sentence.','targetId':'same:revision','revision':True})
+    assert prepared == []
+    for fn,args in queued: fn(*args)
+    assert prepared == ['Latest sentence.']
+    assert service.get(first['id'])['status']=='cancelled'
+    assert service.get(latest['id'])['coverage']['totalBlocks']==1
+    assert len(reviewed)==1
+
+
+def test_sentence_preparation_failure_reports_incomplete_coverage(service, monkeypatch):
+    monkeypatch.setattr(service.resources, 'capabilities', lambda: {'model':{'available':True}})
+    def failed(*args): raise RuntimeError('Synthetic preparation failure')
+    monkeypatch.setattr('alder.proofreading.service.revision_passages', failed)
+    job = service.start({'text':'A sentence.','targetId':'revision','revision':True})
+    result = finish(service,job['id'])
+    assert result['status']=='partial' and result['warnings']
 
 
 @pytest.fixture

@@ -136,18 +136,34 @@ class ProofreadingService:
                    "_cancel": threading.Event(), "_created": time.monotonic()}
             self.jobs[job["id"]] = job
             if revise:
-                passages = list(revision_passages(text, checked_text, offset, segments, config, selected))
-                passages.sort(key=lambda passage: 0 if passage['start'] <= focus <= passage['start'] + u16(passage['text']) else abs(passage['start'] - focus))
-                coverage = {"totalBlocks": len(passages), "checkedBlocks": 0, "advancedBlocks": 0, "skippedBlocks": 0}
-                self._update(job, status='running', stage='model', coverage=coverage)
                 if not self.resources.capabilities()['model']['available']:
                     self._update(job, status='partial', warnings=['The local sentence revision model is unavailable.'],
                                  message='Sentence revision unavailable.')
                 else:
-                    self.advanced_pool.submit(self._advanced, job, passages, config, coverage, [])
+                    self.advanced_pool.submit(self._prepare_revision, job, text, checked_text, offset, segments, config, selected, focus)
                 return self._public(job)
             self.pool.submit(self._run, job, checked_text, project, config, advanced,segments)
             return self._public(job)
+
+    def _prepare_revision(self, job, text, checked_text, offset, segments, config, selected, focus):
+        # Preparation shares the serial model queue. Obsolete queued requests
+        # must not scan a whole manuscript or hold the job lock before the model
+        # can use them. Checking/coverage semantics remain whole-document.
+        try:
+            if self._cancelled(job): return
+            self._update(job, status='running', stage='model', message='Preparing sentence review…')
+            passages = []
+            for passage in revision_passages(text, checked_text, offset, segments, config, selected):
+                if self._cancelled(job): return
+                passages.append(passage)
+            passages.sort(key=lambda passage: 0 if passage['start'] <= focus <= passage['start'] + u16(passage['text']) else abs(passage['start'] - focus))
+            coverage = {"totalBlocks": len(passages), "checkedBlocks": 0, "advancedBlocks": 0, "skippedBlocks": 0}
+            self._update(job, coverage=coverage)
+            self._advanced(job, passages, config, coverage, [])
+        except Exception:
+            self._update(job, status='partial', message='Sentence review incomplete.', warnings=['Sentence review preparation failed. Try again.'])
+        finally:
+            if self._cancelled(job): self._update(job, status='cancelled', message='Check cancelled.')
 
     def _public(self, job):
         result = copy.deepcopy({key: value for key, value in job.items() if not key.startswith("_")})

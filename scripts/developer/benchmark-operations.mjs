@@ -41,7 +41,7 @@ const generated = spawnSync(
 if (generated.status !== 0) throw Error(generated.stderr);
 const runs = Number(values.runs);
 if (!Number.isInteger(runs) || runs < 1 || runs > 10)
-  throw Error("Choose 1�10 independent runs.");
+  throw Error("Choose 1 to 10 independent runs.");
 const report = {
   platform: process.platform,
   architecture: process.arch,
@@ -60,11 +60,13 @@ const save = () =>
     JSON.stringify(report, null, 2),
   );
 const mod = process.platform === "darwin" ? "Meta" : "Control";
-for (const filename of [
+const cases = [
   "Small UTF8.txt",
   "Large 1MiB.txt",
   "Large 1000 paragraphs.docx",
-]
+];
+if (values.only && !cases.includes(values.only)) throw Error("Choose a supported operating fixture.");
+for (const filename of cases
   .filter((name) => !values.only || name === values.only)
   .flatMap((name) => Array(runs).fill(name))) {
   const profile = fs.mkdtempSync(path.join(output, "profile-"));
@@ -202,6 +204,7 @@ for (const filename of [
         : undefined,
     }));
     sample.saveTraffic = await app.evaluate(() => globalThis.saveTraffic);
+    sample.backend = await page.evaluate(() => window.alder.request("GET", "/api/performance"));
     sample.status = sample.errors.length ? "failed" : "passed";
   } catch (error) {
     sample.status = "failed";
@@ -211,7 +214,7 @@ for (const filename of [
   }
   report.scenarios.push(sample);
   save();
-  console.log(JSON.stringify(sample));
+  console.log(JSON.stringify({filename, status:sample.status, quietSaveMs:sample.quietSaveMs, pausedSaveMs:sample.pausedSaveMs, error:sample.error}));
 }
 report.status = report.scenarios.every((s) => s.status === "passed")
   ? "passed"

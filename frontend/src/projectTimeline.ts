@@ -101,7 +101,9 @@ function changes(
   after: any,
   path: Path = [],
   output: Patch[] = [],
+  limit = Infinity,
 ): Patch[] {
+  if (output.length > limit) return output;
   if (Object.is(before, after)) return output;
   if (
     before &&
@@ -133,7 +135,8 @@ function changes(
             hadBefore: Object.hasOwn(before, key),
             hadAfter: Object.hasOwn(after, key),
           });
-        else changes(before[key], after[key], p, output);
+        else changes(before[key], after[key], p, output, limit);
+        if (output.length > limit) return output;
       }
       return output;
     }
@@ -142,7 +145,7 @@ function changes(
   return output;
 }
 export function projectSaveChanges(before: Project, after: Project) {
-  const patches = changes(before, after);
+  const patches = changes(before, after, [], [], 64);
   return patches.length <= 64
     ? patches.map((patch) =>
         patch.hadAfter

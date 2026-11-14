@@ -116,6 +116,10 @@ export function useProject() {
             savedBase.current.revision === revision.current
               ? projectSaveChanges(savedBase.current, snapshot)
               : null;
+          if (changes?.length === 0) {
+            setSaveState("Saved");
+            continue;
+          }
           const reply = await api<Project | SaveReply>(
             `/api/projects/${snapshot.id}`,
             "PUT",

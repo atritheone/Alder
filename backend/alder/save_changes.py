@@ -29,4 +29,5 @@ def canonical_changes(source, saved):
         compare(source, saved, [])
     except FullResponse:
         return saved
+    if len(changes) > 64: return saved
     return {'savedRevision': saved['revision'], 'changes': changes}

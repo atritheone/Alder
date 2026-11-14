@@ -93,6 +93,13 @@ it("reconstructs snapshot changes and preserves identity after structural edits"
   expect(reversed.book!.chapters[0]).toBe(original.book!.chapters[1]);
   expect(reversed.book!.chapters[1]).toBe(original.book!.chapters[0]);
 });
+it("uses the full-snapshot fallback when normalisation changes many properties", () => {
+  const before = fixture(), after = {...before, settings:{...before.settings}};
+  for (let index=0;index<100;index++) (after.settings as any)[`option${index}`]=index;
+  expect(projectSaveChanges(before,after)).toBeNull();
+  const history = new ProjectTimeline(); history.record(before,after);
+  expect(history.step(after,"undo")!.project).toEqual(before);
+});
 function edit(project: Project, fn: (p: any) => void) {
   const next = structuredClone(project);
   fn(next);
