@@ -56,7 +56,7 @@ jobs:
       - name: Check narration state and history metadata boundaries
         shell: bash
         run: |
-          "$PYTHON" -B -m pytest backend/tests/test_version_metadata_cache.py backend/tests/test_speech_operating_state.py backend/tests/test_speech_pipeline.py -q -k 'metadata or summaries or dirty or event or cancel or review or resume or staged or intact or corrupt' -p no:cacheprovider
+          "$PYTHON" -B -m pytest backend/tests/test_version_metadata_cache.py backend/tests/test_speech_operating_state.py backend/tests/test_speech_pipeline.py backend/tests/test_system_voices.py -q -k 'metadata or summaries or dirty or event or cancel or review or resume or staged or intact or corrupt or prepar or inactive or first_request' -p no:cacheprovider
       - name: Measure available native voice PCM and word events
         # Optional OS voice packs are not the isolated core fixture. Preserve a
         # failed/pending voice report without preventing editor/save qualification.
@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: '"$PYTHON" -B scripts/verify-system-voices.py --ffmpeg "$FFMPEG" --output "$RUNNER_TEMP/native-voice-results"'
       - name: Check bounded editor decorations and typing
-        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
+        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/NarrationReview.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
       - name: Native startup and TXT/DOCX opening
         if: steps.changes.outputs.application == 'true' || github.event_name == 'workflow_dispatch'
         shell: bash

@@ -1,5 +1,12 @@
 import { formatInteger } from "./numberDisplay";
-import { useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { AudioLines, Clock3, LoaderCircle, Play } from "lucide-react";
 import type {
   Job,
@@ -19,6 +26,10 @@ type Props = {
   onReview?: (request: SpeechReviewRequest) => Promise<void>;
 };
 type Peaks = { minimum: Float32Array; maximum: Float32Array; seconds: number };
+const ReviewDrafts = createContext<Map<
+  string,
+  { note: string; listened: boolean }
+> | null>(null);
 const waveformCache = new Map<string, Peaks>();
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 
@@ -255,7 +266,11 @@ function Differences({ check }: { check: SpeechCheck }) {
         <p className="narration-check-score">
           Word error rate: {(check.wordErrorRate * 100).toFixed(1)}%
           <span>
-            {check.expectedWords == null ? "—" : formatInteger(check.expectedWords)} expected · {check.heardWords == null ? "—" : formatInteger(check.heardWords)}{" "}
+            {check.expectedWords == null
+              ? "—"
+              : formatInteger(check.expectedWords)}{" "}
+            expected ·{" "}
+            {check.heardWords == null ? "—" : formatInteger(check.heardWords)}{" "}
             recognised
           </span>
         </p>
@@ -333,10 +348,22 @@ function ListeningDecision({
   accepted: boolean;
   onReview: NonNullable<Props["onReview"]>;
 }) {
-  const [note, setNote] = useState(""),
-    [listened, setListened] = useState(false),
+  const drafts = useContext(ReviewDrafts),
+    draftKey = chunkId || "all";
+  const [note, setNoteValue] = useState(drafts?.get(draftKey)?.note || ""),
+    [listened, setListenedValue] = useState(
+      drafts?.get(draftKey)?.listened || false,
+    ),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const setNote = (value: string) => {
+    setNoteValue(value);
+    drafts?.set(draftKey, { note: value, listened });
+  };
+  const setListened = (value: boolean) => {
+    setListenedValue(value);
+    drafts?.set(draftKey, { note, listened: value });
+  };
   const decide = async (value: boolean) => {
     setBusy(true);
     setError("");
@@ -344,6 +371,7 @@ function ListeningDecision({
       await onReview({ chunkId, accepted: value, note });
       setListened(false);
       setNote("");
+      drafts?.delete(draftKey);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
@@ -522,7 +550,9 @@ function ChunkReview({
         )}
         {attempts.length > 0 && (
           <details className="narration-attempts">
-            <summary>Saved take checks ({formatInteger(attempts.length)})</summary>
+            <summary>
+              Saved take checks ({formatInteger(attempts.length)})
+            </summary>
             {attempts.map((attempt) => (
               <article key={attempt.index}>
                 <header>
@@ -564,6 +594,28 @@ export default function NarrationReview({
   currentTime = 0,
   onReview,
 }: Props) {
+  const drafts = useMemo(
+    () => new Map<string, { note: string; listened: boolean }>(),
+    [job.id],
+  );
+  const [pendingReviews, setPendingReviews] = useState(0);
+  const review: Props["onReview"] = onReview
+    ? async (request) => {
+        setPendingReviews((count) => count + 1);
+        try {
+          await onReview(request);
+        } finally {
+          setPendingReviews((count) => count - 1);
+        }
+      }
+    : undefined;
+  const [chunkPage, setChunkPage] = useState(0),
+    pageSize = 50;
+  const page = Math.min(
+      chunkPage,
+      Math.max(0, Math.ceil(job.chunks.length / pageSize) - 1),
+    ),
+    start = page * pageSize;
   const [open, setOpen] = useState(
       job.strictVerification !== false && job.reviewStatus === "needs_review",
     ),
@@ -573,75 +625,102 @@ export default function NarrationReview({
       setOpen(true);
   }, [job.reviewStatus, job.strictVerification]);
   return (
-    <details
-      className="narration-review"
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>
-        <AudioLines size={13} />
-        <span>Review chunks and wording</span>
-        <small>
-          {formatInteger(job.chunks.length)} chunks
-          {job.verificationSummary
-            ? ` · ${formatInteger(job.verificationSummary.needsReview)} ${job.strictVerification === false ? "wording warnings" : "need review"}`
-            : ""}
-        </small>
-      </summary>
-      {open && (
-        <div className="narration-review-body">
-          <p className="narration-review-note">
-            Content checks compare independent speech recognition with the
-            narration wording. They do not establish natural delivery or exact
-            word timing.
-          </p>
-          {job.audioUrl && (
-            <>
-              <button
-                className="narration-waveform-toggle"
-                aria-expanded={showWaveform}
-                onClick={() => setShowWaveform((value) => !value)}
-              >
-                <AudioLines size={12} />
-                {showWaveform ? "Hide waveform" : "Show waveform"}
-              </button>
-              {showWaveform && (
-                <Waveform
-                  url={job.audioUrl}
-                  currentTime={currentTime}
-                  onSeek={onSeek}
-                />
-              )}
-            </>
-          )}
-          {onReview && (
-            <ListeningDecision
-              label="all chunks"
-              ready={job.status === "ready"}
-              accepted={job.manualReviewStatus === "accepted"}
-              onReview={onReview}
-            />
-          )}
-          {job.manualReviewSummary && (
+    <ReviewDrafts.Provider value={drafts}>
+      <details
+        className="narration-review"
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
+        <summary>
+          <AudioLines size={13} />
+          <span>Review chunks and wording</span>
+          <small>
+            {formatInteger(job.chunks.length)} chunks
+            {job.verificationSummary
+              ? ` · ${formatInteger(job.verificationSummary.needsReview)} ${job.strictVerification === false ? "wording warnings" : "need review"}`
+              : ""}
+          </small>
+        </summary>
+        {open && (
+          <div className="narration-review-body">
             <p className="narration-review-note">
-              Listening acceptance: {formatInteger(job.manualReviewSummary.accepted)} of{" "}
-              {formatInteger(job.manualReviewSummary.total)} chunks. Automatic recognition:{" "}
-              {job.reviewStatus?.replaceAll("_", " ") || "not checked"}.
+              Content checks compare independent speech recognition with the
+              narration wording. They do not establish natural delivery or exact
+              word timing.
             </p>
-          )}
-          {job.chunks.map((chunk, index) => (
-            <ChunkReview
-              key={chunk.id}
-              chunk={chunk}
-              index={index}
-              assembled={!!job.audioUrl}
-              onPlayChunk={onPlayChunk}
-              onSeek={onSeek}
-              onReview={onReview}
-            />
-          ))}
-        </div>
-      )}
-    </details>
+            {job.audioUrl && (
+              <>
+                <button
+                  className="narration-waveform-toggle"
+                  aria-expanded={showWaveform}
+                  onClick={() => setShowWaveform((value) => !value)}
+                >
+                  <AudioLines size={12} />
+                  {showWaveform ? "Hide waveform" : "Show waveform"}
+                </button>
+                {showWaveform && (
+                  <Waveform
+                    url={job.audioUrl}
+                    currentTime={currentTime}
+                    onSeek={onSeek}
+                  />
+                )}
+              </>
+            )}
+            {onReview && (
+              <ListeningDecision
+                label="all chunks"
+                ready={job.status === "ready"}
+                accepted={job.manualReviewStatus === "accepted"}
+                onReview={review!}
+              />
+            )}
+            {job.manualReviewSummary && (
+              <p className="narration-review-note">
+                Listening acceptance:{" "}
+                {formatInteger(job.manualReviewSummary.accepted)} of{" "}
+                {formatInteger(job.manualReviewSummary.total)} chunks. Automatic
+                recognition:{" "}
+                {job.reviewStatus?.replaceAll("_", " ") || "not checked"}.
+              </p>
+            )}
+            {job.chunks.length > pageSize && (
+              <nav aria-label="Narration chunk pages">
+                <button
+                  disabled={!page || pendingReviews > 0}
+                  onClick={() => setChunkPage(page - 1)}
+                >
+                  Previous chunks
+                </button>
+                <span>
+                  {formatInteger(start + 1)}–
+                  {formatInteger(Math.min(start + pageSize, job.chunks.length))}{" "}
+                  of {formatInteger(job.chunks.length)}
+                </span>
+                <button
+                  disabled={
+                    start + pageSize >= job.chunks.length || pendingReviews > 0
+                  }
+                  onClick={() => setChunkPage(page + 1)}
+                >
+                  Next chunks
+                </button>
+              </nav>
+            )}
+            {job.chunks.slice(start, start + pageSize).map((chunk, index) => (
+              <ChunkReview
+                key={chunk.id}
+                chunk={chunk}
+                index={start + index}
+                assembled={!!job.audioUrl}
+                onPlayChunk={onPlayChunk}
+                onSeek={onSeek}
+                onReview={review}
+              />
+            ))}
+          </div>
+        )}
+      </details>
+    </ReviewDrafts.Provider>
   );
 }

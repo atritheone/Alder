@@ -10,6 +10,7 @@ from pathlib import Path
 import queue
 import shutil
 import threading
+from concurrent.futures import Future
 import time
 import wave
 
@@ -29,7 +30,9 @@ STOPPED = {"cancelling", "ready", "failed", "cancelled", "interrupted", "needs_r
 class SpeechPipeline(SpeechService):
     staged_narration = True
 
-    def __init__(self, data_dir, project_root):
+    def __init__(self, data_dir, project_root, *, policy=None):
+        self.policy=policy
+        self._preparations={}
         self._queued = set()
         self._inflight = set()
         self._assembling = set()
@@ -231,6 +234,26 @@ class SpeechPipeline(SpeechService):
 
     def prepare(self, voice_id):
         voice = self._voice(voice_id)
+        key=(voice_id,voice.get('hash','default'),self.runtime.get('modelRevision'),self.runtime.get('sourceRevision'),self.runtime.get('qaModelRevision'))
+        with self._lock:
+            pending=self._preparations.get(key)
+            owner=pending is None
+            if owner:
+                if len(self._preparations)>=2:raise ValueError('Finish the current voice preparation before preparing another voice.')
+                pending=Future();self._preparations[key]=pending
+        if not owner:return copy.deepcopy(pending.result())
+        try:
+            if self.policy:self.policy.checkpoint()
+            result=self._prepare_voice(voice_id,voice)
+            pending.set_result(result)
+            return result
+        except BaseException as error:
+            pending.set_exception(error)
+            raise
+        finally:
+            with self._lock:self._preparations.pop(key,None)
+
+    def _prepare_voice(self, voice_id, voice):
         self._last_work = time.monotonic()
         if system_voices.is_system(voice_id):
             with self._system_serial:

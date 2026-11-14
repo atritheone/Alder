@@ -9,7 +9,7 @@ def summary(job):
     chunks=job.get('chunks',[])
     # A summary never claims verified playback. Opening the recording hydrates
     # it through the normal integrity/review checks before Listen is enabled.
-    return {**value,'summary':True,'text':'','chunks':[], 'chunkCount':len(chunks),
+    return {**value,'summary':True,'text':str(job.get('text',''))[:100],'chunks':[], 'chunkCount':len(chunks),
             'readyChunkCount':sum(c.get('status') in ('ready','completed') for c in chunks)}
 
 
@@ -53,9 +53,11 @@ class SpeechLibrary:
                 stat = checked.stat()
                 signature = [stat.st_size, stat.st_mtime_ns]
                 cached = self.rows.get(identity)
-                if not isinstance(cached, dict) or cached.get("signature") != signature or not isinstance(cached.get("projectId"), str) or not isinstance(cached.get('summary'),dict):
+                if (not isinstance(cached, dict) or cached.get("signature") != signature or not isinstance(cached.get("projectId"), str)
+                    or cached.get('summaryVersion')!=2 or not isinstance(cached.get('summary'),dict)
+                    or cached['summary'].get('id')!=identity or cached['summary'].get('projectId')!=cached['projectId']):
                     job = self.load(identity)
-                    cached = {"projectId": job["projectId"], "createdAt": job["createdAt"], "signature": signature,'summary':summary(job)}
+                    cached = {"projectId": job["projectId"], "createdAt": job["createdAt"], "signature": signature,'summaryVersion':2,'summary':summary(job)}
                 rows[identity] = cached
             except (OSError, KeyError, ValueError, TypeError):
                 continue

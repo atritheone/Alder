@@ -41,7 +41,7 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
     work_policy=WorkPolicy()
     def make_speech():
         from .speech_pipeline import SpeechPipeline as SpeechService
-        return SpeechService(store.data_dir, root)
+        return SpeechService(store.data_dir, root,policy=work_policy)
     speech = DeferredService(make_speech)
     proofreading = ProofreadingService(
         Path(os.environ.get("ALDER_RESOURCES_DIR", root / "resources")), store.data_dir,

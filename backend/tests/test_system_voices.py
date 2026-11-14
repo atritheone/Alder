@@ -74,14 +74,14 @@ def test_unspaced_language_duration_is_not_counted_as_one_word(tmp_path):
     assert not inspect_pcm(path, text, "en")["accepted"]
 
 
-def test_service_refreshes_discovery_on_startup(tmp_path, monkeypatch):
+def test_service_discovers_voices_on_first_request(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(native, "voices", lambda refresh=False: calls.append(refresh) or [])
     s = SpeechService(tmp_path, tmp_path)
     try:
-        assert calls == [True]
+        assert calls == []
         s.voices()
-        assert calls == [True, False]
+        assert calls == [False]
     finally:
         s.shutdown()
 

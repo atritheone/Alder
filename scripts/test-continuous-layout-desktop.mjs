@@ -146,7 +146,7 @@ try {
     incrementalMatchesFull: true,
   });
   const body = page.getByRole("textbox", { name: "Text editor", exact: true });
-  await body.press("Control+End");
+  await body.press(process.platform==='darwin'?'Meta+ArrowDown':'Control+End');
   await page
     .getByRole("button", { name: "More formatting", exact: true })
     .click();
@@ -155,7 +155,7 @@ try {
   await page.getByLabel("Section start").selectOption("nextPage");
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await ready();
-  await body.press("Control+z");
+  await body.press("ControlOrMeta+z");
   const undone = await ready();
   expect(undone).toEqual(grown);
   report.checks.push(

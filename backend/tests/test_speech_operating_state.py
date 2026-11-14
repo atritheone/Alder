@@ -46,3 +46,22 @@ def test_inactive_durable_recordings_are_evicted_without_touching_active_or_infl
     retired=next(identity for identity in (f'job-{i}' for i in range(40)) if identity not in s._jobs)
     s._library=SpeechLibrary(tmp_path/'jobs');assert s._job(retired)['id']==retired
     assert (tmp_path/'jobs'/retired/'manifest.json').is_file()
+
+def test_backend_preparation_is_shared_bounded_and_retryable(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import pytest
+    s,_=fixture(tmp_path);s._preparations={};s.policy=None;s.runtime={}
+    s._voice=lambda identity:{'hash':identity};started=threading.Event();release=threading.Event();calls=[]
+    def prepare(identity,voice):
+        calls.append(identity);started.set();assert release.wait(2);return {'ready':True}
+    s._prepare_voice=prepare
+    with ThreadPoolExecutor(4) as pool:
+        first=pool.submit(s.prepare,'one');assert started.wait(1)
+        duplicate=pool.submit(s.prepare,'one');second=pool.submit(s.prepare,'two')
+        # Synchronise the second owner without imposing sleep on the application.
+        import time
+        deadline=time.monotonic()+1
+        while len(calls)<2 and time.monotonic()<deadline:time.sleep(.001)
+        with pytest.raises(ValueError,match='current voice preparation'):s.prepare('three')
+        release.set();assert first.result()==duplicate.result()==second.result()=={'ready':True}
+    assert calls.count('one')==1 and s._preparations=={}
