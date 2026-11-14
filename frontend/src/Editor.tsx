@@ -1097,6 +1097,8 @@ export function refreshEditorDecorations(
 }
 
 export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
+  // The narration presentation guard is shared by Write and Sandbox.
+  const showStructure = props.showStructure && !props.suppressChecks;
   const undo: import("prosemirror-state").Command = (state, dispatch) =>
     projectHistoryCommand(props.projectId, "undo", !!dispatch) ??
     localUndo(state, dispatch);
@@ -4274,10 +4276,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           <option value="title">Title Case</option>
         </select>
         <button
-          className={props.showStructure ? "active" : ""}
+          className={showStructure ? "active" : ""}
           data-help-label="Show structure"
           aria-label="Show structure"
-          aria-pressed={props.showStructure}
+          aria-pressed={showStructure}
+          disabled={!!props.suppressChecks}
           onClick={props.onToggleStructure}
         >
           <Pilcrow />
@@ -4332,7 +4335,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       )}
       <div
         className={
-          "editor-scroll" + (props.showStructure && !props.rawMode ? " show-structure" : "")
+          "editor-scroll" + (showStructure && !props.rawMode ? " show-structure" : "")
         }
         onScroll={(e) => {
           if (!props.pageLayout) return;

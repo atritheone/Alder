@@ -9,7 +9,10 @@ visible whitespace and **Text tools**. Advanced tools stay in the overflow or
 the **Text** menu. Rich controls appear for formats that retain their features.
 
 Formatting marks default off in Sandbox and on in DOCX and book Write. Each
-editor keeps its own saved choice. Fold arrows use a stable gutter slot so they
+editor keeps its own saved choice. Narration temporarily hides formatting marks
+in all editors, including TXT whitespace, while preparing or playing. Stopping
+restores the saved choices. Markdown retains the rich editor and its Raw toggle.
+Fold arrows use a stable gutter slot so they
 do not displace change markers or line numbers. The contrasting grey gutter puts
 fold arrows left of the line numbers and change bars beside the text area.
 The number column sits directly beside the arrows and widens only when more

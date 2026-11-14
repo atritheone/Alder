@@ -289,6 +289,7 @@ export default forwardRef<EditorHandle, Props>(
       threshold,
     } = preferences;
     const font = configuredFont || props.fontFamily || DOCUMENT_FONT;
+    const showWhitespace = whitespace && !props.suppressChecks;
     const fontSize = preferences.inheritFontSize
       ? props.fontSize || 16
       : configuredFontSize;
@@ -1013,7 +1014,7 @@ export default forwardRef<EditorHandle, Props>(
         effects: config.current.reconfigure([
           ...(wrap ? [EditorView.lineWrapping] : []),
           ...(numbers ? [lineNumbers()] : []),
-          ...(whitespace ? [highlightWhitespace()] : []),
+          ...(showWhitespace ? [highlightWhitespace()] : []),
           occurrenceHighlights(() => currentPreferences.current),
           Prec.highest(
             keymap.of(
@@ -1067,7 +1068,7 @@ export default forwardRef<EditorHandle, Props>(
     }, [
       wrap,
       numbers,
-      whitespace,
+      showWhitespace,
       fontSize,
       tabSize,
       font,
@@ -1137,7 +1138,9 @@ export default forwardRef<EditorHandle, Props>(
       {
         id: "whitespace",
         label: "Toggle visible whitespace",
-        run: () => setWhitespace(!whitespace),
+        run: () => {
+          if (!latest.current.suppressChecks) setWhitespace(!whitespace);
+        },
       },
       {
         id: "bookmark",
@@ -1292,7 +1295,8 @@ export default forwardRef<EditorHandle, Props>(
           <button
             aria-label="Show whitespace"
             title="Show whitespace"
-            aria-pressed={whitespace}
+            aria-pressed={showWhitespace}
+            disabled={!!props.suppressChecks}
             onClick={() => setWhitespace(!whitespace)}
           >
             <Pilcrow />
@@ -1402,7 +1406,8 @@ export default forwardRef<EditorHandle, Props>(
             <label>
               <input
                 type="checkbox"
-                checked={whitespace}
+                checked={showWhitespace}
+                disabled={!!props.suppressChecks}
                 onChange={(e) => setWhitespace(e.target.checked)}
               />{" "}
               Whitespace

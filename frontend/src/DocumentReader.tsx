@@ -627,8 +627,8 @@ export default function DocumentReader(p: Props) {
       !playing &&
       (!bufferReady || !loaded.current));
   useLayoutEffect(() => {
-    p.onPlaybackChange(playing || (active && shouldPlay.current));
-  }, [playing, active, rendering, buffering, shouldPlay.current]);
+    p.onPlaybackChange(requesting || playing || (active && shouldPlay.current));
+  }, [requesting, playing, active, rendering, buffering, shouldPlay.current]);
   useEffect(() => () => p.onPlaybackChange(false), [p.onPlaybackChange]);
   const togglePlayback = () => {
     if (
