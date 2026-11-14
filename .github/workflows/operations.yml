@@ -30,9 +30,9 @@ jobs:
         run: npm run build
       - name: Check startup, import, and recovery boundaries
         shell: bash
-        run: '"$PYTHON" -B -m pytest backend/tests/test_startup.py backend/tests/test_proofreading.py backend/tests/test_sentence_revisions.py -q -p no:cacheprovider'
+        run: '"$PYTHON" -B -m pytest backend/tests/test_startup.py backend/tests/test_proofreading.py backend/tests/test_sentence_revisions.py backend/tests/test_plain_text_file.py backend/tests/test_plain_text_api.py -q -p no:cacheprovider'
       - name: Check bounded editor decorations and typing
-        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/speechTransport.test.ts --reporter=dot
+        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/speechTransport.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts --reporter=dot
       - name: Native startup and TXT/DOCX opening
         shell: bash
         run: |

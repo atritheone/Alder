@@ -1,6 +1,25 @@
 import codecs
 import unittest
+import tempfile
+from pathlib import Path
 from alder.plain_text_file import decode_file, encode_file
+
+
+def test_plain_fingerprint_bytes_match_publisher_and_reject_rich_content():
+    from alder.plain_text_file import plain_project_bytes
+    from alder.models import create_project, text_document, validate_project
+    from alder.publishing import build_export
+    for raw in (b'', b'a\r\nb\nc\r', codecs.BOM_UTF16_LE+'字😀\n'.encode('utf-16-le'), b'caf\xe9\r\n'):
+        text, metadata=decode_file(raw)
+        project=create_project(template='blank')
+        project['settings'].update(documentKind='txt',includeTitle=False,includeToc=False,textFile=metadata)
+        project['book']={'version':1,'chapters':[{'id':'chapter','title':'Document','include':True,'document':text_document(text)}]}
+        project=validate_project(project)
+        with tempfile.TemporaryDirectory() as folder:
+            result=build_export(project,'txt',Path(folder))
+            assert plain_project_bytes(project)==Path(result['path']).read_bytes()
+        project['book']['chapters'][0]['document']['content'][0]['attrs']['bold']=True
+        assert plain_project_bytes(project) is None
 
 
 class PlainTextFileTests(unittest.TestCase):

@@ -4,6 +4,27 @@ import difflib
 import re
 
 
+def plain_project_bytes(project):
+    """Fast path only for a single plain TXT chapter; rich work uses publishing."""
+    settings = project.get('settings', {})
+    chapters = [c for c in project.get('book', {}).get('chapters', []) if c.get('include', True)]
+    if settings.get('documentKind') != 'txt' or settings.get('includeTitle') or settings.get('includeToc') or len(chapters) != 1:
+        return None
+    doc = chapters[0]['document']
+    if doc.get('attrs') or doc.get('marks'):
+        return None
+    lines = []
+    for node in doc.get('content', []):
+        if node.get('type') != 'paragraph' or node.get('marks') or any(k != 'blockId' and v not in (None, '') for k, v in (node.get('attrs') or {}).items()):
+            return None
+        children = node.get('content', [])
+        if any(c.get('type') != 'text' or c.get('marks') or c.get('attrs') for c in children):
+            return None
+        lines.append(''.join(c.get('text', '') for c in children))
+    text = '\n'.join(lines)
+    return encode_file(text, settings['textFile']) if settings.get('textFile') else text.encode('utf-8')
+
+
 def decode_file(raw, selected_encoding=None):
     if selected_encoding is not None and selected_encoding not in ('utf-8', 'utf-16-le', 'utf-16-be', 'cp1252'):
         raise ValueError('Unsupported TXT encoding.')

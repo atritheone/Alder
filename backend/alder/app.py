@@ -430,6 +430,13 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         project = store.get(project_id)
         if project.get('settings', {}).get('documentKind') != 'txt':
             raise HTTPException(422, 'Choose a TXT document.')
+        from .plain_text_file import plain_project_bytes
+        try:
+            content = plain_project_bytes(project)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if content is not None:
+            return {'revision': project['revision'], 'digest': hashlib.sha256(content).hexdigest()}
         with tempfile.TemporaryDirectory(prefix='alder-txt-fingerprint-') as directory:
             try:
                 result = build_export(project, 'txt', Path(directory))

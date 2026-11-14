@@ -30,10 +30,11 @@ for(const filename of ['Small UTF8.txt','Large 1MiB.txt','Large 1000 paragraphs.
   const snapshot=()=>page.evaluate(async()=>{const p=await window.alder.request('GET',`/api/projects/${localStorage.getItem('alder.project')}`);return p.book.chapters.map(c=>c.text).join('\n');});
   const before=await snapshot();await editor.focus();await page.keyboard.press(process.platform==='darwin'?'Meta+ArrowUp':'Control+Home');
   for(let i=0;i<18;i++){const t=performance.now();await page.keyboard.type('x');await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));sample.editsMs.push(performance.now()-t);}
-  const stop=performance.now();await expect(page.locator('.save-status')).toHaveText('Saved',{timeout:30000});sample.quietSaveMs=performance.now()-stop;
+  const saved=()=>page.waitForFunction(()=>document.querySelector('.save-status')?.textContent==='Saved',undefined,{timeout:30000});
+  const stop=performance.now();await saved();sample.quietSaveMs=performance.now()-stop;
   expect(await snapshot()).toBe('x'.repeat(18)+before);
   for(let i=0;i<6;i++){await page.keyboard.type('x');await page.waitForTimeout(650);}
-  const pause=performance.now();await expect(page.locator('.save-status')).toHaveText('Saved',{timeout:30000});sample.pausedSaveMs=performance.now()-pause;
+  const pause=performance.now();await saved();sample.pausedSaveMs=performance.now()-pause;
   expect(await snapshot()).toBe('x'.repeat(24)+before);
   await page.keyboard.press(mod+'+z');await page.keyboard.press(mod+'+Shift+Z');
   await expect(page.locator('.save-status')).toHaveText('Saved',{timeout:30000});

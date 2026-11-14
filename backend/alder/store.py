@@ -17,6 +17,7 @@ from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 
 from .models import ValidationError, create_project, now, uid, validate_project
 from .system_voices import is_system, references
+from .performance import span
 
 
 class ConflictError(ValueError):
@@ -155,11 +156,13 @@ class Store:
                 raise ConflictError("A newer revision is already saved. Reload before applying this change.", current)
             if not isinstance(project, dict) or project.get("id") != project_id:
                 raise ValidationError("The project identity cannot change during an edit.")
-            p = validate_project(project, current)
+            with span('save.validate'):
+                p = validate_project(project, current)
             p["createdAt"] = current["createdAt"]
             p["updatedAt"] = now()
             p["revision"] = row["revision"] + 1
-            payload = json.dumps(p, ensure_ascii=False)
+            with span('save.serialize'):
+                payload = json.dumps(p, ensure_ascii=False)
             cursor = row["cursor"] + 1
             conn.execute("DELETE FROM history WHERE project_id=? AND seq>?", (project_id, row["cursor"]))
             conn.execute("INSERT INTO history VALUES (?,?,?)", (project_id, cursor, payload))
