@@ -313,17 +313,17 @@
   flex-wrap: wrap;
 }
 .txt-paged .cm-scroller {
-  padding: 22px;
-  background: #f4f4f4;
+  padding: 0;
+  background: #fefefe;
 }
 .txt-paged .cm-gutters {
   box-sizing: border-box;
   flex: 0 0 var(--txt-gutter-width);
   min-width: var(--txt-gutter-width);
-  margin-left: max(0px, calc((100% - var(--txt-paper-width)) / 2));
+  margin-left: 0;
   background: #e7e7e7;
   border-right: 1px solid #c6c6c6;
-  height: var(--txt-sheet-height, var(--txt-paper-height));
+  height: var(--txt-sheet-height, 100%);
   min-height: 0 !important;
   box-shadow: none;
   align-self: flex-start;
@@ -331,31 +331,16 @@
 }
 .txt-paged .cm-content {
   box-sizing: border-box;
-  flex: none;
-  width: calc(var(--txt-paper-width) - var(--txt-gutter-width));
-  min-width: calc(var(--txt-paper-width) - var(--txt-gutter-width));
-  min-height: var(--txt-paper-height);
-  margin: 0 auto 0 0;
-  padding: var(--txt-paper-top) var(--txt-paper-right) var(--txt-paper-bottom)
-    max(4px, calc(var(--txt-paper-left) - var(--txt-gutter-width)));
+  flex: 1 0 0;
+  width: auto;
+  min-width: 0;
+  min-height: 100%;
+  margin: 0;
+  padding: 8px 12px;
   position: relative;
   background: transparent;
   box-shadow: none;
   color: #2a2a2a;
-}
-/* Paint one full-height sheet behind both columns and behind selection layers. */
-.txt-paged .cm-content::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 0 calc(-1 * var(--txt-gutter-width));
-  z-index: -3;
-  pointer-events: none;
-  background: linear-gradient(
-    to right,
-    #e7e7e7 0 var(--txt-gutter-width),
-    #fefefe var(--txt-gutter-width)
-  );
-  box-shadow: 0 2px 7px #4e4e4e33;
 }
 .txt-paged .cm-line {
   padding: 0;

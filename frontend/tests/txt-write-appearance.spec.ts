@@ -40,6 +40,28 @@ test("TXT retains shared Write chrome and typography; TXT tools stay scoped", as
     await page.evaluate(() => document.fonts.ready);
     await expect(page.locator(".book-editor .format-toolbar")).toBeVisible();
     if (kind === "txt") {
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const host = document
+              .querySelector(".book-editor .txt-host")!
+              .getBoundingClientRect();
+            const gutter = document
+              .querySelector(".book-editor .cm-gutters")!
+              .getBoundingClientRect();
+            const content = document
+              .querySelector(".book-editor .cm-content")!
+              .getBoundingClientRect();
+            return Math.max(
+              Math.abs(gutter.left - host.left),
+              Math.abs(content.right - host.right),
+              Math.abs(content.top - host.top),
+              Math.abs(content.bottom - host.bottom),
+              Math.abs(gutter.bottom - host.bottom),
+            );
+          }),
+        )
+        .toBeLessThanOrEqual(1);
       await expect(
         page.getByRole("button", { name: "Text tools", exact: true }),
       ).toBeVisible();
@@ -107,7 +129,7 @@ test("TXT retains shared Write chrome and typography; TXT tools stay scoped", as
       Number(results[0].toolbarHeight) - Number(results[1].toolbarHeight),
     ),
   ).toBeLessThanOrEqual(2);
-  expect(
-    Math.abs(Number(results[0].paperWidth) - Number(results[1].paperWidth)),
-  ).toBeLessThanOrEqual(2);
+  expect(Number(results[0].paperWidth)).toBeGreaterThan(
+    Number(results[1].paperWidth),
+  );
 });
