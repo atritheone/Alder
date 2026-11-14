@@ -26,6 +26,7 @@ TERMINAL = {"completed", "partial", "failed", "cancelled"}
 
 class ProofreadingService:
     _source_repair_enabled = False  # Failed the frozen 2026-11-13 quality gate; developer study only.
+    _lexical_guard_families = frozenset({'contractions'})
 
     def __init__(self, resources, data_dir, speech_busy=None,policy=None):
         self.resources = Resources(resources)
@@ -381,13 +382,19 @@ class ProofreadingService:
         return self.model.check(source,config,interrupted)
 
     def _revision_annotation(self,source,corrected,config):
+        lexical=self._uses_source_repair(config)
+        if not lexical and self._can_use_lexical_guards(config):
+            lexical=self._lexical_guard_families
         return revision(source,corrected,config['acceptedWords'],
-                        lexical_repairs=self._uses_source_repair(config))
+                        lexical_repairs=lexical)
 
-    def _uses_source_repair(self,config):
-        return (self._source_repair_enabled and config.get('revisionProfile')!='creative'
+    def _can_use_lexical_guards(self,config):
+        return (config.get('revisionProfile')!='creative'
                 and config.get('revisionMode')!='rephrase'
                 and self.resources.capabilities().get('rules',{}).get('available',False))
+
+    def _uses_source_repair(self,config):
+        return self._source_repair_enabled and self._can_use_lexical_guards(config)
 
     def _finish_revision(self, source, corrected, config, cancelled, warnings):
         if not self._uses_source_repair(config):

@@ -1,9 +1,9 @@
 # Grammar guard-only evaluation
 
-Completed 14 November 2026. **Keep application defaults unchanged. Take forward
-only the stricter, exact-contraction subset as a small candidate fix.** This is
-not promotion of the previously rejected retry strategy or a demonstrated general
-grammar-quality improvement.
+Evaluation completed 14 November 2026. Its decision was to take forward only the
+stricter, exact-contraction subset. **The subsequent user-authorized rollout
+enables that subset alone**, as recorded below. This does not promote the rejected
+retry strategy or establish a general grammar-quality improvement.
 
 ## What was isolated
 
@@ -26,7 +26,7 @@ this reuse is an ablation, not fresh independent natural validation.
 
 ## Results by family
 
-The current development baseline has TP 176 / FP 181 / FN 148 and F0.5 .5023.
+The pre-rollout development baseline has TP 176 / FP 181 / FN 148 and F0.5 .5023.
 It includes the scalar/group safety guards committed in the preceding study.
 Counts below are differences against that current baseline, not against the
 earlier pre-safety policy.
@@ -124,7 +124,7 @@ and possession/quantifier handling need stronger clause and noun alignment plus
 independent evidence of benefit. Another broad retry or larger model is not part
 of this result.
 
-**No application default was enabled in this evaluation.** The natural samples
+**No application default was enabled at the evaluation checkpoint.** The natural samples
 were previously exposed and show no newly independent benefit estimate. Unknown
 names, ambiguous intended wording and cases outside the explicit tests still
 require conservative handling. Nothing here establishes Grammarly parity.
@@ -137,3 +137,32 @@ and adverse challenge outcomes remain under
 are not redistributed with the aggregate. JFLEG use remains local noncommercial
 research under CC BY-NC-SA 4.0; its author/essay identities and pretraining overlap
 are unknown. The old sealed test remains closed.
+
+## Subsequent authorized rollout: exact contractions only
+
+After reviewing this evaluation, the user requested taking forward the exact-
+contraction subset. Standard sentence corrections now apply only the
+`contractions` admission exception after the existing plural/spelling finaliser.
+The model request, complete spelling audit and existing retry budget are unchanged.
+Initial-maybe, quantifier, existential-negation, negative-possession and the broader
+source-recovery strategy remain disabled in the application.
+
+Only matched apostrophe corrections such as `Lets go` to `Let's go.` and
+`Thanks, Ill watch as soon as I can.` to `Thanks, I'll watch as soon as I can.`
+receive the exception. The remainder of the passage must match, with a terminal
+full stop optional. Explicit vocabulary, quoted spans, repeated/mixed name uses
+and names following recognised titles such as `Dr.` stay protected. Creative
+writing and explicit rephrase retain their previous behaviour; a missing rules
+pack cannot bypass spelling verification.
+
+All 252 relevant tests pass. A final application replay across the 428 recorded
+cases matches the evaluated exact-contraction arm's deliveries, statuses and
+warnings, while consuming exactly the same 440 recorded requests as the incumbent
+finaliser. No extra inference is introduced. The samples remain previously
+exposed: this is a small recovery of two demonstrated corrections, not a new
+independent estimate of general grammar quality.
+
+Rollout provenance is recorded separately in
+[`verification/grammar-exact-contractions.json`](verification/grammar-exact-contractions.json).
+This changes the repository source; no installation update or user-data change
+was performed.

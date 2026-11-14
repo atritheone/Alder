@@ -56,7 +56,7 @@ def test_paired_lexical_correction_adds_no_model_call():
 
 
 @pytest.mark.parametrize('source,draft,displayed',[
-    ('Lets go',"Let's go.",False),
+    ('Lets go',"Let's go.",True),
     ('We are more closed now.','We are more open now.',False),
     ('The young is still working.','The young person is still working.',False),
     ('The young is still working.','The young are still working.',True),

@@ -567,8 +567,10 @@ selects individual `contractions`, `initial-maybe`, `quantifier`,
 are rejected. The contraction exception now requires the whole passage to match
 after paired apostrophe insertion, with only a terminal full stop optional, and
 excludes quoted spans. Other exceptions remain unsafe on specified adversarial
-examples. Application defaults remain disabled. See
-`docs/grammar-guard-ablation-study.md` for the completed 14 November comparison.
+examples. The application now enables only exact contractions for standard
+improve revisions with the local rules pack. The other four families and source
+recovery remain disabled. See `docs/grammar-guard-ablation-study.md` for the
+14 November comparison and subsequent authorized rollout.
 
 For application integration, `replay.py --recorded-source <frozen-source>` also
 verifies the worker/prompt and model/runtime identities, then compares the old
@@ -607,8 +609,9 @@ as a fresh held-out comparison.
 
 Final 13 November decision: the conservative candidate failed its second reserved
 sample (2.33% fewer unmatched reference edits, with slightly lower precision and
-F0.5). Application source recovery and the paired lexical exceptions remain
-disabled; use the explicit study adapter to reproduce them. The application keeps
+F0.5). At that checkpoint, application source recovery and the paired lexical
+exceptions remained disabled; use the explicit study adapter to reproduce them.
+The later 14 November rollout enables only exact contractions. The application keeps
 its existing generation/repair policy with two conservative meaning guards for
 scalar opposites and collective-to-individual changes. These safeguards do not
 constitute promotion of the failed grammar candidate. Aggregate evidence lives in

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-14",
+  "status": "exact-contractions-enabled-in-source",
+  "baseCommit": "edcdf1090583c662419889a362c406ac92f86393",
+  "enabledFamilies": [
+    "contractions"
+  ],
+  "disabledFamilies": [
+    "initial-maybe",
+    "quantifier",
+    "existential-negation",
+    "negative-possession"
+  ],
+  "broaderSourceRecoveryEnabled": false,
+  "scope": {
+    "profile": "standard",
+    "mode": "improve",
+    "localRulesPackRequired": true
+  },
+  "safeguards": [
+    "Entire passage must match after paired apostrophe insertion; only terminal full stop optional",
+    "Explicit accepted vocabulary, quoted spans, repeated/mixed names and recognised honorifics stay protected",
+    "Existing complete spelling audit, original-source invariants and plural/spelling retry budget remain in place"
+  ],
+  "verification": {
+    "relevantTestsPassed": 252,
+    "fullSuiteRun": false,
+    "replayCases": 428,
+    "replays": [
+      {
+        "cohort": "development",
+        "cases": 200,
+        "deliveryDifferences": [],
+        "changedModelRequests": [],
+        "allRequestsBound": true,
+        "requestsUsed": 203
+      },
+      {
+        "cohort": "exposed-validation",
+        "cases": 150,
+        "deliveryDifferences": [],
+        "changedModelRequests": [],
+        "allRequestsBound": true,
+        "requestsUsed": 156
+      },
+      {
+        "cohort": "controls",
+        "cases": 78,
+        "deliveryDifferences": [],
+        "changedModelRequests": [],
+        "allRequestsBound": true,
+        "requestsUsed": 81
+      }
+    ],
+    "recordedRequestsConsumed": 440,
+    "additionalRequestsVersusLegacy": 0,
+    "newInferenceCalls": 0,
+    "paidAPICalls": 0,
+    "expectedComparison": "Exact-contraction guard-only arm from the preceding source-bound ablation; all delivery/status/warning fields match"
+  },
+  "evidence": {
+    "naturalDevelopmentRecoveries": 2,
+    "additionalMatchedReferenceEdits": 3,
+    "additionalUnmatchedProposedEdits": 0,
+    "newIndependentNaturalValidation": false,
+    "evaluationArtifactSHA256": "de8dd3dbaa07da53c865afaac3494cdde7841319a34b3674ab398b1a56e2f071",
+    "sourceArchiveSHA256": "aacca1c2095f2c4fea77ba45bcd8987e61170c1458320c11fd9a7e78dff5a19d",
+    "replayManifestSHA256": {
+      "development": "7b6faddb4bfcd4ddb7d1c864ad80f3813f1c96e99fbc95b124a0854ef3a6912b",
+      "exposed-validation": "2b6d782dfe6bc954f5fbb456cb125dc718afd8996b9d3a1090867097167933be",
+      "controls": "315d2c9cf616018074d9d41735c69ee0d5ac6adb3705930029dbea006d69dbc3"
+    }
+  },
+  "limits": [
+    "Previously exposed natural samples; no general editorial or Grammarly parity claim",
+    "Unknown names and intended wording are not proven by these bounded checks",
+    "Repository change only: installed application and user data were not modified",
+    "No model, prompt, runtime, memory-admission or frontend change"
+  ],
+  "evidenceDirectoryHint": "%LOCALAPPDATA%/AlderTesting/guard-ablation-20261114/enabled-production-final"
+}

@@ -43,6 +43,7 @@ def repaired_names(source,target,families=REPAIR_FAMILIES):
         match=re.search(prefix+word+r'\s+('+verbs+r')\b',source)
         if not match:continue
         position=re.search(r'\b'+word+r'\b',source).start()
+        if re.search(r'\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St)\.\s*$',source[:position],re.I):continue
         if any(quote.start()<=position<quote.end() for quote in re.finditer(QUOTES,source)):continue
         repaired=r'(?<!\w)'+re.escape(replacement)+r'\s+'+match[1]+r'\b'
         if len(re.findall(repaired,normalized))-len(re.findall(repaired,source.replace('’',"'")))==1 and not re.search(r'\b'+word+r'\b',target):
