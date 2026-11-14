@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { api } from "./api";
 import { useProject } from "./useProject";
+import { canonicalSaved } from "./saveChanges";
 import type { Project } from "./types";
 vi.mock("./api", async (importOriginal) => ({
   ...(await importOriginal<any>()),
@@ -24,7 +25,14 @@ it("flushes before close and rehydrates the durable revision on reopen, retainin
   let durable = initial;
   vi.mocked(api).mockImplementation(async (_path, method, body: any) => {
     if (method === "PUT")
-      durable = { ...body.project, revision: durable.revision + 1 };
+      durable = {
+        ...(body.project ||
+          canonicalSaved(durable, {
+            savedRevision: durable.revision,
+            changes: body.changes,
+          })),
+        revision: durable.revision + 1,
+      };
     return durable;
   });
   const host = document.createElement("div"),
@@ -118,7 +126,10 @@ it("applies compact save replies to their request snapshot while coalescing newe
   });
   expect(submitted).toHaveLength(2);
   expect(submitted[1].expectedRevision).toBe(2);
-  expect(submitted[1].project.name).toBe("Latest edit");
+  expect(submitted[1].changes).toContainEqual({
+    path: ["name"],
+    value: "Latest edit",
+  });
   expect(project.project?.name).toBe("Latest edit");
   expect(project.project?.revision).toBe(3);
   expect(project.saveState).toBe("Saved");

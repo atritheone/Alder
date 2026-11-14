@@ -3,7 +3,9 @@ import {
   ProjectTimeline,
   shareProject,
   type EditorEdit,
+  projectSaveChanges,
 } from "./projectTimeline";
+import { canonicalSaved } from "./saveChanges";
 import type { Project } from "./types";
 
 const fixture = () =>
@@ -54,6 +56,43 @@ const editor = (identity: string, joined = false) =>
     after: {},
     joined,
   }) as EditorEdit;
+it("reconstructs snapshot changes and preserves identity after structural edits", () => {
+  let before = fixture();
+  for (const mutate of [
+    (p: Project) => {
+      p.book!.chapters[0].text = "🦉 new text";
+    },
+    (p: Project) => {
+      p.book!.chapters.reverse();
+    },
+    (p: Project) => {
+      delete (p.settings as any).fontSize;
+    },
+    (p: Project) => {
+      (p.settings as any).nested = { list: [1, 2] };
+    },
+  ]) {
+    const next = edit(before, mutate),
+      patches = projectSaveChanges(before, next)!;
+    expect(
+      canonicalSaved(before, {
+        savedRevision: before.revision,
+        changes: patches,
+      }),
+    ).toEqual(next);
+    before = next;
+  }
+  const original = fixture(),
+    reversed = shareProject(original, {
+      ...original,
+      book: {
+        ...original.book!,
+        chapters: [...original.book!.chapters].reverse(),
+      },
+    });
+  expect(reversed.book!.chapters[0]).toBe(original.book!.chapters[1]);
+  expect(reversed.book!.chapters[1]).toBe(original.book!.chapters[0]);
+});
 function edit(project: Project, fn: (p: any) => void) {
   const next = structuredClone(project);
   fn(next);

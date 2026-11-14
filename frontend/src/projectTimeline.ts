@@ -67,9 +67,18 @@ export function shareProject<T>(before: T, after: T): T {
     const value = right[key],
       id = value?.id || value?.attrs?.blockId;
     let prior = left[key];
-    if (Array.isArray(left) && id && id !== (prior?.id || prior?.attrs?.blockId)) {
-      keyed ||= new Map(left.filter(x => x && typeof x === "object" && (x.id || x.attrs?.blockId))
-        .map(x => [x.id || x.attrs.blockId, x]));
+    if (
+      Array.isArray(left) &&
+      id &&
+      id !== (prior?.id || prior?.attrs?.blockId)
+    ) {
+      keyed ||= new Map(
+        left
+          .filter(
+            (x) => x && typeof x === "object" && (x.id || x.attrs?.blockId),
+          )
+          .map((x) => [x.id || x.attrs.blockId, x]),
+      );
       prior = keyed.get(id);
     }
     const shared = shareProject(prior, value);
@@ -132,6 +141,16 @@ function changes(
   output.push({ path, before, after, hadBefore: true, hadAfter: true });
   return output;
 }
+export function projectSaveChanges(before: Project, after: Project) {
+  const patches = changes(before, after);
+  return patches.length <= 64
+    ? patches.map((patch) =>
+        patch.hadAfter
+          ? { path: patch.path, value: patch.after }
+          : { path: patch.path, remove: true as const },
+      )
+    : null;
+}
 
 // History payloads are immutable. Cache subtree weights so coalescing a typing
 // group does not rescan every retained paragraph on each key. Shared branches
@@ -151,9 +170,15 @@ function valueBytes(value: unknown): number {
   return size;
 }
 function bytes(patches: Patch[]): number {
-  return patches.reduce((total, patch) => total + 128 +
-    patch.path.reduce<number>((n, key) => n + String(key).length * 2 + 8, 0) +
-    valueBytes(patch.before) + valueBytes(patch.after), 32);
+  return patches.reduce(
+    (total, patch) =>
+      total +
+      128 +
+      patch.path.reduce<number>((n, key) => n + String(key).length * 2 + 8, 0) +
+      valueBytes(patch.before) +
+      valueBytes(patch.after),
+    32,
+  );
 }
 
 function applyPatch(project: Project, patch: Patch, reverse: boolean): Project {

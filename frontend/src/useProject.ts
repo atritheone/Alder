@@ -9,6 +9,7 @@ import {
   currentEditorEdit,
   ProjectTimeline,
   shareProject,
+  projectSaveChanges,
 } from "./projectTimeline";
 import { registerProjectHistory } from "./projectHistoryBridge";
 import {
@@ -65,6 +66,7 @@ export function useProject() {
     });
   }, []);
   const current = useRef<Project | null>(null),
+    savedBase = useRef<Project | null>(null),
     revision = useRef(0),
     dirty = useRef(false),
     serial = useRef(0),
@@ -79,6 +81,7 @@ export function useProject() {
       if (current.current?.id === p.id && current.current !== p)
         timelineFor(p.id).clear();
       let converted = !p.book;
+      savedBase.current = p;
       p = migrateBook(p);
       // Font substitution is a display decision. Never rewrite authored choices on open.
       current.current = p;
@@ -108,12 +111,22 @@ export function useProject() {
           seq = serial.current;
         setSaveState("Saving…");
         try {
+          const changes =
+            savedBase.current?.id === snapshot.id &&
+            savedBase.current.revision === revision.current
+              ? projectSaveChanges(savedBase.current, snapshot)
+              : null;
           const reply = await api<Project | SaveReply>(
             `/api/projects/${snapshot.id}`,
             "PUT",
-            { expectedRevision: revision.current, project: snapshot, responseMode: "changes" },
+            {
+              expectedRevision: revision.current,
+              ...(changes ? { changes } : { project: snapshot }),
+              responseMode: "changes",
+            },
           );
           const saved = canonicalSaved(snapshot, reply);
+          savedBase.current = saved;
           revision.current = saved.revision;
           if (seq === serial.current) {
             current.current = shareProject(current.current!, saved);
@@ -203,6 +216,7 @@ export function useProject() {
           if (next) install(next);
           else {
             current.current = null;
+            savedBase.current = null;
             setProject(null);
             localStorage.removeItem("alder.project");
           }
@@ -221,7 +235,8 @@ export function useProject() {
       [...opened.current.values()]
         .reverse()
         .find(
-          (p) => localStorage.getItem("alder.documentSource." + p.id) === source,
+          (p) =>
+            localStorage.getItem("alder.documentSource." + p.id) === source,
         ),
     [],
   );
@@ -273,8 +288,13 @@ export function useProject() {
       setProject(next);
       setSaveState("Unsaved changes");
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => void flush().catch(() => {}),
-        Math.min(500, Math.max(0, 2000 - (performance.now() - dirtySince.current))));
+      timer.current = setTimeout(
+        () => void flush().catch(() => {}),
+        Math.min(
+          500,
+          Math.max(0, 2000 - (performance.now() - dirtySince.current)),
+        ),
+      );
     },
     [flush, remember, timelineFor],
   );
@@ -363,27 +383,43 @@ export function useProject() {
       }
       const manifest = restoreManifest.current;
       const active = manifest.active || manifest.ids.at(-1);
-      const order = [active, ...manifest.ids.filter(id => id !== active)].filter((id): id is string => Boolean(id));
+      const order = [
+        active,
+        ...manifest.ids.filter((id) => id !== active),
+      ].filter((id): id is string => Boolean(id));
       let first = true;
       // Hydrate the active tab first. Limit inactive snapshots in flight so a
       // restored session cannot starve opening or editing its visible document.
       while (order.length) {
         const ids = order.splice(0, first ? 1 : 2);
-        const results = await Promise.allSettled(ids.map(id => api<Project>(`/api/projects/${id}`)));
+        const results = await Promise.allSettled(
+          ids.map((id) => api<Project>(`/api/projects/${id}`)),
+        );
         if (cancelled) return;
         for (const result of results) {
-          if (result.status !== "fulfilled" || result.value.settings.documentKind !== "txt") continue;
+          if (
+            result.status !== "fulfilled" ||
+            result.value.settings.documentKind !== "txt"
+          )
+            continue;
           const restored = migrateBook(result.value);
           if (!opened.current.has(restored.id)) remember(restored);
-          if (serial.current === initialSerial && !current.current) install(restored);
+          if (serial.current === initialSerial && !current.current)
+            install(restored);
         }
         first = false;
-        if (order.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
+        if (order.length)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
-      setDocuments(previous => [...previous].sort((a, b) => {
-        const rank = (id: string) => { const index = manifest.ids.indexOf(id); return index < 0 ? Number.MAX_SAFE_INTEGER : index; };
-        return rank(a.id) - rank(b.id);
-      }));
+      setDocuments((previous) =>
+        [...previous].sort((a, b) => {
+          const rank = (id: string) => {
+            const index = manifest.ids.indexOf(id);
+            return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+          };
+          return rank(a.id) - rank(b.id);
+        }),
+      );
       setRestoreDone(true);
     };
     void restore().catch(() => {

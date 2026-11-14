@@ -303,10 +303,22 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         revision = data.get("expectedRevision")
         if not isinstance(revision, int) or isinstance(revision, bool):
             raise ValidationError("Every edit must include its expectedRevision integer.")
-        saved = await run_in_threadpool(store.update, project_id, data.get("project"), revision)
+        source = data.get('project')
+        if 'changes' in data:
+            if source is not None: raise ValidationError('Choose a complete snapshot or incremental changes.')
+            from .project_changes import apply_project_changes
+            def update_changes():
+                current = store.get(project_id)
+                if current['revision'] != revision:
+                    raise ConflictError('A newer revision is already saved. Reload before applying this change.', current)
+                submitted = apply_project_changes(current, data['changes'])
+                return submitted, store.update(project_id, submitted, revision)
+            source, saved = await run_in_threadpool(update_changes)
+        else:
+            saved = await run_in_threadpool(store.update, project_id, source, revision)
         if data.get('responseMode') == 'changes':
             from .save_changes import canonical_changes
-            return JSONResponse(await run_in_threadpool(canonical_changes, data['project'], saved))
+            return JSONResponse(await run_in_threadpool(canonical_changes, source, saved))
         return JSONResponse(saved)
 
     @app.get("/api/projects/{project_id}/history")
