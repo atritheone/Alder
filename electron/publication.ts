@@ -8,10 +8,12 @@ export function renderPublicationPdf(
   input: unknown,
   preload: string,
   pdf = true,
+  signal?: AbortSignal,
 ) {
   const work = queue
     .catch(() => {})
     .then(async () => {
+      signal?.throwIfAborted();
       const renderer = new BrowserWindow({
         show: false,
         focusable: false,
@@ -26,6 +28,8 @@ export function renderPublicationPdf(
         },
       });
       renderer.setMenu(null);
+      const cancel = () => { if (!renderer.isDestroyed()) renderer.destroy(); };
+      signal?.addEventListener("abort", cancel, { once: true });
       renderer.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       renderer.webContents.on("will-navigate", (event) =>
         event.preventDefault(),
@@ -35,9 +39,11 @@ export function renderPublicationPdf(
       }, 120000);
       try {
         await renderer.loadURL("alder://app/index.html?publication=1");
+        signal?.throwIfAborted();
         const metadata = await renderer.webContents.executeJavaScript(
           `window.alderPublication.then(render => render(${JSON.stringify(input)}))`,
         );
+        signal?.throwIfAborted();
         const data = pdf
           ? await renderer.webContents.printToPDF({
               preferCSSPageSize: true,
@@ -47,9 +53,11 @@ export function renderPublicationPdf(
               margins: { top: 0, bottom: 0, left: 0, right: 0 },
             })
           : null;
+        signal?.throwIfAborted();
         return { metadata, data };
       } finally {
         clearTimeout(timeout);
+        signal?.removeEventListener("abort", cancel);
         if (!renderer.isDestroyed()) renderer.destroy();
       }
     });

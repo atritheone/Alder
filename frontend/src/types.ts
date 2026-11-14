@@ -510,7 +510,8 @@ declare global {
         name: string,
         mode: "save" | "saveAs" | "copy",
       ) => Promise<string | null>;
-      request: (method: string, path: string, body?: unknown) => Promise<any>;
+      request: (method: string, path: string, body?: unknown, requestId?: string) => Promise<any>;
+      cancelRequest?: (requestId: string) => Promise<void>;
       upload: (
         path: string,
         name: string,

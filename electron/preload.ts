@@ -89,8 +89,9 @@ contextBridge.exposeInMainWorld("alder", {
   writeClipboard: (text: string) =>
     ipcRenderer.invoke("alder:clipboard-write-text", text),
   readClipboardContent: () => ipcRenderer.invoke("alder:clipboard-content"),
-  request: (method: string, path: string, body?: unknown) =>
-    ipcRenderer.invoke("alder:request", method, path, body),
+  request: (method: string, path: string, body?: unknown, requestId?: string) =>
+    ipcRenderer.invoke("alder:request", method, path, body, requestId),
+  cancelRequest: (requestId: string) => ipcRenderer.invoke("alder:cancel-request", requestId),
   upload: (
     path: string,
     name: string,

@@ -61,20 +61,18 @@ export function shareProject<T>(before: T, after: T): T {
     return after;
   const left = before as any,
     right = after as any;
-  const keyed = Array.isArray(left)
-    ? new Map(
-        left
-          .filter(
-            (x) => x && typeof x === "object" && (x.id || x.attrs?.blockId),
-          )
-          .map((x) => [x.id || x.attrs.blockId, x]),
-      )
-    : null;
+  let keyed: Map<string, any> | undefined;
   let output = right;
   for (const key of Object.keys(right)) {
     const value = right[key],
       id = value?.id || value?.attrs?.blockId;
-    const shared = shareProject(keyed && id ? keyed.get(id) : left[key], value);
+    let prior = left[key];
+    if (Array.isArray(left) && id && id !== (prior?.id || prior?.attrs?.blockId)) {
+      keyed ||= new Map(left.filter(x => x && typeof x === "object" && (x.id || x.attrs?.blockId))
+        .map(x => [x.id || x.attrs.blockId, x]));
+      prior = keyed.get(id);
+    }
+    const shared = shareProject(prior, value);
     if (shared !== value) {
       if (output === right)
         output = Array.isArray(right) ? [...right] : { ...right };
@@ -135,15 +133,27 @@ function changes(
   return output;
 }
 
-function bytes(value: unknown, seen = new Set<unknown>()): number {
+// History payloads are immutable. Cache subtree weights so coalescing a typing
+// group does not rescan every retained paragraph on each key. Shared branches
+// may be counted twice: this is a conservative residency estimate, not a heap
+// measurement. Never cache the mutable Patch records or their containing list.
+const weights = new WeakMap<object, number>();
+function valueBytes(value: unknown): number {
   if (typeof value === "string") return value.length * 2;
   if (!value || typeof value !== "object") return 8;
-  if (seen.has(value)) return 0;
-  seen.add(value);
-  return Object.entries(value).reduce(
-    (n, [k, v]) => n + k.length * 2 + bytes(v, seen),
+  const cached = weights.get(value);
+  if (cached !== undefined) return cached;
+  const size = Object.entries(value).reduce(
+    (n, [k, v]) => n + k.length * 2 + valueBytes(v),
     32,
   );
+  weights.set(value, size);
+  return size;
+}
+function bytes(patches: Patch[]): number {
+  return patches.reduce((total, patch) => total + 128 +
+    patch.path.reduce<number>((n, key) => n + String(key).length * 2 + 8, 0) +
+    valueBytes(patch.before) + valueBytes(patch.after), 32);
 }
 
 function applyPatch(project: Project, patch: Patch, reverse: boolean): Project {

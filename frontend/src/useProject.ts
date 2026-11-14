@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project } from "./types";
 import { api } from "./api";
+import { canonicalSaved, type SaveReply } from "./saveChanges";
 import { createEditorDraft } from "./editorDraft";
 import { migrateBook } from "./book";
 import { forgetSessionPosition, documentPositionKey } from "./documentPosition";
@@ -32,7 +33,8 @@ export function useProject() {
   );
   const opened = useRef(new Map<string, Project>());
   const dirtySince = useRef(0);
-  const recentlyClosed = useRef<Project[]>([]);
+  // Closing flushes first; keep identities, not twenty complete manuscripts.
+  const recentlyClosed = useRef<string[]>([]);
   const [restoreDone, setRestoreDone] = useState(false);
   const restoreManifest = useRef(readTextSessionManifest());
   // Only untouched documents created in this session can be replaced automatically.
@@ -106,11 +108,12 @@ export function useProject() {
           seq = serial.current;
         setSaveState("Saving…");
         try {
-          const saved = await api<Project>(
+          const reply = await api<Project | SaveReply>(
             `/api/projects/${snapshot.id}`,
             "PUT",
-            { expectedRevision: revision.current, project: snapshot },
+            { expectedRevision: revision.current, project: snapshot, responseMode: "changes" },
           );
+          const saved = canonicalSaved(snapshot, reply);
           revision.current = saved.revision;
           if (seq === serial.current) {
             current.current = shareProject(current.current!, saved);
@@ -191,7 +194,7 @@ export function useProject() {
         await flush();
         const ids = [...opened.current.keys()];
         if (!opened.current.has(id)) return;
-        recentlyClosed.current.push(opened.current.get(id)!);
+        recentlyClosed.current.push(id);
         if (recentlyClosed.current.length > 20) recentlyClosed.current.shift();
         if (current.current?.id === id) {
           window.dispatchEvent(new Event("alder-save-document-position"));
@@ -226,7 +229,7 @@ export function useProject() {
     const previous = recentlyClosed.current.pop();
     if (!previous) return;
     try {
-      await load(previous);
+      await load(await api<Project>(`/api/projects/${previous}`));
     } catch (error) {
       recentlyClosed.current.push(previous);
       throw error;

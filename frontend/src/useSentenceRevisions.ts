@@ -37,11 +37,12 @@ export function useSentenceRevisions(
   useEffect(() => {
     if (text === undefined || !projectId || !enabled) return;
     let disposed = false;
+    const controller = new AbortController();
     let job: string | undefined;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const result = await api<Result>(`/api/proofreading/jobs/${job}`);
+        const result = await api<Result>(`/api/proofreading/jobs/${job}`, "GET", undefined, controller.signal);
         if (disposed) return;
         setState((previous) => {
           const retained =
@@ -138,6 +139,7 @@ export function useSentenceRevisions(
     );
     const cancel = () => {
       disposed = true;
+      controller.abort();
       clearTimeout(timer);
       if (job)
         void api(`/api/proofreading/jobs/${job}`, "DELETE").catch(() => {});

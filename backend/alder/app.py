@@ -303,7 +303,11 @@ def create_app(data_dir: Path | str | None = None, project_root: Path | str | No
         revision = data.get("expectedRevision")
         if not isinstance(revision, int) or isinstance(revision, bool):
             raise ValidationError("Every edit must include its expectedRevision integer.")
-        return JSONResponse(await run_in_threadpool(store.update, project_id, data.get("project"), revision))
+        saved = await run_in_threadpool(store.update, project_id, data.get("project"), revision)
+        if data.get('responseMode') == 'changes':
+            from .save_changes import canonical_changes
+            return JSONResponse(await run_in_threadpool(canonical_changes, data['project'], saved))
+        return JSONResponse(saved)
 
     @app.get("/api/projects/{project_id}/history")
     def history(project_id: str):

@@ -2,6 +2,7 @@ import { WindowsMenu } from "./windows-menu";
 import { TextWorkspaces } from "./textWorkspaces";
 import { openPrintProof } from "./printProof";
 import { renderPublicationPdf } from "./publication";
+import { RequestCancellation } from "./requestCancellation";
 import {
   DocumentFiles,
   atomicDocumentWrite,
@@ -30,6 +31,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { executable, dataDirectory, platformMenu } from "./platform";
 import { mark, performanceReport } from "./performance";
+const cancellable = new RequestCancellation();
 
 app.setAppUserModelId("org.alder.language");
 if (process.platform === "linux")
@@ -511,7 +513,8 @@ function registerIPC() {
       flushRequests.delete(id);
     }
   });
-  const publicationRequest = async (method:string,p:string,body:any) => {
+  const publicationRequest = async (method:string,p:string,body:any,signal?:AbortSignal) => {
+    signal?.throwIfAborted();
     const fieldsOnly = /^\/api\/projects\/[^/?#]+\/layout-fields$/.test(p);
     const word = /^\/api\/projects\/[^/?#]+\/export(?:-jobs)?$/.test(p) && body?.format === 'docx';
     if (
@@ -528,6 +531,7 @@ function registerIPC() {
           ...(word ? {ephemeral:true} : {}),
           ...(fieldsOnly ? { project: body.project, ephemeral: true } : {}),
         },
+        signal,
       );
       if (!fieldsOnly && body?.expectedRevision != null && body.expectedRevision !== snapshot.sourceRevision)
         throw Error('The document changed during export preparation. Export the current version again.');
@@ -539,6 +543,7 @@ function registerIPC() {
         snapshot,
         path.join(__dirname, "preload.cjs"),
         !fieldsOnly && !word,
+        signal,
       );
       if (fieldsOnly) return rendered.metadata.referenceValues;
       if(word){
@@ -573,6 +578,7 @@ function registerIPC() {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
           body: form,
+          signal,
         },
       );
       const result = await response.json();
@@ -584,7 +590,7 @@ function registerIPC() {
         );
       return result;
     }
-    const result = await request(method, p, body);
+    const result = await request(method, p, body, signal);
     if (
       method === "POST" &&
       p === "/api/projects/open" &&
@@ -594,9 +600,15 @@ function registerIPC() {
       await documentFiles.bind(result.id, body.path, "alder", true);
     return result;
   };
-  ipcMain.handle("alder:request", async (e,method,p,body) => {
+  ipcMain.handle("alder:cancel-request", (e,id) => {
     trusted(e);
-    return publicationRequest(method,p,body);
+    if (typeof id === "string") cancellable.cancel(id);
+  });
+  ipcMain.handle("alder:request", async (e,method,p,body,id) => {
+    trusted(e);
+    const owned = id === undefined ? undefined : cancellable.begin(id, method, apiPath(p), body);
+    try { return await publicationRequest(method,p,body,owned?.signal); }
+    finally { owned?.finish(); }
   });
   ipcMain.handle("alder:upload", async (e, p, name, bytes, fields) => {
     trusted(e);
@@ -1084,6 +1096,7 @@ async function createWindow() {
     }
   });
   window.on("closed", () => {
+    cancellable.dispose();
     windowsMenu = null;
     window = null;
     rendererReady = false;

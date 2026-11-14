@@ -83,8 +83,11 @@ export default function PublicationPreview({
   const canvas = useRef<HTMLCanvasElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const readerFrame = useRef<HTMLIFrameElement>(null);
+  const loadedReading = useRef("");
 
   useEffect(() => {
+    const key = JSON.stringify([htmlUrl, project.id, refreshKey, retry]);
+    if (mode !== "reading" || loadedReading.current === key) return;
     const controller = new AbortController();
     setReaderHtml("");
     setReaderError("");
@@ -96,14 +99,17 @@ export default function PublicationPreview({
             `Unable to load the reading preview (${response.status}).`,
           );
         const html = await response.text();
-        if (!controller.signal.aborted) setReaderHtml(html);
+        if (!controller.signal.aborted) {
+          loadedReading.current = key;
+          setReaderHtml(html);
+        }
       })
       .catch((cause) => {
         if (!controller.signal.aborted)
           setReaderError((cause as Error).message);
       });
     return () => controller.abort();
-  }, [htmlUrl, project.id, refreshKey, retry]);
+  }, [htmlUrl, project.id, refreshKey, retry, mode]);
 
   const reading = useMemo(() => {
     if (!readerHtml)
@@ -165,6 +171,7 @@ export default function PublicationPreview({
           `/api/projects/${project.id}/export`,
           "POST",
           { format: "pdf" },
+          controller.signal,
         );
         if (!current) return;
         setProof(result);

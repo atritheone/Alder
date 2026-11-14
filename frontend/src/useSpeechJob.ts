@@ -50,6 +50,7 @@ export function useSpeechJob(
   useEffect(() => {
     if (!job) return;
     let live = true;
+    const controller = new AbortController();
     let sequence = job.eventSequence || 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const receive = async () => {
@@ -57,6 +58,7 @@ export function useSpeechJob(
         try {
           const batch = await api<EventBatch>(
             `/api/speech/jobs/${job.id}/events?after=${sequence}&wait=20`,
+            "GET", undefined, controller.signal,
           );
           if (!live) return;
           sequence = batch.sequence;
@@ -68,7 +70,7 @@ export function useSpeechJob(
         } catch {
           if (!live) return;
           try {
-            const snapshot = await api<Job>(`/api/speech/jobs/${job.id}`);
+            const snapshot = await api<Job>(`/api/speech/jobs/${job.id}`, "GET", undefined, controller.signal);
             if (!live) return;
             sequence = snapshot.eventSequence || 0;
             setJob((previous) =>
@@ -90,6 +92,7 @@ export function useSpeechJob(
     void receive();
     return () => {
       live = false;
+      controller.abort();
       clearTimeout(retry);
     };
   }, [job?.id, setJob]);

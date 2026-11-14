@@ -3,12 +3,33 @@ export async function api<T = any>(
   path: string,
   method = "GET",
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
-  if (window.alder) return window.alder.request(method, path, body);
+  signal?.throwIfAborted();
+  // Only observations and disposable PDF preparation may be transport-aborted.
+  // A lost save response never proves that its durable transaction did not run.
+  if (signal && method !== "GET" && !(method === "POST" && /^\/api\/projects\/[^/?#]+\/export$/.test(path) && (body as any)?.format === "pdf"))
+    throw new Error("This operation must finish before its result can be discarded.");
+  if (window.alder) {
+    if (!signal) return window.alder.request(method, path, body);
+    const id = crypto.randomUUID();
+    let abort!: () => void;
+    const cancelled = new Promise<never>((_, reject) => {
+      abort = () => {
+        void window.alder?.cancelRequest?.(id).catch(() => {});
+        reject(new DOMException("Request cancelled.", "AbortError"));
+      };
+    });
+    const result = window.alder.request(method, path, body, id);
+    signal.addEventListener("abort", abort, { once: true });
+    try { return await Promise.race([result, cancelled]); }
+    finally { signal.removeEventListener("abort", abort); }
+  }
   const response = await fetch(path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   if (!response.ok) {
     const e = await response

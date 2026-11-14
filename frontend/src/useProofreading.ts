@@ -130,6 +130,7 @@ export function useProofreading(
   useEffect(() => {
     if (text === undefined || !project || !targetId) return;
     let disposed = false;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     let jobId: string | null = null;
     setCancelled(false);
@@ -154,6 +155,7 @@ export function useProofreading(
       try {
         const job = await api<ProofreadingResult>(
           `/api/proofreading/jobs/${jobId}`,
+          "GET", undefined, controller.signal,
         );
         publish(job);
         if (!disposed && ["queued", "running"].includes(job.status))
@@ -198,6 +200,7 @@ export function useProofreading(
     );
     return () => {
       disposed = true;
+      controller.abort();
       clearTimeout(timer);
       if (jobId)
         void api(`/api/proofreading/jobs/${jobId}`, "DELETE").catch(() => {});
