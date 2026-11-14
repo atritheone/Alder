@@ -102,7 +102,7 @@ Advanced proofreading remains experimental; Intel Mac remains rules-only.
 
 ## Native platform evidence
 
-[Native opening qualification, revision b9c08e2](https://github.com/atritheone/Alder/actions/runs/43560016210)
+[Native opening qualification, revision 2ed7b7c](https://github.com/atritheone/Alder/actions/runs/43561252271)
 passed on all four targets. Each job built natively, ran only the focused backend
 and editor checks above, and exercised five starts plus the six TXT/DOCX inputs.
 Both Mac architectures also passed normal window close, fresh backend startup
@@ -110,14 +110,16 @@ on activation, and saved TXT-session restoration.
 
 | Hosted native runner | Shell median | Core median | 1 MiB TXT open | Large DOCX open |
 | --- | ---: | ---: | ---: | ---: |
-| Windows x64 | 0.242 s | 0.659 s | 1.480 s | 1.055 s |
-| Linux x64 | 0.494 s | 0.899 s | 1.892 s | 1.334 s |
-| Mac ARM64 | 0.476 s | 0.783 s | 1.517 s | 0.897 s |
-| Mac Intel | 1.143 s | 2.064 s | 5.609 s | 3.082 s |
+| Windows x64 | 0.366 s | 1.003 s | 2.222 s | 1.780 s |
+| Linux x64 | 0.421 s | 0.772 s | 1.776 s | 1.219 s |
+| Mac ARM64 | 0.985 s | 1.415 s | 1.726 s | 1.147 s |
+| Mac Intel | 1.363 s | 2.168 s | 4.305 s | 3.213 s |
 
 These shared hosted machines have different hardware and cache histories; the
-numbers are qualification results, not a controlled OS speed comparison. The
-slowest first core start was 3.785 s, below the 5 s CI median budget. Intel Mac
+numbers are qualification results, not a controlled OS speed comparison. All core
+medians passed the 5 s CI budget. First core samples on the two Mac runners reached
+6.918–7.054 s; the earlier qualification run had Mac medians of 0.783/2.064 s and
+maxima below 3.8 s. This variation prevents a universal cold-start claim. Intel Mac
 remains slower and experimental; this work does not establish full optional
 feature acceptance there. Native Linux under WSLg also passed ten starts and all
 six files locally: 0.241 s shell and 0.458 s core medians, 1.090 s TXT open and
@@ -130,8 +132,47 @@ a workspace. Import byte size alone is not the project storage limit. This chang
 retains those bounds. That check overlapped resource provisioning, so its timings
 are not used as the controlled performance comparison.
 
-The managed Windows rollout uses the published revision above and the existing
-installation root. The complete local data and Chromium preferences/native file
-bindings were copied outside the repository/app/cache, with matching file hashes,
-before activation. Packaged rollout measurements are recorded after installed
-verification completes.
+## Managed Windows rollout
+
+The managed update of 0.13 to the new 0.13 application build (revision `2ed7b7c`)
+completed with `status: passed`, including installed integrity/version/launch
+verification. Document compatibility remains 2, without a migration; automatic
+rollback remains compatible and the previous active payload is retained.
+
+Ten installed starts measured 0.212 s median shell and 1.039 s median core
+readiness (maximum 1.329 s). Ten further starts with separate copies of the existing
+library measured 0.209 s shell and 0.992 s core medians (maximum 1.047 s).
+The earlier copied-library median was 4.80 s. The copied database still lists 125
+projects, a saved snapshot is readable, and all 77 narration manifests remain;
+unused narration did not initialize or create its index.
+
+All six installed TXT/DOCX checks passed. The 1 MiB TXT opened in 1.231 s, with
+an 86 ms first edit and no multi-second renderer stalls. The large DOCX opened
+in 0.987 s, with first edits of 156/150/133 ms. This remains above the soft 100 ms
+editing target; the controlled source run was 102 ms. These results support the
+startup improvement and removal of the large development regression, not a
+claim that every edit/layout task is below 50 or 100 ms.
+
+The complete local data (4,837 files, 1,043,719,660 bytes) and Chromium preferences,
+native bindings and session state (73 files, 3,857,445 bytes) were copied outside
+the repository/app/cache, with matching file hashes, before activation.
+
+The normal shortcut check found that older managed releases used `Alder.lnk`,
+while the updater now creates `Alder (local).lnk`. The original owned shortcut
+still launched the retained old build. Its pre-update hash matched the old
+ownership receipt; a verified copy was retained before repair. Both entries now
+target the active application. Setup now preserves and refreshes an owned
+original-name entry on future updates, while retaining its guard against
+overwriting user-modified launchers. The focused integration regression passed
+on Windows and Linux, and both actual shortcut targets were checked.
+
+Windows automation could not activate/capture the normally launched old window,
+including a fresh-window retry. A normal user close was requested. A visible
+normal-profile check of the corrected shortcut remains separate from the passed
+automated installed launch and isolated library checks; no user process was killed.
+
+The final structure-mark implementation uses measured physical-page ranges for
+projected columns, whose source DOM order is not vertically monotonic. A focused
+regression plus native desktop column geometry, editing/undo, section breaks,
+and PDF page-count checks passed. Launch-time queued archives and second-instance
+handoff passed with the existing archive-copy collision policy preserved.

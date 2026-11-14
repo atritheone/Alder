@@ -60,6 +60,12 @@ def integrations(root,active):
         paths=[Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Alder (local).lnk']
     existing=read_json(root/'integrations.json') if (root/'integrations.json').exists() else []
     owned={x['path']:x for x in existing}
+    if target.startswith('win32'):
+        # Older managed releases used this name. Keep updating that owned entry
+        # as well as the current launcher, so the user's usual shortcut cannot
+        # silently continue opening the retained previous application.
+        legacy=Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Alder.lnk'
+        if str(legacy) in owned:paths.append(legacy)
     for p in paths:
         if (p.exists() or p.is_symlink()) and str(p) not in owned:
             raise SetupError('ALDER_INTEGRATION',f'An existing unowned launcher would be replaced: {p}. Move or rename your existing launcher before retrying; do not edit the repository.')
@@ -90,12 +96,11 @@ def integrations(root,active):
     else:
         # Pass strings as JSON through an environment variable, never interpolate shell code.
         import json
-        payload={'shortcut':str(paths[0]),'exe':str(exe),'working':str(app),'description':active['description']}
-        env={**os.environ,'ALDER_SHORTCUT_JSON':json.dumps(payload)}
         script='$p=$env:ALDER_SHORTCUT_JSON|ConvertFrom-Json; $s=(New-Object -ComObject WScript.Shell).CreateShortcut($p.shortcut); $s.TargetPath=$p.exe; $s.WorkingDirectory=$p.working; $s.IconLocation=$p.exe; $s.Description=$p.description; $s.Save()'
-        subprocess.run(['powershell.exe','-NoProfile','-Command',script],env=env,check=True,creationflags=subprocess.CREATE_NO_WINDOW)
-        from common import digest
-        write_json(root/'integrations.json',[{'path':str(paths[0]),'sha256':digest(paths[0])}])
+        for shortcut in paths:
+            payload={'shortcut':str(shortcut),'exe':str(exe),'working':str(app),'description':active['description']}
+            env={**os.environ,'ALDER_SHORTCUT_JSON':json.dumps(payload)}
+            subprocess.run(['powershell.exe','-NoProfile','-Command',script],env=env,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         import winreg
         # The external bootstrap interpreter can remove the app's Python on Windows.
         python=Path(sys.executable)

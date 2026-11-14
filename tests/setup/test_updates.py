@@ -17,7 +17,37 @@ import cli
 import updates
 from common import SetupError, inventory, read_json, write_json
 from doctor import validate_metadata
-from install import activate, rollback
+from install import activate, rollback, integrations
+
+
+class WindowsLauncherTests(unittest.TestCase):
+    def test_owned_original_launcher_follows_the_current_managed_version(self):
+        from contextlib import nullcontext
+        from common import digest
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            menu=root/'profile/Microsoft/Windows/Start Menu/Programs'
+            menu.mkdir(parents=True)
+            original=menu/'Alder.lnk';original.write_bytes(b'old managed shortcut')
+            write_json(root/'integrations.json',[{'path':str(original),'sha256':digest(original)}])
+            active={'target':'win32-x64','directory':'versions/current','description':'Alder','version':'0.13.0'}
+            calls=[]
+            def create_shortcut(_args,**kwargs):
+                payload=json.loads(kwargs['env']['ALDER_SHORTCUT_JSON'])
+                calls.append(payload)
+                Path(payload['shortcut']).write_bytes(payload['exe'].encode())
+            registry=SimpleNamespace(CreateKey=lambda *a:nullcontext(object()),SetValueEx=MagicMock(),
+                                     HKEY_CURRENT_USER=0,REG_SZ=1)
+            with patch.dict('os.environ',{'APPDATA':str(root/'profile')}),patch.dict(sys.modules,{'winreg':registry}),patch('install.subprocess.run',side_effect=create_shortcut):
+                launcher=integrations(root,active)
+                self.assertEqual(launcher,str(menu/'Alder (local).lnk'))
+                self.assertEqual({row['shortcut'] for row in calls},{str(original),launcher})
+                self.assertTrue(all(row['exe']==str(root/'versions/current/Alder.exe') for row in calls))
+                self.assertEqual({row['path'] for row in read_json(root/'integrations.json')},{str(original),launcher})
+                # A later user edit must still be protected, never overwritten.
+                original.write_bytes(b'user changed shortcut')
+                with self.assertRaisesRegex(SetupError,'modified outside setup'):
+                    integrations(root,active)
 
 
 class UpdateTests(unittest.TestCase):
