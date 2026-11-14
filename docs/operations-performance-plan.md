@@ -4,6 +4,11 @@ Date: 14 November 2026. Source reviewed: `57c564b`; installed application measur
 `2ed7b7c`, release 0.13. This is an implementation plan, not a claim that the
 proposed operating improvements have already been made.
 
+Implementation is now recorded in
+[operations-performance-implementation.md](operations-performance-implementation.md), including
+delivered changes, native checks, repeated measurements and unmet/deferred gates.
+The investigation and sequence below preserve the original planning evidence.
+
 ## Objective and priorities
 
 Keep writing, selecting, navigating, saving, reviewing and listening responsive
