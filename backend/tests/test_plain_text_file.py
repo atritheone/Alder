@@ -31,6 +31,9 @@ def test_plain_export_projection_matches_complete_publisher(tmp_path):
             assert candidate == before
         project['settings']['includeGlossary'] = True
         assert plain_project_bytes(project) is None
+        project['settings'].pop('includeGlossary')
+        project['settings'].pop('includeTitle')
+        assert plain_project_bytes(project) is None  # Publisher defaults to including the title.
     # Publication overrides and rich content must keep the general path.
     for options in ({'includeTitle': True}, {'includeGlossary': True}, {'reviewView': 'invalid'}):
         try:
