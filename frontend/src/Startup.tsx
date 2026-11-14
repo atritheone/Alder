@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import StartScreen from "./StartScreen";
-import { readTextSessionManifest } from "./plainTextSessionManifest";
 import type { StartupIntent } from "./startupIntent";
 
 export default function Startup() {
@@ -48,7 +47,6 @@ export default function Startup() {
     window.addEventListener("drop", drop);
     void window.alder?.performance?.("renderer.shell");
     void window.alder?.ready?.().then(() => window.alder?.performance?.("renderer.core-ready")).catch(cause => setError(String(cause.message || cause)));
-    if (localStorage.getItem("alder.txt.restoreSession") !== "false" && readTextSessionManifest().ids.length) void open();
     return () => { close?.(); files?.(); commands?.(); window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); };
   }, [open, workspace]);
   if (workspace) { const Workspace = workspace; return <Workspace initialIntent={intent.current} />; }

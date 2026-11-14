@@ -23,7 +23,8 @@ read-only and copied for realistic-library measurements.
    it; requested jobs retain interrupted-job and missing-audio recovery. Damaged
    files are retained. The normal writing view does not request all narration jobs.
 4. **Separate the renderer bootstrap.** The start screen is a small entry chunk;
-   editors/workspaces load on action or saved TXT-session restoration. Dialogs and
+   editors/workspaces load on an explicit New/Open action. Saved TXT tabs restore
+   in the background afterward, without dismissing the start screen. Dialogs and
    publication preview load on use. Buffered native commands and archive-open
    events survive the handoff. Restore the active TXT tab first, then other tabs
    two at a time. Font discovery reuses its initial result, refreshes on focus,

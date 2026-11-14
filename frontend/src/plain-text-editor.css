@@ -346,7 +346,7 @@
   padding: 0;
 }
 .txt-paged .cm-activeLine {
-  background: #edf0f044;
+  background: transparent;
 }
 .txt-paged .cm-activeLineGutter {
   background: transparent;

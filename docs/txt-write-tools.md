@@ -70,6 +70,9 @@ exclude filters narrow scanning. Results open in normal tabs. Replacement needs
 a preview; verified backups precede writes, and restore refuses to overwrite newer
 authored work. Backups remain in Alder data under `backups/text-replacements`.
 
-TXT session restoration can be disabled in Text editor settings. See the
+Launching Alder keeps the New/Open screen available until you choose a document.
+Previous TXT tabs restore in the background when you create or open a workspace;
+they never replace the document you chose. This can be disabled in Text editor
+settings. See the
 [implementation record](txt-editor-plan.md#measured-limits-and-boundaries) for
 large-file, folder-operation and platform limits.

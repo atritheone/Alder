@@ -175,7 +175,7 @@ export default function TextEditorSettings() {
         />
       </label>
       <label className="settings-row">
-        Restore TXT tabs on launch
+        Restore previous TXT tabs when opening a workspace
         <input
           type="checkbox"
           checked={p.restoreSession}

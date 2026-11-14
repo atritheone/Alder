@@ -388,7 +388,6 @@ export function useProject() {
   }, [project?.id, history, timelineFor]);
   useEffect(() => {
     let cancelled = false;
-    const initialSerial = serial.current;
     const restore = async () => {
       if (localStorage.getItem("alder.txt.restoreSession") === "false") {
         setRestoreDone(true);
@@ -401,8 +400,9 @@ export function useProject() {
         ...manifest.ids.filter((id) => id !== active),
       ].filter((id): id is string => Boolean(id));
       let first = true;
-      // Hydrate the active tab first. Limit inactive snapshots in flight so a
-      // restored session cannot starve opening or editing its visible document.
+      // Restore tabs in the background after an explicit New/Open action.
+      // The saved session must never replace that action or the start screen.
+      // Limit snapshots in flight so restoration cannot starve the chosen document.
       while (order.length) {
         const ids = order.splice(0, first ? 1 : 2);
         const results = await Promise.allSettled(
@@ -417,8 +417,6 @@ export function useProject() {
             continue;
           const restored = migrateBook(result.value);
           if (!opened.current.has(restored.id)) remember(restored);
-          if (serial.current === initialSerial && !current.current)
-            install(restored);
         }
         first = false;
         if (order.length)
@@ -441,7 +439,7 @@ export function useProject() {
     return () => {
       cancelled = true;
     };
-  }, [install, remember]);
+  }, [remember]);
   useEffect(() => {
     if (!restoreDone) return;
     const ids = documents

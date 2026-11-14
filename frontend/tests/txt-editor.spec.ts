@@ -174,6 +174,7 @@ test("TXT Write uses the plain editor, completes file words, highlights matches 
     )
     .toBe(6);
   await page.reload();
+  await openSaved(page);
   await expect(
     page.getByRole("textbox", { name: "TXT text editor", exact: true }),
   ).toBeVisible();
