@@ -234,7 +234,19 @@ try {
             { timeout: 30000 },
           )
           .toBeGreaterThan(0);
-        await page.waitForTimeout(300);
+        await expect
+          .poll(
+            async () => {
+              try {
+                await page.evaluate(() => window.__layoutProbe.capture());
+                return true;
+              } catch {
+                return false;
+              }
+            },
+            { timeout: 30000 },
+          )
+          .toBe(true);
         results.push(
           await page.evaluate(() => {
             const capture = window.__layoutProbe.capture();

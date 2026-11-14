@@ -892,6 +892,16 @@ export function parseEditorDocument(input: DocNode): {
     };
   }
 }
+// Project document roots are immutable. Keep parsed models only while their
+// source is owned by an open document/history; this cache retains no view/DOM.
+const preparedDocuments = new WeakMap<DocNode, PMNode>();
+export function preparedEditorDocument(input: DocNode) {
+  const previous=preparedDocuments.get(input);
+  if(previous)return {document:previous,error:null};
+  const parsed=parseEditorDocument(input);
+  if(parsed.document)preparedDocuments.set(input,parsed.document);
+  return parsed;
+}
 export function namedStyleTransaction(
   state: EditorState,
   id: string,
@@ -2409,7 +2419,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
   );
   useLayoutEffect(() => {
     if (!host.current) return;
-    const parsed = parseEditorDocument(props.document);
+    const parsed = preparedEditorDocument(props.document);
     blocked.current = !parsed.document;
     setParseError(parsed.error);
     setRangeWarning("");
@@ -2440,7 +2450,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         selection.current = { from: s.from, to: s.to, text: selected };
       latest.current.onSelection(word, selected, { from: s.from, to: s.to });
     };
-    const initialState = EditorState.create({
+    const config = {
       doc,
       plugins: [
         directTyping(),
@@ -2722,7 +2732,11 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           },
         }),
       ],
-    });
+    };
+    const cached = editorSession(props.identity);
+    restoredEditorSession.current = !!(!blocked.current && cached?.doc.eq(doc));
+    const initialState = restoredEditorSession.current
+      ? cached!.reconfigure({plugins:config.plugins}) : EditorState.create(config);
     // Keep the view in a separate lexical scope. Cached plugin closures may
     // outlive a mounted editor; sharing their scope with the view retains its
     // entire detached DOM even after destroy() and effect cleanup.
@@ -2824,6 +2838,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             setRangeWarning("");
             const jsonStarted = performance.now();
             const json = documentJSON(next.doc);
+            preparedDocuments.set(json,next.doc);
             const text = projectText(next.doc).text;
             recordOperation('editor.project',jsonStarted);
             lastDocument.current = json;
@@ -3150,11 +3165,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         props.identity,
         () => v.state,
       );
-      const cached = editorSession(props.identity);
       positionInteracted.current = false;
-      restoredEditorSession.current = !!(!blocked.current && cached?.doc.eq(doc));
-      if (restoredEditorSession.current)
-        v.updateState(cached!.reconfigure({ plugins: v.state.plugins }));
       tick((n) => n + 1);
       return () => {
         unregisterSession(blocked.current ? undefined : v.state);
@@ -3178,7 +3189,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     // Avoid serializing the whole manuscript on both sides of that round trip.
     // External objects still pass schema parsing and semantic comparison below.
     if (v && props.document !== lastDocument.current) {
-      const parsed = parseEditorDocument(props.document);
+      const parsed = preparedEditorDocument(props.document);
       // Source paragraphs omit default attributes. Equivalent parent updates
       // must not recreate editor state, reset the caret or clear undo history.
       if (parsed.document?.eq(v.state.doc) && !blocked.current) {

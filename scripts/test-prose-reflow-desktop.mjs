@@ -182,6 +182,8 @@ try {
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
   await page.evaluate(()=>window.__layoutProbe.edit(0,0,'Superseding edit. '));
   await sameAsFresh('Styled keep chains and superseded sliced reflow');
+  await page.evaluate(()=>window.__layoutProbe.font('monospace'));
+  await sameAsFresh('Font metrics invalidate the complete page map');
   expect(await page.evaluate(()=>globalThis.__alderOperationTimings.events.some(event=>event.event==='layout.slice'))).toBe(true);
   await page.screenshot({ path: path.join(directory, "prose.png") });
   expect(report.errors).toEqual([]);

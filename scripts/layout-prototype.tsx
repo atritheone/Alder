@@ -82,6 +82,7 @@ function Prototype() {
   const editor = useRef<EditorHandle>(null);
   const [doc, setDoc] = useState(document);
   const [zoom, setZoom] = useState(1);
+  const [fontFamily, setFontFamily] = useState("serif");
   const [scale, setScale] = useState(1);
   const [structure, setStructure] = useState(false);
   const [generation, setGeneration] = useState(0);
@@ -122,6 +123,7 @@ function Prototype() {
     movePage: (from: number, to: number) => editor.current!.movePage(from, to),
     doc: () => doc,
     zoom: setZoom,
+    font: setFontFamily,
     scale: setScale,
     structure: setStructure,
     document: (value: DocNode) => {
@@ -179,7 +181,7 @@ function Prototype() {
       identity={`layout-prototype-${generation}`}
       projectId="prototype"
       assets={[]}
-      fontFamily="Cambria"
+      fontFamily={fontFamily}
       fontSize={16}
       styles={[]}
       showStructure={structure}

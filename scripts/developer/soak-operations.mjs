@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 const interval = Number(process.env.ALDER_SOAK_INTERVAL_MS || 0);
+const mixed = process.env.ALDER_SOAK_MIXED === "1";
 const startedAt = Date.now();
 const paragraphs = Number(process.env.ALDER_MEMORY_PARAGRAPHS || 400),
   cycles = Number(process.env.ALDER_MEMORY_CYCLES || 3);
@@ -30,9 +31,11 @@ const report = {
   status: "running",
   paragraphs,
   cycles,
+  mixed,
   machine: { platform: process.platform, cpu: os.cpus()[0]?.model },
   samples: [],
   switchMilliseconds: [],
+  switchInPageMilliseconds: [],
   selectionFailures: [],
   historyFailures: [],
   errors: [],
@@ -153,12 +156,48 @@ try {
     );
     await expect(tabs.getByRole("tab")).toHaveCount(3);
     for (let i = 0; i < 3; i++) {
+      await page.evaluate(
+        ({ name, passage }) => {
+          const tab = [...document.querySelectorAll("[role=tab]")].find(
+            (node) => node.getAttribute("aria-label") === name,
+          );
+          globalThis.operatingSwitch = null;
+          tab.addEventListener(
+            "click",
+            () => {
+              const started = performance.now();
+              const check = () => {
+                if (
+                  document
+                    .querySelector('[aria-label="Chapter text editor"]')
+                    ?.textContent.includes(passage)
+                )
+                  requestAnimationFrame(
+                    () =>
+                      (globalThis.operatingSwitch =
+                        performance.now() - started),
+                  );
+                else requestAnimationFrame(check);
+              };
+              requestAnimationFrame(check);
+            },
+            { once: true },
+          );
+        },
+        { name: `Memory ${cycle}-${i}`, passage: `Passage ${cycle}-${i}-0.` },
+      );
       const start = performance.now();
       await tabs
         .getByRole("tab", { name: `Memory ${cycle}-${i}`, exact: true })
         .click();
       await expect(passage).toContainText(`Passage ${cycle}-${i}-0.`);
       report.switchMilliseconds.push(performance.now() - start);
+      await page.waitForFunction(
+        () => typeof globalThis.operatingSwitch === "number",
+      );
+      report.switchInPageMilliseconds.push(
+        await page.evaluate(() => globalThis.operatingSwitch),
+      );
       await page.evaluate(() => {
         const editor = document.querySelector(
             '[aria-label="Chapter text editor"]',
@@ -179,6 +218,79 @@ try {
       await expect(page.locator(".save-status")).toHaveText("Saved");
     }
     await sample(`open-${cycle}`);
+    if (mixed && cycle === 0) {
+      report.nativeSpeech = await page.evaluate(async () => {
+        const voices = (await window.alder.request("GET", "/api/speech/voices"))
+          .voices;
+        const voice = voices.find(
+          (v) => v.system && v.available && v.culture?.startsWith("en"),
+        );
+        if (!voice) return { status: "unavailable" };
+        const started = performance.now(),
+          project = localStorage.getItem("alder.project");
+        let job = await window.alder.request(
+          "POST",
+          `/api/projects/${project}/speech`,
+          {
+            scope: "selection",
+            text: "Alder reads clearly. The author moves between documents and reviews each passage.",
+            voiceId: voice.id,
+            format: "wav",
+            strictVerification: false,
+          },
+        );
+        const deadline = performance.now() + 30000;
+        while (
+          !["ready", "failed", "cancelled", "needs_review"].includes(
+            job.status,
+          ) &&
+          performance.now() < deadline
+        ) {
+          await new Promise((r) => setTimeout(r, 50));
+          job = await window.alder.request("GET", `/api/speech/jobs/${job.id}`);
+        }
+        if (job.status !== "ready" || !job.audioUrl)
+          throw Error(
+            "Native operating speech fixture did not produce verified audio.",
+          );
+        const readyMs = performance.now() - started,
+          controls = [];
+        for (const mode of ["playing", "paused", "playing", "stopped"]) {
+          const t = performance.now();
+          await window.alder.request(
+            "POST",
+            `/api/speech/jobs/${job.id}/demand`,
+            { index: 0, speed: 1, mode },
+          );
+          controls.push(performance.now() - t);
+        }
+        const audio = new Audio(window.alder.mediaBase + job.audioUrl);
+        audio.volume = 0;
+        await new Promise((resolve, reject) => {
+          audio.onloadedmetadata = resolve;
+          audio.onerror = reject;
+        });
+        const playStarted = performance.now();
+        await audio.play();
+        await new Promise((r) => setTimeout(r, 150));
+        const advanced = audio.currentTime;
+        audio.pause();
+        audio.currentTime = Math.min(0.1, audio.duration);
+        audio.removeAttribute("src");
+        audio.load();
+        if (!(advanced > 0))
+          throw Error("Native PCM did not advance in the audio transport.");
+        return {
+          status: "passed",
+          provider: voice.provider,
+          readyMs,
+          controlMs: controls,
+          playMs: performance.now() - playStarted - 150,
+          advancedSeconds: advanced,
+        };
+      });
+      save();
+    }
     await page.getByRole("button", { name: "Preview", exact: true }).click();
     await expect(page.locator(".publication-page-text p")).toContainText(
       "Passage",
@@ -295,6 +407,46 @@ try {
       if (count > 1) await expect(tabs.getByRole("tab")).toHaveCount(count - 1);
       else await expect(page.locator(".start-screen")).toBeVisible();
     }
+    if (mixed) {
+      const filename = path.join(profile, `Mixed ${cycle}.txt`);
+      fs.writeFileSync(
+        filename,
+        "ALDER_SOAK_TXT\n" +
+          Array.from(
+            { length: 1200 },
+            (_, i) =>
+              `TXT passage ${i}. ` +
+              "Synthetic text retains Unicode café 😀 and exact line endings. ".repeat(
+                6,
+              ),
+          ).join("\n"),
+      );
+      await page
+        .locator(".start-screen input[type=file]")
+        .setInputFiles(filename);
+      const plain = page.locator(".cm-content[contenteditable=true]");
+      await expect(plain).toBeVisible();
+      await plain.focus();
+      await page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
+      );
+      await page.keyboard.type("Final text. ");
+      await expect(page.locator(".save-status")).toHaveText("Saved");
+      await page.keyboard.press("ControlOrMeta+f");
+      const panel = page.getByRole("complementary", {
+        name: "Find and replace",
+      });
+      await panel
+        .getByLabel("Find text", { exact: true })
+        .fill("ALDER_SOAK_TXT");
+      await expect(panel.getByRole("status")).toHaveText("1 matches");
+      await panel
+        .getByRole("button", { name: "Close find and replace", exact: true })
+        .click();
+      await plain.focus();
+      await page.keyboard.press("ControlOrMeta+w");
+      await expect(page.locator(".start-screen")).toBeVisible();
+    }
     const closed = await sample(`closed-${cycle}`),
       initial = report.samples[0];
     const warmed = report.samples.find((value) => value.name === "closed-0");
@@ -304,10 +456,12 @@ try {
     expect(closed.jsEventListeners).toBeLessThanOrEqual(
       warmed.jsEventListeners + 5,
     );
-    if (interval && cycle < cycles - 1)
+    if (interval && cycle < cycles - 1) {
       await page.waitForTimeout(
         Math.max(0, interval - (Date.now() - cycleStarted)),
       );
+      await sample(`idle-${cycle}`);
+    }
     console.log(
       JSON.stringify({
         cycle,
