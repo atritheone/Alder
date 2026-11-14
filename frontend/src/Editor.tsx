@@ -2476,6 +2476,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         structureMarks(
           () => !blocked.current && !latest.current.rawMode,
           () => latest.current.showStructure,
+          () => measuredPages.current,
         ),
         structureGuides(() => ({
           enabled: !blocked.current && !latest.current.rawMode && latest.current.showStructure,

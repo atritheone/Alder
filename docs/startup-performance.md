@@ -100,6 +100,38 @@ pinned core runtime/fonts; this validates opening, not optional models or a
 complete end-user installation. Linux/Mac never build the Windows native module.
 Advanced proofreading remains experimental; Intel Mac remains rules-only.
 
-Native Linux/Mac evidence and packaged Windows rollout results are recorded after
-the corresponding qualification runs. The existing installation is updated only
-through the managed updater, after a complete verified external data backup.
+## Native platform evidence
+
+[Native opening qualification, revision b9c08e2](https://github.com/atritheone/Alder/actions/runs/43560016210)
+passed on all four targets. Each job built natively, ran only the focused backend
+and editor checks above, and exercised five starts plus the six TXT/DOCX inputs.
+Both Mac architectures also passed normal window close, fresh backend startup
+on activation, and saved TXT-session restoration.
+
+| Hosted native runner | Shell median | Core median | 1 MiB TXT open | Large DOCX open |
+| --- | ---: | ---: | ---: | ---: |
+| Windows x64 | 0.242 s | 0.659 s | 1.480 s | 1.055 s |
+| Linux x64 | 0.494 s | 0.899 s | 1.892 s | 1.334 s |
+| Mac ARM64 | 0.476 s | 0.783 s | 1.517 s | 0.897 s |
+| Mac Intel | 1.143 s | 2.064 s | 5.609 s | 3.082 s |
+
+These shared hosted machines have different hardware and cache histories; the
+numbers are qualification results, not a controlled OS speed comparison. The
+slowest first core start was 3.785 s, below the 5 s CI median budget. Intel Mac
+remains slower and experimental; this work does not establish full optional
+feature acceptance there. Native Linux under WSLg also passed ten starts and all
+six files locally: 0.241 s shell and 0.458 s core medians, 1.090 s TXT open and
+0.843 s large DOCX open.
+
+A separate Windows size-boundary check opened a 5 MiB TXT with exact text and
+editing preserved. The 10 MiB many-paragraph and 30 MiB inputs exceeded the
+existing 40 MB structured-project limit and were clearly refused without creating
+a workspace. Import byte size alone is not the project storage limit. This change
+retains those bounds. That check overlapped resource provisioning, so its timings
+are not used as the controlled performance comparison.
+
+The managed Windows rollout uses the published revision above and the existing
+installation root. The complete local data and Chromium preferences/native file
+bindings were copied outside the repository/app/cache, with matching file hashes,
+before activation. Packaged rollout measurements are recorded after installed
+verification completes.

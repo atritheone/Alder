@@ -3,7 +3,8 @@ import { Plugin } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 
 /** Visual overlays only: never replace text or add characters to the document. */
-export function structureMarks(enabled: () => boolean, whitespace = enabled) {
+export function structureMarks(enabled: () => boolean, whitespace = enabled,
+  physicalPages?: () => readonly { from: number; to: number }[]) {
   type Mark = { from: number; to?: number; symbol: string; kind: string };
   const blocks = new WeakMap<Node, Mark[]>();
   const identities = new WeakMap<Node, number>();
@@ -105,10 +106,14 @@ export function structureMarks(enabled: () => boolean, whitespace = enabled) {
         if (!enabled() || !whitespace() || !viewport) return;
         const bounds = viewport.getBoundingClientRect();
         if (!bounds.width || !bounds.height) return;
-        const elements = [...view.dom.children].filter(element => !element.classList.contains("ProseMirror-widget"));
-        if (elements.length !== view.state.doc.childCount) return;
+        const columns = view.dom.hasAttribute("data-column-layout");
+        const pages = columns ? physicalPages?.() : undefined;
+        const elements = columns
+          ? [...viewport.querySelectorAll(".page-sheets > .page-sheet")]
+          : [...view.dom.children].filter(element => !element.classList.contains("ProseMirror-widget"));
+        if (columns ? !pages?.length || elements.length !== pages.length : elements.length !== view.state.doc.childCount) return;
         const offsets: number[] = [];
-        view.state.doc.forEach((_node, pos) => offsets.push(pos));
+        if (!columns) view.state.doc.forEach((_node, pos) => offsets.push(pos));
         const boundary = (test: (element: Element) => boolean) => {
           let low = 0, high = elements.length;
           while (low < high) { const mid = (low + high) >>> 1; if (test(elements[mid])) low = mid + 1; else high = mid; }
@@ -116,11 +121,13 @@ export function structureMarks(enabled: () => boolean, whitespace = enabled) {
         };
         const first = boundary(element => element.getBoundingClientRect().bottom < bounds.top - 300);
         const last = boundary(element => element.getBoundingClientRect().top < bounds.bottom + 300);
-        let nextFrom = offsets[first] ?? view.state.doc.content.size;
-        let nextTo = offsets[last] ?? view.state.doc.content.size;
+        // Column text is projected out of vertical source order. Its physical
+        // sheets are monotonic and already carry the complete source ranges.
+        let nextFrom = (columns ? pages?.[first]?.from : offsets[first]) ?? view.state.doc.content.size;
+        let nextTo = (columns ? pages?.[last - 1]?.to : offsets[last]) ?? view.state.doc.content.size;
         // A very long paragraph/table must not expand the decoration budget to
         // the entire document. Hit testing locates the visible source window.
-        if (nextTo - nextFrom > 20000) {
+        if (!columns && nextTo - nextFrom > 20000) {
           const root = view.dom.getBoundingClientRect();
           const left = Math.max(root.left + 4, bounds.left + 24);
           const top = view.posAtCoords({ left, top: Math.max(root.top + 2, bounds.top + 8) })?.pos;

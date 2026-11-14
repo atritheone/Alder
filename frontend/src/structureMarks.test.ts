@@ -67,3 +67,29 @@ it("bounds whitespace overlays in long documents without changing paragraph mark
     view.destroy(); host.remove();
   }
 });
+
+it("uses physical page ranges for projected columns instead of source DOM order", async () => {
+  const viewport = document.body.appendChild(document.createElement("div"));
+  viewport.className = "editor-scroll";
+  viewport.getBoundingClientRect = () => ({ top: 0, bottom: 600, width: 800, height: 600 } as DOMRect);
+  const sheets = viewport.appendChild(document.createElement("div"));
+  sheets.className = "page-sheets";
+  for (const [top, bottom] of [[-2000, -1000], [-1000, -400], [0, 600]]) {
+    const sheet = sheets.appendChild(document.createElement("div"));
+    sheet.className = "page-sheet";
+    sheet.getBoundingClientRect = () => ({ top, bottom } as DOMRect);
+  }
+  const host = viewport.appendChild(document.createElement("div"));
+  const doc = schema.node("doc", null, Array.from({ length: 20 }, () =>
+    schema.node("paragraph", null, schema.text("word ".repeat(100)))));
+  const view = new EditorView(host, { state: EditorState.create({ doc,
+    plugins: [structureMarks(() => true, () => true,
+      () => [{from:0,to:3000},{from:3000,to:8000},{from:8000,to:doc.content.size}])] }) });
+  try {
+    view.dom.setAttribute("data-column-layout", "");
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(view.dom.children[18].querySelectorAll(".structure-whitespace").length).toBeGreaterThan(0);
+    expect(view.dom.children[0].querySelectorAll(".structure-whitespace")).toHaveLength(0);
+    expect(view.state.doc).toBe(doc);
+  } finally { view.destroy(); viewport.remove(); }
+});
