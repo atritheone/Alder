@@ -3,3 +3,7 @@
 ## todo
 
 merge chatterbox narration rendering into alder.
+
+add taskbar right click options.
+
+clean multiple tab closing.
