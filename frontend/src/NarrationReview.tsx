@@ -16,6 +16,12 @@ import type {
   SpeechReviewRequest,
 } from "./types";
 import { duration, mediaUrl } from "./api";
+import {
+  createWavePeaks,
+  addPcmWaveform,
+  finishWavePeaks,
+  yieldWaveform,
+} from "./pcmWaveform";
 import "./narration-review.css";
 
 type Props = {
@@ -31,7 +37,7 @@ const ReviewDrafts = createContext<Map<
   { note: string; listened: boolean }
 > | null>(null);
 const waveformCache = new Map<string, Peaks>();
-const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 32 * 1024 * 1024;
 
 function checkLabel(check?: SpeechCheck) {
   if (!check) return "Not checked";
@@ -54,13 +60,13 @@ async function limitedAudio(url: string, signal: AbortSignal) {
   if (Number(response.headers.get("content-length") || 0) > MAX_AUDIO_BYTES) {
     await response.body?.cancel();
     throw new Error(
-      "This audio exceeds the 100 MB waveform limit. Use a shorter narration or listen to its individual chunks.",
+      "This audio exceeds the 32 MB passage waveform limit. Use a shorter narration or listen to its individual chunks.",
     );
   }
   if (!response.body) {
     const buffer = await response.arrayBuffer();
     if (buffer.byteLength > MAX_AUDIO_BYTES)
-      throw new Error("This audio exceeds the 100 MB waveform limit.");
+      throw new Error("This audio exceeds the 32 MB passage waveform limit.");
     return buffer;
   }
   const reader = response.body.getReader(),
@@ -74,7 +80,7 @@ async function limitedAudio(url: string, signal: AbortSignal) {
       if (size > MAX_AUDIO_BYTES) {
         await reader.cancel();
         throw new Error(
-          "This audio exceeds the 100 MB waveform limit. Use a shorter narration or listen to its individual chunks.",
+          "This audio exceeds the 32 MB passage waveform limit. Use a shorter narration or listen to its individual chunks.",
         );
       }
       parts.push(value);
@@ -93,63 +99,96 @@ async function limitedAudio(url: string, signal: AbortSignal) {
 
 function Waveform({
   url,
+  chunks,
+  seconds,
   currentTime = 0,
   onSeek,
 }: {
   url: string;
+  chunks: readonly SpeechChunk[];
+  seconds?: number;
   currentTime?: number;
   onSeek: (seconds: number) => void;
 }) {
-  const [peaks, setPeaks] = useState<Peaks | null>(
-      () => waveformCache.get(url) || null,
-    ),
+  const [peaks, setPeaks] = useState<Peaks | null>(null),
     [error, setError] = useState("");
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const cached = waveformCache.get(url);
-    if (cached) {
-      setPeaks(cached);
-      return;
-    }
     const abort = new AbortController();
     let disposed = false;
-    let context: AudioContext | undefined;
     setPeaks(null);
     setError("");
     void (async () => {
       try {
-        const bytes = await limitedAudio(url, abort.signal);
-        if (disposed) return;
-        context = new AudioContext();
-        const decoded = await context.decodeAudioData(bytes);
-        if (disposed) return;
-        const resolution = 1000,
-          minimum = new Float32Array(resolution),
-          maximum = new Float32Array(resolution);
-        for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
-          const values = decoded.getChannelData(channel);
-          for (let pixel = 0; pixel < resolution; pixel++) {
-            const start = Math.floor((pixel * values.length) / resolution),
-              end = Math.max(
-                start + 1,
-                Math.floor(((pixel + 1) * values.length) / resolution),
-              );
-            let low = minimum[pixel],
-              high = maximum[pixel];
-            for (
-              let frame = start;
-              frame < Math.min(end, values.length);
-              frame++
-            ) {
-              low = Math.min(low, values[frame]);
-              high = Math.max(high, values[frame]);
-            }
-            minimum[pixel] = low;
-            maximum[pixel] = high;
-          }
+        if (
+          !chunks.length ||
+          chunks.some(
+            (c) =>
+              !c.audioUrl ||
+              !Number.isFinite(c.startSeconds) ||
+              !Number.isFinite(c.seconds) ||
+              c.playbackEligible === false,
+          )
+        )
+          throw Error(
+            "Reopen the recording to load its verified waveform passages.",
+          );
+        const total =
+          seconds ||
+          chunks.reduce(
+            (end, c) => Math.max(end, c.startSeconds! + c.seconds!),
+            0,
+          );
+        const hashes = chunks.map((c) =>
+          c.manualReview?.accepted && !c.manualReview.superseded
+            ? c.manualReview.audioHash
+            : c.qa?.audioHash,
+        );
+        const identity = JSON.stringify([
+          url,
+          total,
+          chunks.map((c, i) => [
+            c.id,
+            c.startSeconds,
+            c.seconds,
+            c.selectedAttempt,
+            c.selectedSeed,
+            hashes[i],
+          ]),
+        ]);
+        const key = Array.from(
+          new Uint8Array(
+            await crypto.subtle.digest(
+              "SHA-256",
+              new TextEncoder().encode(identity),
+            ),
+          ),
+          (b) => b.toString(16).padStart(2, "0"),
+        ).join("");
+        abort.signal.throwIfAborted();
+        const cacheable = hashes.every(
+          (hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash),
+        );
+        const cached = cacheable ? waveformCache.get(key) : undefined;
+        if (cached) {
+          if (!disposed) setPeaks(cached);
+          return;
         }
-        const result = { minimum, maximum, seconds: decoded.duration };
-        waveformCache.set(url, result);
+        const result = createWavePeaks(total);
+        for (const chunk of chunks) {
+          const bytes = await limitedAudio(chunk.audioUrl!, abort.signal);
+          await addPcmWaveform(
+            bytes,
+            result,
+            chunk.startSeconds!,
+            chunk.seconds!,
+            abort.signal,
+            () => yieldWaveform(abort.signal),
+          );
+        }
+        abort.signal.throwIfAborted();
+        finishWavePeaks(result);
+        if (cacheable) waveformCache.set(key, result);
         while (waveformCache.size > 12) {
           const oldest = waveformCache.keys().next().value;
           if (oldest) waveformCache.delete(oldest);
@@ -161,16 +200,13 @@ function Waveform({
           setError(
             failure instanceof Error ? failure.message : String(failure),
           );
-      } finally {
-        if (context) await context.close().catch(() => {});
       }
     })();
     return () => {
       disposed = true;
       abort.abort();
-      if (context) void context.close().catch(() => {});
     };
-  }, [url]);
+  }, [url, chunks, seconds]);
   useEffect(() => {
     const element = canvas.current,
       context = element?.getContext("2d");
@@ -661,6 +697,8 @@ export default function NarrationReview({
                 {showWaveform && (
                   <Waveform
                     url={job.audioUrl}
+                    chunks={job.chunks}
+                    seconds={job.seconds}
                     currentTime={currentTime}
                     onSeek={onSeek}
                   />

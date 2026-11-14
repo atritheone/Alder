@@ -38,11 +38,13 @@ jobs:
         run: python scripts/developer/prepare-opening-runtime.py --native-audio --state "$RUNNER_TEMP/alder-opening-core"
       - name: Build for the native OS
         run: npm run build
-      - name: Identify production changes for repeated measurements
+      - name: Identify authoring changes for repeated measurements
         id: changes
         shell: bash
         run: |
-          if git diff --quiet HEAD^ HEAD -- frontend electron backend/alder; then
+          # Narration display has its own PCM/DOM checks. Avoid repeating sixty
+          # import/edit sequences for changes limited to that conditional UI.
+          if git diff --quiet HEAD^ HEAD -- frontend electron backend/alder ':(exclude)frontend/src/NarrationReview*' ':(exclude)frontend/src/pcmWaveform*' ':(exclude)frontend/src/types.ts'; then
             echo 'application=false' >> "$GITHUB_OUTPUT"
           else
             echo 'application=true' >> "$GITHUB_OUTPUT"
@@ -63,8 +65,11 @@ jobs:
         continue-on-error: true
         shell: bash
         run: '"$PYTHON" -B scripts/verify-system-voices.py --ffmpeg "$FFMPEG" --output "$RUNNER_TEMP/native-voice-results"'
+      - name: Check bounded waveform projection on actual native PCM
+        shell: bash
+        run: node scripts/developer/test-native-waveform.mjs "$RUNNER_TEMP/native-voice-results"
       - name: Check bounded editor decorations and typing
-        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/preparedEditorDocument.test.ts frontend/src/editorSessions.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/NarrationReview.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
+        run: npm exec vitest run -- frontend/src/plainTextChanges.test.ts frontend/src/operatingCaches.test.ts frontend/src/preparedEditorDocument.test.ts frontend/src/editorSessions.test.ts frontend/src/projectTimeline.test.ts frontend/src/plainTextTools.test.ts frontend/src/plainTextMetadata.test.ts frontend/src/speechTransport.test.ts frontend/src/NarrationReview.test.ts frontend/src/pcmWaveform.test.ts frontend/src/runPatternSearch.test.ts frontend/src/patternSearch.test.ts frontend/src/apiCancellation.test.ts frontend/src/publicationCancellation.test.ts frontend/src/sharedWork.test.ts frontend/src/voicePreparation.test.ts frontend/src/documentExports.test.ts frontend/src/slicedJob.test.ts frontend/src/hyphenationLayoutEpoch.test.ts frontend/src/saveChanges.test.ts frontend/src/useProject.test.ts --reporter=dot
       - name: Native startup and TXT/DOCX opening
         if: steps.changes.outputs.application == 'true' || github.event_name == 'workflow_dispatch'
         shell: bash

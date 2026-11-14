@@ -421,9 +421,23 @@ try {
               ),
           ).join("\n"),
       );
-      await page
-        .locator(".start-screen input[type=file]")
-        .setInputFiles(filename);
+      // CDP pins file-input ancestors in the inspector. Use the actual File
+      // import event without adding debugger roots to retained-DOM measurements.
+      await page.evaluate(
+        ({ name, text }) => {
+          const input = document.querySelector(
+            ".start-screen input[type=file]",
+          );
+          const transfer = new DataTransfer();
+          transfer.items.add(new File([text], name, { type: "text/plain" }));
+          input.files = transfer.files;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        },
+        {
+          name: path.basename(filename),
+          text: fs.readFileSync(filename, "utf8"),
+        },
+      );
       const plain = page.locator(".cm-content[contenteditable=true]");
       await expect(plain).toBeVisible();
       await plain.focus();

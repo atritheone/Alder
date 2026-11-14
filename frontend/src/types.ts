@@ -262,6 +262,7 @@ export type SpeechDifference = {
   heardTokenEnd?: number;
 };
 export type SpeechCheck = {
+  audioHash?: string;
   status: string;
   matched?: boolean;
   expected?: string;
