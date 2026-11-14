@@ -25,7 +25,7 @@ for(const filename of ['Small UTF8.txt','Large 1MiB.txt','Large 1000 paragraphs.
   await page.evaluate(()=>window.alder.ready());
   await app.evaluate(()=>{const original=globalThis.fetch;globalThis.unsolicitedPrepare=0;globalThis.fetch=(...args)=>{if(String(args[0]).endsWith('/api/speech/prepare'))globalThis.unsolicitedPrepare++;return original(...args);};});
   await page.locator('.start-screen input[type=file]').setInputFiles(path.join(output,'fixtures',filename));
-  const editor=page.locator('[contenteditable=true]').filter({hasText:'ALDER_OPEN_BEGIN'}).first();await expect(editor).toBeVisible();
+  const editor=page.locator('[contenteditable=true]').filter({hasText:'ALDER_OPEN_BEGIN'}).first();await editor.waitFor({state:'visible',timeout:60000});
   await page.waitForTimeout(Number(values.settle));
   const snapshot=()=>page.evaluate(async()=>{const p=await window.alder.request('GET',`/api/projects/${localStorage.getItem('alder.project')}`);return p.book.chapters.map(c=>c.text).join('\n');});
   const before=await snapshot();await editor.focus();await page.keyboard.press(process.platform==='darwin'?'Meta+ArrowUp':'Control+Home');
