@@ -1,4 +1,5 @@
 import { WindowsMenu } from "./windows-menu";
+import { configureHiddenTests, hiddenTestMode } from "./hiddenTests";
 import { TextWorkspaces } from "./textWorkspaces";
 import { openPrintProof } from "./printProof";
 import { renderPublicationPdf } from "./publication";
@@ -32,6 +33,7 @@ import { pathToFileURL } from "node:url";
 import { executable, dataDirectory, platformMenu } from "./platform";
 import { mark, performanceReport } from "./performance";
 const cancellable = new RequestCancellation();
+configureHiddenTests();
 
 app.setAppUserModelId("org.alder.language");
 if (process.platform === "linux")
@@ -118,7 +120,8 @@ function sizeWindow(mode: "start" | "workspace", width = 480, height = 342) {
       ),
     ),
   });
-  if (workspace) window.maximize();
+  // Maximizing can show a hidden HWND. Test instances must stay off the desktop.
+  if (workspace && !hiddenTestMode) window.maximize();
 }
 function installMenu(menu: Menu, background: string) {
   applicationMenu = menu;
@@ -409,23 +412,30 @@ function registerIPC() {
                 id: string;
                 label: string;
                 checked?: boolean;
+                enabled?: boolean;
+                checkType?: "checkbox" | "radio";
                 submenu?: unknown[];
               };
               if (
                 typeof item.label !== "string" ||
                 item.label.length > 120 ||
                 typeof item.id !== "string" ||
-                !/^native:[A-Za-z]+:\d+(?::\d+){0,3}$/.test(item.id) ||
+                !/^native:(?:[A-Za-z]+:\d+(?::\d+){0,3}|authoring:[a-z0-9.-]{1,100})$/.test(item.id) ||
                 (item.checked !== undefined &&
                   typeof item.checked !== "boolean")
               )
                 throw new Error("Invalid menu item");
+              if (item.enabled !== undefined && typeof item.enabled !== "boolean")
+                throw new Error("Invalid menu availability");
+              if (item.checkType !== undefined && !["checkbox","radio"].includes(item.checkType))
+                throw new Error("Invalid menu check type");
               if (item.submenu !== undefined) {
                 if (!Array.isArray(item.submenu) || item.submenu.length > 60)
                   throw new Error("Invalid submenu");
                 return {
                   label: item.label,
                   submenu: buildItems(item.submenu, depth + 1),
+                  enabled: item.enabled,
                 };
               }
               const accelerator = item.label.startsWith("New Project")
@@ -447,8 +457,9 @@ function registerIPC() {
                               : undefined;
               return {
                 label: item.label,
-                type: item.checked === undefined ? "normal" : "radio",
+                type: item.checked === undefined ? "normal" : item.checkType || "radio",
                 checked: item.checked,
+                enabled: item.enabled,
                 accelerator,
                 click: () => command(item.id),
               };
@@ -1075,9 +1086,7 @@ async function createWindow() {
     minHeight: 300,
     backgroundColor: "#e1e1e1",
     title: "Alder",
-    show:
-      !process.argv.includes("--smoke-test") &&
-      !process.argv.includes("--headless-test"),
+    show: !hiddenTestMode,
     autoHideMenuBar: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -1163,7 +1172,7 @@ app.whenReady().then(async () => {
     await Promise.all([startBackend(), createWindow()]);
   } catch (e) {
     if (quitting || closeInFlight) return;
-    if (process.argv.includes("--smoke-test")) {
+    if (hiddenTestMode) {
       console.error(e);
       app.exit(1);
     } else {

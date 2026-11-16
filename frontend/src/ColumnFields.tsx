@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import type { PageSettings } from "./pageGeometry";
+import { pageGeometry, type PageSettings } from "./pageGeometry";
 import { validColumns, type Columns } from "./columns";
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 
 /** Shared document/section controls. Incomplete numeric input stays local. */
 export default function ColumnFields({
@@ -13,8 +14,10 @@ export default function ColumnFields({
   rowClass?: string;
 }) {
   const value = page.columns || { count: 1, gapMm: 8 };
-  const [gap, setGap] = useState(String(value.gapMm));
-  useEffect(() => setGap(String(value.gapMm)), [value.gapMm]);
+  const [unit] = useLayoutUnit();
+  const geometry = pageGeometry(page);
+  const maximumGap = value.count>1 ? Math.max(0,Math.min(100,
+    (geometry.width-geometry.margins.left-geometry.margins.right-value.count*20)/(value.count-1))) : 100;
   return (
     <>
       <label className={rowClass}>
@@ -40,21 +43,18 @@ export default function ColumnFields({
       {value.count > 1 && (
         <>
           <label className={rowClass}>
-            Gap (mm)
-            <input
-              aria-label="Column gap"
-              type="number"
+            Gap ({unit})
+            <MeasurementInput
+              label="Column gap"
               min={0}
-              max={100}
-              step="any"
-              value={gap}
-              onChange={(e) => {
-                setGap(e.target.value);
-                const next = { ...value, gapMm: e.currentTarget.valueAsNumber };
-                if (e.currentTarget.validity.valid && validColumns(next, page))
+              max={maximumGap*72/25.4}
+              value={value.gapMm*72/25.4}
+              onChange={points => {
+                if(points == null)return;
+                const next = { ...value, gapMm: points*25.4/72 };
+                if (validColumns(next, page))
                   onChange(next);
               }}
-              onBlur={() => setGap(String(value.gapMm))}
             />
           </label>
           <label className={rowClass}>

@@ -54,6 +54,9 @@ class Writer:
             if tabs is not None:
                 stops = element(props, 'style:tab-stops')
                 for stop in tabs:
+                    if stop['align'] == 'bar':
+                        self.warn('ODT omits bar tabs; retain DOCX or Alder to preserve printed paragraph bars.')
+                        continue
                     attrs = {'style:position':f"{stop['position']:g}pt", 'style:type':'char' if stop['align']=='decimal' else stop['align']}
                     if stop['align']=='decimal': attrs['style:char']='.'
                     if stop['leader'] != 'none': attrs.update({'style:leader-style':'solid', 'style:leader-text':{'dot':'.','dash':'-','line':'_'}[stop['leader']]})
@@ -214,6 +217,7 @@ class Writer:
                 for child in cell.get('content', []): self.block(td, child, depth+1)
 
     def finish(self, path, sections):
+        if self.settings.get('defaultTabStopPt',36)!=36:self.warn('ODT uses default tab spacing; retain DOCX or Alder to preserve custom default spacing.')
         from .page_geometry import page_geometry
         from .running_matter import legacy_running_matter
         settings = self.settings

@@ -68,7 +68,7 @@ export function layoutParagraphPaint(
         .filter(
           (style) =>
             style.kind === "paragraph" &&
-            paragraphAppearanceKeys.some((key) => style[key] != null),
+            (paragraphAppearanceKeys.some((key) => style[key] != null) || !!style.tabStops?.some(stop=>stop.align === "bar")),
         )
         .map(
           (style) =>
@@ -115,6 +115,7 @@ export function layoutParagraphPaint(
         Object.fromEntries(
           [
             "background-color",
+            "background-image",
             "outline-color",
             ...["top", "right", "bottom", "left"].map(
               (edge) => `border-${edge}-color`,
@@ -174,6 +175,8 @@ export function layoutParagraphPaint(
           paint.style.cssText = `position:absolute;left:${(rect.left - origin.left) / scale + shift}px;top:${top}px;width:${width}px;height:${bottom - top}px;clip-path:inset(${Math.max(0, start)}px 0 ${Math.max(0, bottom - top - end)}px 0);pointer-events:none`;
           for (const property of [
             "background-color",
+            "background-image",
+            "color",
             "outline-color",
             "outline-style",
             "outline-width",
@@ -264,7 +267,7 @@ export function layoutParagraphPaint(
     clips.set(element, clip);
     updated.push(element);
     rules.push(
-      `[data-paragraph-paint-scope="${sheet.dataset.paragraphPaint}"] > ${path.join(" > ")}{clip-path:${clip};${projected ? "background-color:transparent!important;outline-color:transparent!important;" : ""}${projected && (cell || element.matches("blockquote")) ? "border-color:transparent!important;" : ""}}`,
+      `[data-paragraph-paint-scope="${sheet.dataset.paragraphPaint}"] > ${path.join(" > ")}{clip-path:${clip};${projected ? "background-color:transparent!important;background-image:none!important;outline-color:transparent!important;" : ""}${projected && (cell || element.matches("blockquote")) ? "border-color:transparent!important;" : ""}}`,
     );
   }
   if (sheet && sheet.textContent !== rules.join("\n"))
@@ -303,6 +306,7 @@ export function copyParagraphPaint(source: Element, target: HTMLElement) {
   if (clip) target.style.clipPath = clip;
   if (projectedElements.has(source)) {
     target.style.backgroundColor = "transparent";
+    target.style.backgroundImage = "none";
     target.style.outlineColor = "transparent";
     if (source.matches("td,th,blockquote"))
       target.style.borderColor = "transparent";

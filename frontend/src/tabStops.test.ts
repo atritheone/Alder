@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { nextTab, validTabStops, cssTabStops, tabStopsCSS } from "./tabStops";
 describe("paragraph tab stops", () => {
+  it("prints bars without consuming a tab or changing default text stops",()=>{
+    const bars=[{position:144,align:"bar" as const,leader:"none" as const}];
+    expect(validTabStops(bars)).toBe(true);
+    expect(nextTab(bars,10,20,8)).toMatchObject({position:36,align:"left",gap:26});
+    expect(nextTab(bars,10,20,8,48).position).toBe(48);
+    expect(validTabStops([{...bars[0],leader:"dot"}])).toBe(false);
+  });
   it("aligns following text and resumes half-inch defaults after custom stops", () => {
     const stops = [
       { position: 72, align: "right" as const, leader: "dot" as const },

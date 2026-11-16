@@ -517,6 +517,8 @@ export default forwardRef<EditorHandle, Props>(
       setReadingRange: (range) =>
         view.current?.dispatch({ effects: reading.of(range) }),
       applyProofreading,
+      canRunMenuCommand: () => false,
+      menuCommandChecked: () => undefined,
       runMenuCommand: (label) => {
         const v = view.current;
         if (!v) return false;

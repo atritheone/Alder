@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { schema } from "./Editor";
-import { mirroredPageLayout, mirroredPlacement } from "./mirroredMargins";
+import { mirroredPageLayout, mirroredPlacement, isMirroredPage } from "./mirroredMargins";
 import { sectionLayout } from "./sectionLayout";
 import type { FlowPage } from "./pageFlow";
 
@@ -14,6 +14,13 @@ const layout = {
   mirrorMargins: true,
 };
 describe("mirrored editable page placement", () => {
+  it("retains inside/outside identity when the current margin widths are equal",()=>{
+    const equal={...layout,margins:{...layout.margins,left:40,right:40}};
+    expect(isMirroredPage(equal,0)).toBe(false);
+    expect(isMirroredPage(equal,1)).toBe(true);
+    expect(isMirroredPage({...equal,firstPageNumber:2},0)).toBe(true);
+    expect(isMirroredPage({...equal,mirrorMargins:false},1)).toBe(false);
+  });
   it("uses logical page parity and retains mirror behaviour in sections", () => {
     expect(mirroredPageLayout(layout, 0).margins?.left).toBe(120);
     expect(mirroredPageLayout(layout, 1).margins?.left).toBe(40);

@@ -15,6 +15,8 @@ import {
 } from "./runningMatter";
 import type { Project } from "./types";
 import { prepareRunningImages } from "./runningImages";
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 
 export default function RunningMatterDialog({
   project,
@@ -37,6 +39,7 @@ export default function RunningMatterDialog({
   onClose: () => void;
   onCollect: (file: File) => Promise<import("./types").Asset>;
 }) {
+  const [unit] = useLayoutUnit();
   const dialog = useRef<HTMLDialogElement>(null),
     [value, setValue] = useState<RunningMatter>(() => structuredClone(initial)),
     [part, setPart] = useState<StoryPart>(initialPart),
@@ -144,23 +147,19 @@ export default function RunningMatterDialog({
               </option>
             </select>
             <label>
-              Distance from edge (mm)
-              <input
-                type="number"
-                aria-label="Header/footer distance"
+              Distance from edge ({unit})
+              <MeasurementInput
+                label="Header/footer distance"
                 min={0}
-                max={100}
-                step="any"
-                required
-                value={
+                max={100*72/25.4}
+                value={(
                   resolved[
                     part === "header" ? "headerDistanceMm" : "footerDistanceMm"
-                  ] ?? 10
-                }
-                onChange={(e) =>
+                  ] ?? 10)*72/25.4}
+                onChange={points => points != null &&
                   setValue({
                     ...value,
-                    [part + "DistanceMm"]: Number(e.target.value),
+                    [part + "DistanceMm"]: points*25.4/72,
                   })
                 }
               />

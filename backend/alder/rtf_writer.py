@@ -109,6 +109,9 @@ class Writer:
             if lcid:output+='\\lang'+str(lcid)
         if node['type']=='heading':output+='\\outlinelevel'+str(attrs.get('level',1)-1)
         for stop in attrs.get('tabStops') or []:
+            if stop['align'] == 'bar':
+                output+='\\tb'+str(round(stop['position']*20))
+                continue
             output+= {'left':'','right':'\\tqr','center':'\\tqc','decimal':'\\tqdec'}[stop['align']]
             output+= {'none':'','dot':'\\tldot','dash':'\\tlhyph','line':'\\tlul'}[stop['leader']]
             output+='\\tx'+str(round(stop['position']*20))
@@ -182,6 +185,7 @@ class Writer:
             if self.settings.get(key):output+='{\\'+key+' '+escape(self.settings[key])+'}'
         output+='}\n'+''.join('\\'+control+str(round(value*1440/25.4)) for control,value in [('paperw',geometry['width']),('paperh',geometry['height']),*[('marg'+edge[0],value) for edge,value in geometry['margins'].items()]])+'\n'
         note_type=2 if len(self.note_kinds)>1 else 1 if 'endnote' in self.note_kinds else 0
+        output+='\\deftab'+str(round(self.settings.get('defaultTabStopPt',36)*20))+'\n'
         output+='\\fet'+str(note_type)+'\\ftnbj\\aenddoc\\ftnnar\\aftnnar\\ftnstart1\\aftnstart1\n'
         output+=''.join(headers)+''.join(body)+'}'
         path.write_text(output,encoding='ascii')

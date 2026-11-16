@@ -6,6 +6,8 @@ import {
   type TableAppearance,
 } from "./tableFormatting";
 import "./word-processing.css";
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 
 export default function TableDialog({
   initial,
@@ -17,6 +19,7 @@ export default function TableDialog({
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [unit] = useLayoutUnit();
   const [changes, setChanges] = useState<TableAppearance>({
     table: {},
     cells: {},
@@ -117,7 +120,10 @@ export default function TableDialog({
             </select>
           </label>
           {(["Top", "Bottom", "Left", "Right"] as const).map((side) =>
-            number("cells", `padding${side}`, `${side} padding (pt)`, 144),
+            <label key={side}>{side} padding ({unit})
+              <MeasurementInput label={`${side} padding`} value={value("cells", `padding${side}`) ?? null}
+                nullable min={0} max={144} onChange={v=>change("cells",`padding${side}`,v)} />
+            </label>,
           )}
           {number("cells", "borderWidth", "Border width (pt)", 12)}
           {(
@@ -167,35 +173,15 @@ export default function TableDialog({
               <option value="true">Allow across pages</option>
             </select>
           </label>
-          {number("rows", "minHeight", "Minimum row height (pt)", 1440)}
+          <label>Minimum row height ({unit})
+            <MeasurementInput label="Minimum row height" value={value("rows","minHeight") ?? null}
+              nullable min={0} max={1440} onChange={v=>change("rows","minHeight",v)} />
+          </label>
           <label>
-            Column width (mm)
-            <input
-              aria-label="Column width (mm)"
-              type="number"
-              min={6.62}
-              max={2645.84}
-              step="any"
-              placeholder="Unchanged"
-              defaultValue={
-                initial.columnWidth
-                  ? Math.max(
-                      6.62,
-                      Math.round(((initial.columnWidth * 25.4) / 96) * 100) /
-                        100,
-                    )
-                  : ""
-              }
-              onChange={(event) =>
-                setChanges((previous) => ({
-                  ...previous,
-                  columnWidth:
-                    event.target.value === ""
-                      ? undefined
-                      : Math.round((Number(event.target.value) * 96) / 25.4),
-                }))
-              }
-            />
+            Column width ({unit})
+            <MeasurementInput label="Column width" min={18.75} max={7500} nullable
+              value={(changes.columnWidth ?? initial.columnWidth) != null ? (changes.columnWidth ?? initial.columnWidth)!*.75 : null}
+              onChange={v=>setChanges(previous=>({...previous,columnWidth:v==null?undefined:v/.75}))} />
           </label>
           <small>
             Changes apply to the selected cells, rows and columns. Row height

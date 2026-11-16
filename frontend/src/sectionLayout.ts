@@ -114,16 +114,18 @@ export function validSection(value: unknown): value is SectionSettings {
 }
 export function settingsForLayout(layout: PageLayout): PageSettings {
   const mm = (value: number) => Number(((value * 25.4) / 96).toPrecision(12)),
-    margins = pageInsets(layout);
+    margins = pageInsets(layout), landscape = layout.width > layout.height;
   return {
     pageSize: "Custom",
-    orientation: "portrait",
-    pageWidthMm: mm(layout.width),
-    pageHeightMm: mm(layout.height),
+    orientation: landscape ? "landscape" : "portrait",
+    pageWidthMm: mm(landscape ? layout.height : layout.width),
+    pageHeightMm: mm(landscape ? layout.width : layout.height),
     marginTopMm: mm(margins.top),
     marginRightMm: mm(margins.right),
     marginBottomMm: mm(margins.bottom),
-    marginLeftMm: mm(margins.left),
+    marginLeftMm: mm(margins.left - (layout.gutter || 0)),
+    ...(layout.gutter ? {gutterMm: mm(layout.gutter)} : {}),
+    ...(layout.mirrorMargins ? {mirrorMargins: true} : {}),
     ...(layout.columns ? { columns: layout.columns } : {}),
     ...(layout.pageBorder !== undefined
       ? { pageBorder: layout.pageBorder }
@@ -143,6 +145,7 @@ export function sectionLayout(
   return {
     ...base,
     ...screenPageGeometry(page),
+    gutter: page.gutterMm ? page.gutterMm * 96 / 25.4 : undefined,
     columns: page.columns,
     pageBorder: page.pageBorder,
     watermark: page.watermark,

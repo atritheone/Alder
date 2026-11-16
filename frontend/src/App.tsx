@@ -14,7 +14,10 @@ import {
   type RunningMatter,
   type StoryPart,
 } from "./runningMatter";
+import CommandSearch from "./CommandSearch";
 import { useRuler } from "./ParagraphRuler";
+import { useVerticalRuler } from "./PageRulers";
+import { authoringCommand } from "./authoringCommands";
 import DocumentReader from "./DocumentReader";
 import { useSpeechTransport } from "./useSpeechTransport";
 import { useSpeechJob } from "./useSpeechJob";
@@ -286,6 +289,24 @@ function savedNumber(key: string, fallback: number, min: number, max: number) {
 }
 export default function App({ initialIntent }: { initialIntent?: StartupIntent } = {}) {
   const [ruler, toggleRuler] = useRuler();
+  const [verticalRuler, toggleVerticalRuler] = useVerticalRuler();
+  const [sandboxRuler, toggleSandboxRuler] = useRuler(false, "sandbox");
+  const [commandSearch, setCommandSearch] = useState(false);
+  useEffect(()=>{
+    const search=(event:KeyboardEvent)=>{
+      if(!event.defaultPrevented && (event.ctrlKey||event.metaKey) && event.shiftKey && !event.altKey &&
+        event.key.toLowerCase()==="p" && !document.querySelector("dialog[open]")){
+        event.preventDefault();setCommandSearch(true);
+      }
+    };
+    window.addEventListener("keydown",search);return()=>window.removeEventListener("keydown",search);
+  },[]);
+  const [, setAuthoringVersion] = useState(0);
+  useEffect(() => {
+    const changed = () => setAuthoringVersion(value => value + 1);
+    window.addEventListener("alder-authoring-state", changed);
+    return () => window.removeEventListener("alder-authoring-state", changed);
+  }, []);
   useTypingPointer();
   const {
     project,
@@ -913,10 +934,11 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
           projectId: string;
           sectionId?: string;
           part?: StoryPart;
+          variant?: import('./runningMatter').StoryVariant;
         }>
       ).detail;
       if (detail.projectId === project?.id)
-        openRunningMatter(detail.sectionId, detail.part);
+        openRunningMatter(detail.sectionId, detail.part, detail.variant);
     };
     const openSources=(event:Event)=>{const identity=(event as CustomEvent<{identity:string}>).detail.identity;const origin=bookEditor.current;if(project&&origin?.getIdentity()===identity)setSourcesDialog({origin,identity,initial:origin.citationSelection(),projectId:project.id});};
     window.addEventListener('alder-sources-dialog',openSources);
@@ -1162,13 +1184,14 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
     setCandidate("");
     setDevicePreview(null);
   };
-  const updateContent = (document: DocNode, text: string) =>
+  const updateContent = (document: DocNode, text: string, settings?: {defaultTabStopPt:number}) =>
     change((p) => {
       const c = p.clips.find((x) => x.id === selected);
       if (!c) return;
       const target = c.variants.find((v) => v.id === c.activeVariantId) || c;
       target.document = document;
       target.text = text;
+      if(settings)Object.assign(p.settings,settings);
     });
   const createClip = (
     trackId: string,
@@ -2327,10 +2350,15 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
     "Sources…": "Citations and bibliography…",
   };
   const documentCommands = (...labels: string[]): MenuEntry[] => labels.map(label => ({
+    commandId: authoringCommand(label).id,
+    keywords: authoringCommand(label).keywords,
     label: commandTitles[label] ?? label,
+      checked: targetEditor()?.menuCommandChecked(authoringCommand(label).id),
+      checkType: "checkbox",
+    disabled: !(writingFocus ? inChapter : detailOpen && detail === "Clip") || !targetEditor()?.canRunMenuCommand(authoringCommand(label).id),
     action: () => {
       const visible = writingFocus ? inChapter : detailOpen && detail === "Clip";
-      if (!visible || !targetEditor()?.runMenuCommand(label))
+      if (!visible || !targetEditor()?.runMenuCommand(authoringCommand(label).id))
         setHint("Place the cursor in formatted text where you want to use this command.");
     },
   }));
@@ -2370,6 +2398,7 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
       { label: "Print…", action: printDocument },
     ],
     Edit: [
+      { label: "Find command…", action: () => setCommandSearch(true) },
       { label: "Paste From Clipboard", action: pasteClipboard },
       {
         label: "Undo document change",
@@ -2392,21 +2421,10 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
       {
         label: "Format",
         submenu: [
+          { label: "Styles…", action: () => openPanel("styles") },
           ...documentCommands("Paragraph…", "Text colour…", "Copy formatting", "Paste formatting"),
-          ...[
-            ["strong", "Bold"],
-            ["em", "Italic"],
-            ["underline", "Underline"],
-            ["strike", "Strikethrough"],
-            ["subscript", "Subscript"],
-            ["superscript", "Superscript"],
-            ["highlight", "Highlight"],
-            ["clear", "Clear character formatting"],
-            ["resetParagraph", "Reset paragraph formatting"],
-          ].map(([name, label]) => ({
-            label,
-            action: () => targetEditor()?.format(name),
-          })),
+          ...documentCommands("Bold", "Italic", "Underline", "Strikethrough", "Subscript", "Superscript",
+            "Highlight", "Clear character formatting", "Reset paragraph formatting"),
         ],
       },
       { label: "Project dictionary…", action: () => openPanel("dictionary") },
@@ -2421,7 +2439,9 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
       ] },
     ],
     Layout: [
-      { label: "Page setup…", action: () => openSettings("Page Layout") },
+      ...(inChapter ? documentCommands("Page setup…") : [{ label: "Page setup…", action: () => openSettings("Page Layout") }]),
+      ...(inChapter ? [{label:"Page",submenu:["Margins…","Orientation…","Size…","Columns…"].map(label=>({...documentCommands("Page setup…")[0],label}))}] : []),
+      ...documentCommands("Tabs…"),
       ...documentCommands("Paragraph…", "Insert page break"),
       ...(inChapter ? documentCommands("Insert column break", "Insert section break…",
         "Section properties…", "Headers and footers…") : []),
@@ -2476,7 +2496,10 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
       },
     ],
     View: [
-      { label: ruler ? "Hide ruler" : "Show ruler", action: toggleRuler },
+      { label: "Rulers", submenu: [
+        {label: "Horizontal", checkType:"checkbox", checked: writingFocus ? ruler : sandboxRuler, action: writingFocus ? toggleRuler : toggleSandboxRuler},
+        {label: "Vertical", checkType:"checkbox", checked: verticalRuler, action: toggleVerticalRuler, disabled: !inChapter},
+      ] },
       {
         label: outlineOpen ? "Hide outline" : "Show outline",
         action: () => {
@@ -2584,6 +2607,7 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
           onClose={() => setVersionsOpen(false)}
         />
       )}
+      {commandSearch && <CommandSearch menus={menuItems} onClose={() => setCommandSearch(false)} />}
       {window.alder ? (
         <NativeMenu items={menuItems} onError={setError} />
       ) : (
@@ -3186,6 +3210,7 @@ export default function App({ initialIntent }: { initialIntent?: StartupIntent }
                     </label>
                   </aside>
                   <Editor
+                    defaultTabStopPt={project.settings.defaultTabStopPt}
                     language={clip.language || project.language}
                     key={project.id}
                     review={{

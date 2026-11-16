@@ -23,6 +23,11 @@ const raw = {
   ],
 };
 describe("section layout contract", () => {
+  it("retains the binding gutter separately when editing layout and does not inherit it into a new section",()=>{
+    const layout=sectionLayout(base,{pageSize:"A4",marginLeftMm:20,gutterMm:8,mirrorMargins:true});
+    expect(settingsForLayout(layout)).toMatchObject({marginLeftMm:20,gutterMm:8,mirrorMargins:true});
+    expect(sectionLayout(layout,{pageSize:"A4",marginMm:22}).gutter).toBeUndefined();
+  });
   it('retains continuous boundaries as structural metadata rather than authored wording',()=>{
     const attrs={kind:'continuous',page};
     expect(validSection(attrs)).toBe(true);
@@ -61,6 +66,7 @@ describe("section layout contract", () => {
   });
   it("round-trips effective geometry without applying orientation twice", () => {
     const landscape = sectionLayout(base, page);
+    expect(settingsForLayout(landscape).orientation).toBe("landscape");
     const copy = sectionLayout(base, settingsForLayout(landscape));
     expect(copy.width).toBeCloseTo(landscape.width, 8);
     expect(copy.height).toBeCloseTo(landscape.height, 8);

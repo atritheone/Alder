@@ -260,16 +260,17 @@
   min-width: 0;
 }
 .paragraph-ruler {
-  height: 28px;
-  flex: 0 0 28px;
+  height: 38px;
+  flex: 0 0 38px;
   position: relative;
-  overflow: hidden;
+  overflow: clip;
   font-size: 9px;
   user-select: none;
 }
 .ruler-track {
   position: absolute;
-  height: 100%;
+  height: 28px;
+  bottom: 0;
   border-bottom: 1px solid var(--border, #aaa);
 }
 .ruler-tick {
@@ -304,6 +305,9 @@
   border-left: 0;
   border-right: 2px solid currentColor;
 }
+.ruler-tab-bar > span { border-bottom: 0; border-left: 2px solid currentColor; width: 0; }
+.ProseMirror :is(p,h1,h2,h3,h4,h5,h6,pre):dir(ltr) { --alder-bar-paint: var(--alder-bars-ltr); }
+.ProseMirror :is(p,h1,h2,h3,h4,h5,h6,pre):dir(rtl) { --alder-bar-paint: var(--alder-bars-rtl); }
 .ruler-tab-center > span,
 .ruler-tab-decimal > span {
   border-left: 0;
@@ -334,6 +338,16 @@
   top: 1px;
   background: transparent;
 }
+.paragraph-ruler .ruler-indent-hangingIndent { top: 10px; clip-path: polygon(50% 0,100% 100%,0 100%); height: 7px; }
+.paragraph-ruler .ruler-indent-leftIndent { top: 19px; }
+.paragraph-ruler .ruler-indent-rightIndent { top: 19px; }
+.paragraph-ruler .ruler-indent-firstLineIndent { clip-path: polygon(0 0,100% 0,50% 100%); background: var(--accent); height: 7px; }
+.paragraph-ruler .ruler-indent[data-mixed], .paragraph-ruler .ruler-tab[data-mixed] { opacity: .45; }
+.paragraph-ruler .ruler-tab.is-removing { opacity: .25; }
+.ruler-tick-minor { height: 5px; }
+.ruler-default-tab { position:absolute;bottom:0;width:1px;height:3px;background:var(--accent);pointer-events:none; }
+.ruler-drag-guide { position: fixed; z-index: 80; pointer-events: none; border-left: 1px dashed var(--accent); }
+.ruler-drag-guide output { position: absolute; top: 3px; left: 5px; padding: 2px 5px; white-space: nowrap; background: var(--panel); color: var(--text); font-size: 11px; }
 
 .image-resize-overlay {
   position: fixed;
@@ -687,3 +701,41 @@
 .symbol-preview { font-size:1.8rem; min-width:4rem; text-align:center; }
 
 .shape-preview{height:150px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--panel);padding:12px}
+
+.ruler-tab-selector {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 5em;
+  height: 100%;
+  font: inherit;
+  color: var(--accent, #263e60);
+  background: var(--panel, #c6c6c6);
+  border: 0;
+  border-radius: 0;
+}
+.page-ruler-layer { position: fixed; inset: 0; pointer-events: none; z-index: 15; font-size: 9px; }
+.page-ruler-horizontal { position: absolute; overflow: clip; }
+.page-ruler-shade { position: absolute; background: #8883; pointer-events: none; }
+.page-ruler-horizontal .page-ruler-shade { height: 8px; }
+.page-ruler-vertical { position: absolute; width: 25px; overflow: clip; background: var(--panel); }
+.page-ruler-vertical-track { position: absolute; width: 100%; border-right: 1px solid var(--border); }
+.page-ruler-vertical .page-ruler-shade { width: 100%; }
+.page-ruler-vertical-tick { position: absolute; right: 0; border-top: 1px solid var(--border); width: 12px; text-align: right; }
+.page-ruler-layer .page-ruler-margin { position: absolute; pointer-events: auto; padding: 0; border: 0; background: transparent; touch-action: none; min-width: 0; min-height: 0; }
+.page-ruler-horizontal .page-ruler-margin { top: 0; width: 8px; height: 8px; margin-left: -4px; cursor: ew-resize; border-left: 1px solid var(--accent); }
+.page-ruler-horizontal .column-ruler-edge { position:absolute; pointer-events:auto; top:0; width:8px; height:8px; margin-left:-4px; padding:0; min-width:0; min-height:0; border:0; border-left:2px solid var(--accent); background:transparent; cursor:ew-resize; touch-action:none; }
+.page-ruler-horizontal .column-ruler-edge:focus-visible { outline:2px solid var(--accent); }
+.page-ruler-vertical .page-ruler-margin { left: 0; width: 25px; height: 8px; margin-top: -4px; cursor: ns-resize; border-top: 1px solid var(--accent); }
+.page-ruler-layer .page-ruler-margin:focus-visible { outline: 2px solid var(--accent); }
+.page-ruler-vertical .page-ruler-margin-header,.page-ruler-vertical .page-ruler-margin-footer { left: 10px; width: 15px; border-top-style: dashed; }
+.page-ruler-readout { position: absolute; padding: 3px 6px; color: var(--text); background: var(--panel); font-size: 11px; }
+.table-ruler-horizontal { position:absolute; height:8px; overflow:clip; z-index:2; }
+.table-ruler-vertical { position:absolute; width:25px; overflow:clip; z-index:2; }
+.page-ruler-layer .table-ruler-handle { position:absolute; pointer-events:auto; padding:0; min-width:0; min-height:0; border:1px solid var(--accent); border-radius:0; background:var(--panel); touch-action:none; }
+.table-ruler-column { width:8px; height:8px; margin-left:-4px; cursor:ew-resize; }
+.table-ruler-row { width:25px; height:6px; margin-top:-3px; cursor:ns-resize; }
+.table-ruler-handle:focus-visible { outline:2px solid var(--accent); }
+.ruler-drag-guide.table-ruler-row-guide { border-left:0; border-top:1px solid var(--accent); height:0; }
+@media print { .page-ruler-layer,.paragraph-ruler,.ruler-drag-guide { display: none !important; } }

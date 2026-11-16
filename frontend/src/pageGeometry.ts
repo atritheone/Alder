@@ -7,6 +7,7 @@ export type PageInsets = {
   left: number;
 };
 export type PageGeometry = {
+  gutter?: number;
   lineNumbering?: import('./lineNumbering').LineNumbering | null;
   watermark?: import('./watermark').Watermark | null;
   pageBorder?: import("./pageBorder").PageBorder | null;
@@ -99,6 +100,7 @@ export function screenPageGeometry(settings: PageSettings): PageGeometry {
     width: width * px,
     height: height * px,
     margin: margin * px,
+    ...(settings.gutterMm ? { gutter: settings.gutterMm * px } : {}),
     ...(settings.mirrorMargins ? { mirrorMargins: true } : {}),
     ...(settings.columns ? { columns: settings.columns } : {}),
     ...(settings.pageBorder !== undefined

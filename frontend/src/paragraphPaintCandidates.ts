@@ -17,7 +17,7 @@ export function hasParagraphPaint(doc: PMNode, styles: NamedStyle[] = emptyStyle
     let styled = new Set<string>();
     try {
       styled = new Set([...resolveStyles(definitions).values()]
-        .filter(style => paragraphAppearanceKeys.some(key => style[key] != null))
+        .filter(style => paragraphAppearanceKeys.some(key => style[key] != null) || style.tabStops?.some(stop => stop.align === "bar"))
         .map(style => style.id));
     } catch { return true; }
     check = (node) => {
@@ -26,7 +26,7 @@ export function hasParagraphPaint(doc: PMNode, styles: NamedStyle[] = emptyStyle
       const painted = node.type.name === "doc"
         ? node.content.content.some(child => check!(child))
         : !["paragraph", "heading", "code_block"].includes(node.type.name) ||
-          paragraphAppearanceKeys.some(key => node.attrs[key] != null) || styled.has(node.attrs.styleId);
+          paragraphAppearanceKeys.some(key => node.attrs[key] != null) || node.attrs.tabStops?.some((stop: {align:string}) => stop.align === "bar") || styled.has(node.attrs.styleId);
       cache.set(node, painted);
       return painted;
     };

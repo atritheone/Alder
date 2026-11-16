@@ -1,0 +1,56 @@
+import { _electron as electron, expect } from '@playwright/test';
+import { desktopExecutable } from './desktop-paths.mjs';
+import { closeTestDesktop } from './close-test-desktop.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'alder-measurements-'));
+let app,page;
+try {
+  app=await electron.launch({executablePath:desktopExecutable(),args:['.','--headless-test',`--user-data-dir=${fixture}/profile`],env:{...process.env,ALDER_DATA_DIR:`${fixture}/data`}});
+  page=await app.firstWindow();page.setDefaultTimeout(6000);
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1440,1000));
+  await page.getByRole('button',{name:'New',exact:true}).click();
+  await page.getByRole('button',{name:'Word Document',exact:false}).click();
+  await page.getByRole('button',{name:'Create',exact:true}).click();
+  const editor=page.getByRole('textbox',{name:'Chapter text editor',exact:true});
+  const toolbar=page.locator('.book-main .format-toolbar');
+  await editor.fill('Physical dimensions.');
+  const command=async name=>{
+    await editor.focus();await editor.press('ControlOrMeta+Shift+p');
+    const search=page.getByRole('dialog',{name:'Find command',exact:true});
+    await search.getByRole('searchbox').fill(name);await search.getByRole('searchbox').press('Enter');
+  };
+  const unit=async value=>page.evaluate(value=>{localStorage.setItem('alder.layoutUnit',value);window.dispatchEvent(new Event('alder-preference-changed'));},value);
+  await command('insert shape');
+  const shapeDialog=page.getByRole('dialog',{name:'Shape properties',exact:true});
+  await shapeDialog.getByLabel('Shape width (mm)',{exact:true}).fill('1 in');
+  await shapeDialog.getByRole('button',{name:'Apply',exact:true}).click();
+  const shape=editor.locator('[data-document-shape]').first();
+  await expect.poll(async()=>JSON.parse(await shape.getAttribute('data-document-shape')).width).toBe(96);
+  await shape.dblclick();await unit('pc');
+  await expect(shapeDialog.getByLabel('Shape width (pc)',{exact:true})).toHaveValue('6');
+  await shapeDialog.getByRole('button',{name:'Apply',exact:true}).click();
+  await expect.poll(async()=>JSON.parse(await shape.getAttribute('data-document-shape')).width).toBe(96);
+  await editor.press('ControlOrMeta+End');await editor.press('Enter');
+  await command('insert text box');
+  const boxDialog=page.getByRole('dialog',{name:'Text box properties',exact:true});
+  await boxDialog.getByLabel('Text box width (pc)',{exact:true}).fill('12');
+  await boxDialog.getByRole('button',{name:'Apply',exact:true}).click();
+  await expect(editor.locator('[data-text-box]').first()).toBeVisible();
+  await editor.press('ControlOrMeta+End');await editor.press('Enter');
+  const choosing=page.waitForEvent('filechooser');
+  await toolbar.getByRole('button',{name:'Insert image',exact:true}).click();
+  await (await choosing).setFiles({name:'square.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAPElEQVR4nO3RQREAMAjEwKNq6qJW8K+iEsKHX1bAMRPqvs6ms7oeDwz4A2QiZCJkImQiZCJkImQiZCJkImQiZKKQD/vQAQdjv4jtAAAAAElFTkSuQmCC','base64')});
+  const picture=editor.locator('img[data-asset-id]').first();await picture.click();
+  await toolbar.getByRole('button',{name:'More formatting',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Image properties…',exact:true}).click();
+  const imageDialog=page.getByRole('dialog',{name:'Image properties',exact:true});
+  await imageDialog.getByLabel('Image width (pc)',{exact:true}).fill('1 in');
+  await imageDialog.getByRole('button',{name:'Apply',exact:true}).click();
+  await expect.poll(()=>picture.evaluate(e=>parseFloat(e.style.width)||Number(e.getAttribute('width')))).toBe(96);
+  expect(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(w=>w.isVisible()))).toBe(false);
+  console.log('PASS: physical object sizes accept units and retain dimensions across preference changes; all windows stayed hidden.');
+} catch(error) {
+  console.error(error);await page?.screenshot({path:path.join(fixture,'failure.png')}).catch(()=>{});console.error('Fixture:',fixture);process.exitCode=1;
+} finally {await closeTestDesktop(app,`${fixture}/data`);}

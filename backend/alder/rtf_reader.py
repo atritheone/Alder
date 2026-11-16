@@ -259,7 +259,7 @@ class Reader:
         elif name in ('ql','qc','qr','qj'):state['paragraph']['align']={'ql':'left','qc':'center','qr':'right','qj':'justify'}[name]
         elif name in ('li','ri','fi','sb','sa') and value is not None:
             key={'li':'leftIndent','ri':'rightIndent','fi':'firstLineIndent','sb':'spaceBefore','sa':'spaceAfter'}[name]
-            state['paragraph'][key]=max(-144 if name in ('li','ri','fi') else 0,min(144,value/20))
+            state['paragraph'][key]=max(-1440 if name in ('li','ri','fi') else 0,min(1440 if name in ('li','ri','fi') else 144,value/20))
         elif name=='sl' and value is not None:state['leading']=value;state['paragraph'].update(lineSpacingMode='exact' if value<0 else 'atLeast',lineSpacing=max(1,min(144,abs(value)/20)))
         elif name=='slmult' and on:
             state['paragraph'].update(lineSpacingMode='multiple',lineHeight=max(.8,min(4,abs(state.get('leading',240))/240)));state['paragraph'].pop('lineSpacing',None)
@@ -270,9 +270,9 @@ class Reader:
         elif name=='outlinelevel' and value is not None and 0<=value<6:state['paragraph']['level']=value+1
         elif name in ('tqr','tqc','tqdec'):state['tabAlign']={'tqr':'right','tqc':'center','tqdec':'decimal'}[name]
         elif name in ('tldot','tlhyph','tlul'):state['tabLeader']={'tldot':'dot','tlhyph':'dash','tlul':'line'}[name]
-        elif name=='tx' and value is not None and 0<value<=28800:
+        elif name in ('tx','tb') and value is not None and 0<value<=28800:
             stops=state['paragraph'].setdefault('tabStops',[])
-            stops[:]=sorted({stop['position']:stop for stop in [*stops,{'position':value/20,'align':state['tabAlign'],'leader':state['tabLeader']}]}.values(),key=lambda item:item['position'])[:64]
+            stops[:]=sorted({stop['position']:stop for stop in [*stops,{'position':value/20,'align':'bar' if name=='tb' else state['tabAlign'],'leader':'none' if name=='tb' else state['tabLeader']}]}.values(),key=lambda item:item['position'])[:64]
             state['tabAlign']='left';state['tabLeader']='none'
         elif name=='s' and value is not None:
             if value in style_trail or len(style_trail)>50:raise ValueError('RTF styles contain an inheritance cycle or excessive depth.')
@@ -280,6 +280,7 @@ class Reader:
             if parent is not None and parent!=value:self.control(Control('s',parent),state,style_trail+(value,))
             for item in entry:
                 if isinstance(item,Control) and item.name not in ('s','sbasedon','snext'):self.control(item,state,style_trail+(value,))
+        elif name=='deftab' and value is not None and 20<=value<=14400:self.settings['defaultTabStopPt']=value/20
         elif name in ('paperw','paperh','margl','margr','margt','margb') and value is not None:
             key={'paperw':'pageWidthMm','paperh':'pageHeightMm','margl':'marginLeftMm','margr':'marginRightMm','margt':'marginTopMm','margb':'marginBottomMm'}[name]
             self.settings[key]=value*25.4/1440

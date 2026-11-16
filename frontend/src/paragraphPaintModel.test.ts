@@ -22,3 +22,8 @@ it('invalidates inherited paragraph paint when a named style changes', () => {
   expect(hasParagraphPaint(document, [{...styles[0], paragraphBorderWidth:1}])).toBe(true);
   expect(hasParagraphPaint(document, styles)).toBe(false);
 });
+it('clips printed bar tabs across page gaps even when there are no typed tabs',()=>{
+  const bars=[{position:72,align:'bar' as const,leader:'none' as const}];
+  expect(hasParagraphPaint(doc(p({tabStops:bars})))).toBe(true);
+  expect(hasParagraphPaint(doc(p({styleId:'bar'})),[{id:'bar',name:'Bars',kind:'paragraph',tabStops:bars}])).toBe(true);
+});

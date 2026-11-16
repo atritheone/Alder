@@ -362,7 +362,7 @@ export function setTableProperties(
       return false;
     if (
       values.columnWidth !== undefined &&
-      (!Number.isInteger(values.columnWidth) ||
+      (!Number.isFinite(values.columnWidth) ||
         values.columnWidth < 25 ||
         values.columnWidth > 10000)
     )
@@ -422,7 +422,7 @@ export function sizeTableColumns(widths: number[] | null): Command {
       (widths &&
         (widths.length !== rect.map.width ||
           widths.some(
-            (width) => !Number.isInteger(width) || width < 25 || width > 10000,
+            (width) => !Number.isFinite(width) || width < 25 || width > 10000,
           )))
     )
       return false;

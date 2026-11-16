@@ -296,7 +296,7 @@ import { citationSpec, bibliographySpec, validBibliography, selectedCitation } f
 import { validCitationItems, type CitationItem } from './citationTypes';
 import IndexEntriesDialog from './IndexEntriesDialog';
 import { prepareRunningImages, runningImageVersion } from "./runningImages";
-import { storyDocuments as runningImageStories } from "./runningMatter";
+import { storyDocuments as runningImageStories, storyVariant } from "./runningMatter";
 import {
   projectText,
   projectedRange,
@@ -311,6 +311,12 @@ import { tabLayout, layoutTabs } from "./tabLayout";
 import { exactLeading, layoutExactLeading } from "./exactLeading";
 import { parseTabStops, validTabStops } from "./tabStops";
 import ParagraphRuler, { useRuler } from "./ParagraphRuler";
+import { applyRulerTabEdit, paragraphTabs, selectionRulerTabs } from "./rulerTabs";
+import { rulerIndentChange } from "./rulerIndents";
+import { resolveStyles } from "./styleResolution";
+import PageRulers, { useVerticalRuler } from "./PageRulers";
+import PageSetupDialog from "./PageSetupDialog";
+import { authoringCommand } from "./authoringCommands";
 import {
   capturePagePublication,
   type PagePublication,
@@ -947,6 +953,8 @@ export function namedStyleTransaction(
 }
 export type EditorHandle = {
   runMenuCommand: (label: string) => boolean;
+  canRunMenuCommand: (label: string) => boolean;
+  menuCommandChecked: (label:string) => boolean | "mixed" | undefined;
   isLayoutReady: () => boolean;
   getPagePublication: (chapters?: readonly ChapterBlocks[]) => PagePublication;
   getIdentity: () => string;
@@ -1042,6 +1050,10 @@ type Props = {
   onToggleRaw?: () => void;
   rawDisabled?: boolean;
   pageLayout?: PageLayout;
+  onBasePageSettings?: (patch: import("./pageGeometry").PageSettings) => void;
+  onDocumentPageSettings?: (patch: import("./pageGeometry").PageSettings) => void;
+  onBaseRunningMatter?: (patch: import("./runningMatter").RunningMatter) => void;
+  defaultTabStopPt?: number;
   layoutVisible?: boolean;
   capturePages?: boolean;
   onPageSnapshots?: (pages: string[]) => void;
@@ -1055,7 +1067,7 @@ type Props = {
   projectId: string;
   assets: Project["assets"];
   headingStarts?: number[];
-  onChange: (document: DocNode, text: string) => void;
+  onChange: (document: DocNode, text: string, settings?: {defaultTabStopPt: number}) => void;
   onSelection: (
     word: string,
     selection: string,
@@ -1157,7 +1169,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         initial,
       });
   };
-  const [ruler] = useRuler();
+  const [ruler] = useRuler(!!props.pageLayout, props.pageLayout ? "write" : "sandbox");
+  const [verticalRuler] = useVerticalRuler();
+  const [pageSetup,setPageSetup] = useState<{position:number;doc:PMNode;initial:import("./pageGeometry").PageSettings}|null>(null);
   const [indexDialog,setIndexDialog]=useState<{doc:PMNode;identity:string;selection:string}|null>(null);
   const [notesDialog,setNotesDialog]=useState<{doc:PMNode;identity:string;id?:string}|null>(null);
   const showNotes=(id?:string)=>{const v=editableView();if(v&&!latest.current.rawMode){const references=noteReferenceNumbers(v.state.doc),note=id?references.find(note=>note.id===id):references.find(note=>note.pos===v.state.selection.from||note.pos+1===v.state.selection.from);setNotesDialog({doc:v.state.doc,identity:latest.current.identity,id:note?.targetId||id});}};
@@ -1166,6 +1180,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     unknown
   > | null>(null);
   const [tableDialog, setTableDialog] = useState(false);
+  const [paragraphTabFocus, setParagraphTabFocus] = useState(false);
   const [captionDialog, setCaptionDialog] = useState<{
     id: string;
     label: CaptionLabel;
@@ -1351,11 +1366,46 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     }
   };
   const editableView = () => (blocked.current ? null : view.current);
+  const changePageSettings = (position:number, patch:import("./pageGeometry").PageSettings) => {
+    const v=editableView();if(!v)return;
+    let source:number|null=null;
+    v.state.doc.forEach((node,pos)=>{if(pos<=position&&node.type.name==="section_break")source=pos;});
+    if(source==null)latest.current.onBasePageSettings?.(patch);
+    else {
+      const node=v.state.doc.nodeAt(source)!;
+      const tr=closeHistory(v.state.tr).setNodeMarkup(source,undefined,{...node.attrs,page:{...node.attrs.page,...patch}});
+      v.dispatch(tr);v.dispatch(closeHistory(v.state.tr));
+    }
+  };
+  const showPageSetup = (position=view.current?.state.selection.from||0) => {
+    const v=editableView(),base=latest.current.pageLayout;if(!v||!base)return;
+    let active=base;
+    v.state.doc.forEach((node,pos)=>{if(pos<=position&&node.type.name==="section_break")active=sectionLayout(base,node.attrs.page);});
+    setPageSetup({position,doc:v.state.doc,initial:settingsForLayout(active)});
+  };
+  const changeRunningDistances = (position:number, patch:import("./runningMatter").RunningMatter) => {
+    const v=editableView();if(!v)return;
+    let source:number|null=null;
+    v.state.doc.forEach((node,pos)=>{if(pos<=position&&node.type.name==="section_break")source=pos;});
+    if(source==null)latest.current.onBaseRunningMatter?.(patch);
+    else {
+      const node=v.state.doc.nodeAt(source)!;
+      v.dispatch(closeHistory(v.state.tr).setNodeMarkup(source,undefined,{...node.attrs,runningMatter:{...node.attrs.runningMatter,...patch}}));
+      v.dispatch(closeHistory(v.state.tr));
+    }
+  };
+  const rulerProperties = (position:number, part?:import("./runningMatter").StoryPart, variant?:import("./runningMatter").StoryVariant) => {
+    if(!part){showPageSetup(position);return;}
+    let sectionId=latest.current.pageLayout?.runningSectionId;
+    view.current?.state.doc.forEach((node,pos)=>{if(pos<=position&&node.type.name==="section_break")sectionId=node.attrs.blockId;});
+    window.dispatchEvent(new CustomEvent("alder-running-matter",{detail:{projectId:latest.current.projectId,sectionId,part,variant}}));
+  };
   const runFormat = (name: string) => {
     const v = editableView();
     if (v) command(formattingCommands(v.state)[name].command);
   };
   const showParagraph = () => {
+    setParagraphTabFocus(false);
     const v = editableView();
     if (v)
       setParagraphDialog(
@@ -1372,6 +1422,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       lineHeight: latest.current.pageLayout?.lineHeight || 1.7,
     });
     if (copied) {
+      window.dispatchEvent(new Event("alder-authoring-state"));
       setRangeWarning(
         "Formatting copied. Paste formatting applies it to selected text; a whole paragraph or caret also receives paragraph formatting.",
       );
@@ -1399,11 +1450,17 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     { label: "Convert table to text", command: tableToText() },
     { label: "Delete table", command: deleteTable },
   ];
-  const formatActions = (): { context?: boolean; label: string; disabled?: boolean; run: () => unknown }[] => {
+  useEffect(() => {
+    window.dispatchEvent(new Event("alder-authoring-state"));
+  }, [JSON.stringify(formatting), documentVersion, props.rawMode, props.identity]);
+  const formatActions = (): { context?: boolean; label: string; disabled?: boolean; checked?:boolean|"mixed"; run: () => unknown }[] => {
     const v = editableView();
     if (!v || latest.current.rawMode) return [];
     const commands = formattingCommands(v.state);
+    const menuFormatting = selectionFormatting(v.state, latest.current.styles);
     return [
+      ...(latest.current.pageLayout ? [{label:"Page setup…",run:()=>showPageSetup()}] : []),
+      {label:"Tabs…",run:()=>{showParagraph();setParagraphTabFocus(true);}},
       ...(captionObject(v.state)
         ? [
             {
@@ -1519,6 +1576,9 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         ] as const
       ).map(([mode, label]) => ({ label, run: () => void paste(mode) })),
       ...[
+        "strong",
+        "em",
+        "underline",
         "left",
         "center",
         "right",
@@ -1534,6 +1594,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       ].map((name) => ({
         label: commands[name].label,
         disabled: !commands[name].command(v.state),
+        checked: Object.hasOwn(menuFormatting.marks,name) ? menuFormatting.marks[name] : undefined,
         run: () => runFormat(name),
       })),
       {
@@ -1842,12 +1903,25 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       return null;
     }
   };
+  const menuActionsCache = useRef<{state:EditorState;key:unknown[];actions:ReturnType<typeof formatActions>} | null>(null);
+  const menuAction = (label:string) => {
+    const v=editableView();if(!v)return undefined;
+    const key=[latest.current.styles,latest.current.identity,!!latest.current.pageLayout,latest.current.rawMode,hasCopiedFormatting()];
+    if(menuActionsCache.current?.state!==v.state || key.some((value,index)=>value!==menuActionsCache.current?.key[index]))
+      menuActionsCache.current={state:v.state,key,actions:formatActions()};
+    const id=authoringCommand(label).id;
+    return menuActionsCache.current!.actions.find(item=>authoringCommand(item.label).id===id);
+  };
   useImperativeHandle(
     ref,
     () => ({
+      canRunMenuCommand(label) {
+        const action = menuAction(label);
+        return !!action && !action.disabled;
+      },
+      menuCommandChecked(label) { return menuAction(label)?.checked; },
       runMenuCommand(label) {
-        const action = formatActions().find(item => item.label === label ||
-          (label === "Insert table of contents…" && item.label === "Table of contents…"));
+        const action = menuAction(label);
         if (!action || action.disabled) return false;
         action.run();
         return true;
@@ -1858,7 +1932,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           !hyphenationLayoutChange(v) && lastPageMeasurement.current?.doc === v.state.doc &&
           lastPageMeasurement.current.displayScale === pageDisplayScaleRef.current &&
           lastPageMeasurement.current.layout === JSON.stringify([layout, latest.current.fontFamily,
-            latest.current.fontSize, latest.current.styles, latest.current.headingStarts]) &&
+            latest.current.fontSize, latest.current.styles, latest.current.headingStarts, latest.current.defaultTabStopPt]) &&
           document.fonts.status === 'loaded';
       },
       getPagePublication(chapters) {
@@ -1881,6 +1955,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
               latest.current.fontSize,
               latest.current.styles,
               latest.current.headingStarts,
+              latest.current.defaultTabStopPt,
             ]) ||
           document.fonts.status !== "loaded"
         )
@@ -3354,6 +3429,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           namedStyles.css,
           settings.styles,
           settings.headingStarts,
+          settings.defaultTabStopPt,
           v.dom.offsetWidth,
         ]);
         const key = JSON.stringify([
@@ -3365,6 +3441,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           settings.headingStarts,
           settings.fontFamily,
           settings.fontSize,
+          settings.defaultTabStopPt,
           namedStyles.css,
           v.dom.getBoundingClientRect().width,
           v.dom.closest(".flow-canvas")?.getBoundingClientRect().width,
@@ -3461,6 +3538,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
             settings.fontSize,
             settings.styles,
             settings.headingStarts,
+            settings.defaultTabStopPt,
           ]),
         };
         };
@@ -3555,8 +3633,14 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     props.fontSize,
     props.fontFamily,
     props.language,
+    props.defaultTabStopPt,
   ]);
   const mark = (name: string) => formatting?.marks[name] || false;
+  const rulerVersion = useMemo(()=>({}),[props.identity,documentVersion,props.styles,props.fontFamily,props.fontSize,
+    props.pageLayout?.zoom,view.current?.state.selection.from,view.current?.state.selection.to]);
+  const rulerTabs = useMemo(() => view.current && ruler && !props.rawMode
+    ? selectionRulerTabs(view.current.state, props.styles || []) : { stops: [], mixed: false },
+    [rulerVersion, ruler, props.rawMode]);
   useLayoutEffect(() => {
     const v = view.current;
     if (!v || props.pageLayout) return;
@@ -3578,6 +3662,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
     props.fontSize,
     props.fontFamily,
     namedStyles.css,
+    props.defaultTabStopPt,
     props.identity,
   ]);
   const setFont = (name: string, value: any) => {
@@ -3606,8 +3691,26 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
         (props.persistentCaret ? " persistent-caret" : "")
       }
       data-alder-editor={editorScope}
+      style={{"--alder-default-tab": props.defaultTabStopPt || 36} as React.CSSProperties}
     >
       <style>{namedStyles.css}</style>
+      {pageSetup && <PageSetupDialog initial={pageSetup.initial}
+        wholeDocument={!!props.onDocumentPageSettings}
+        onClose={()=>{setPageSetup(null);requestAnimationFrame(()=>view.current?.focus());}}
+        onApply={(patch,scope)=>{
+          if(view.current?.state.doc===pageSetup.doc) {
+            if(scope==="document")latest.current.onDocumentPageSettings?.(patch);
+            else changePageSettings(pageSetup.position,patch);
+          }
+          else setRangeWarning("The document changed. Open page settings again.");
+          setPageSetup(null);requestAnimationFrame(()=>view.current?.focus());
+        }} />}
+      {props.pageLayout && props.layoutVisible !== false && !props.rawMode && (ruler || verticalRuler) &&
+        <PageRulers view={()=>view.current} layout={props.pageLayout} pages={sheetPages}
+          version={rulerVersion} horizontal={ruler} vertical={verticalRuler}
+          readingOffset={props.readingRange?.start} onChange={changePageSettings}
+          onTableCommand={command} onTableProperties={()=>{const v=editableView();if(v){const initial=selectedTableProperties(v.state);if(initial)setTablePropertiesDialog({initial,doc:v.state.doc,selection:v.state.selection});}}}
+          onRunningChange={changeRunningDistances} onProperties={rulerProperties} />}
       {reviewDialog && (
         <ReviewDialog
           doc={reviewDialog.doc}
@@ -3822,7 +3925,7 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
           onInsert={table}
           onClose={() => {
             setTableDialog(false);
-            view.current?.focus();
+            requestAnimationFrame(() => view.current?.focus());
           }}
         />
       )}
@@ -4012,13 +4115,23 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       {paragraphDialog && (
         <ParagraphDialog
           initial={paragraphDialog}
+          focusTabs={paragraphTabFocus}
+          defaultTabStopPt={props.defaultTabStopPt || 36}
           onClose={() => {
             setParagraphDialog(null);
             view.current?.focus();
           }}
-          onApply={(values) => {
-            const origin = view.current;
-            command(setParagraph(values));
+          onApply={(values, interval) => {
+            const origin = editableView();
+            if (origin && interval !== undefined && interval !== (props.defaultTabStopPt || 36)) {
+              const commit=(doc:DocNode,text:string)=>latest.current.onChange(doc,text,{defaultTabStopPt:interval});
+              let changed=false;
+              command((state,dispatch) => {
+                changed=setParagraph(values)(state,tr=>{tr.setMeta("projectCommit",commit);dispatch?.(tr);});
+                return changed;
+              });
+              if (!changed) commit(documentJSON(origin.state.doc),projectText(origin.state.doc).text);
+            } else command(setParagraph(values));
             setParagraphDialog(null);
             requestAnimationFrame(() => {
               if (origin && view.current === origin) origin.focus();
@@ -4239,7 +4352,12 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                     clientY: rect.bottom,
                     preventDefault() {},
                   },
-                  formatActions(),
+                  formatActions().filter(item=>item.context || new Set([
+                    "Tabs…","Text colour…","Copy formatting","Paste formatting","Paste keeping formatting",
+                    "Paste matching destination","Paste plain text","Strikethrough","Subscript","Superscript",
+                    "Highlight","Clear character formatting","Reset paragraph formatting","Align left","Align center",
+                    "Align right","Align justify","Bullet list","Numbered list","Block quote",
+                  ]).has(item.label)),
                   { label: "Formatting" },
                 );
               }}
@@ -4389,20 +4507,36 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
       </WriteToolbar>
       {ruler && !props.rawMode && (
         <ParagraphRuler
+          defaultInterval={props.defaultTabStopPt || 36}
           view={() => view.current}
-          stops={
-            (formatting?.paragraph
-              .tabStops as import("./tabStops").TabStop[]) || []
-          }
-          version={[formatting, documentVersion, props.pageLayout?.zoom]}
+          stops={rulerTabs.stops}
+          mixed={rulerTabs.mixed}
+          version={rulerVersion}
           paragraph={formatting?.paragraph || {}}
+          onProperties={showParagraph}
+          onHanging={(value, rtl) => {
+            const v = editableView();
+            if (!v) return;
+            const styles = resolveStyles(latest.current.styles || []);
+            setParagraph(node => rulerIndentChange("hangingIndent", value, {
+              ...styles.get(node.attrs.styleId),
+              ...Object.fromEntries(Object.entries(node.attrs).filter(([, value]) => value != null)),
+            }, rtl))(v.state, v.dispatch);
+          }}
           onFormat={(attributes) => {
             const v = editableView();
             if (v) setParagraph(attributes)(v.state, v.dispatch);
           }}
           onChange={(tabStops) => {
             const v = editableView();
-            if (v) setParagraph({ tabStops })(v.state, v.dispatch);
+            if (!v) return;
+            const styles = resolveStyles(latest.current.styles || []);
+            const before = selectionRulerTabs(v.state, latest.current.styles || []).stops;
+            setParagraph(node => {
+              const current = paragraphTabs(node, styles);
+              const next = applyRulerTabEdit(current, before, tabStops);
+              return JSON.stringify(current) === JSON.stringify(next) ? {} : { tabStops: next };
+            })(v.state, v.dispatch);
           }}
         />
       )}
@@ -4478,7 +4612,8 @@ export default forwardRef<EditorHandle, Props>(function Editor(props, ref) {
                 });
                 window.dispatchEvent(
                   new CustomEvent("alder-running-matter", {
-                    detail: { projectId: props.projectId, sectionId, part },
+                    detail: { projectId: props.projectId, sectionId, part,
+                      variant:frame.layout.runningMatter ? storyVariant(frame.layout.runningMatter,index,frame.layout.sectionStartPage||0) : "default" },
                   }),
                 );
               }}

@@ -12,6 +12,8 @@ import "./styles-manager.css";
 import ParagraphAppearanceFields from "./ParagraphAppearanceFields";
 import TabStopsEditor from "./TabStopsEditor";
 import HyphenationFields from "./HyphenationFields";
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 
 type Props = {
   project: Project;
@@ -64,24 +66,24 @@ const fields: {
   {
     key: "rightIndent",
     label: "Right indent (pt)",
-    min: -144,
-    max: 144,
+    min: -1440,
+    max: 1440,
     step: 1,
     paragraph: true,
   },
   {
     key: "leftIndent",
     label: "Left indent (pt)",
-    min: -144,
-    max: 144,
+    min: -1440,
+    max: 1440,
     step: 1,
     paragraph: true,
   },
   {
     key: "firstLineIndent",
     label: "First line indent (pt)",
-    min: -144,
-    max: 144,
+    min: -1440,
+    max: 1440,
     step: 1,
     paragraph: true,
   },
@@ -94,6 +96,7 @@ export default function StylesManager({
   onError,
   onCapture,
 }: Props) {
+  const [unit] = useLayoutUnit();
   const [editing, setEditing] = useState<NamedStyle | null>(null);
   const [replacing, setReplacing] = useState<NamedStyle | null>(null);
   const [replacementId, setReplacementId] = useState("");
@@ -545,8 +548,12 @@ export default function StylesManager({
               )
               .map((field) => (
                 <label key={field.key}>
-                  {field.label}
-                  <input
+                    {field.key.endsWith("Indent") ? `${field.label.replace(" (pt)", "")} (${unit})` : field.label}
+                    {field.key.endsWith("Indent") ? <MeasurementInput
+                      label={`Style ${field.label.replace(" (pt)", "")}`} nullable
+                      min={field.min} max={field.max}
+                      value={editing[field.key] == null ? null : Number(editing[field.key])}
+                      onChange={value=>setEditing({...editing,[field.key]:value})} /> : <input
                     aria-label={`Style ${field.label}`}
                     type="number"
                     min={field.min}
@@ -571,7 +578,7 @@ export default function StylesManager({
                             : Number(event.target.value),
                       })
                     }
-                  />
+                    />}
                 </label>
               ))}
             <label>
@@ -657,7 +664,7 @@ export default function StylesManager({
             </p>
           </div>
           <footer>
-            <span>Spacing and indentation use points.</span>
+              <span>Spacing uses points; indentation uses {unit}.</span>
             <button onClick={() => setEditing(null)}>Cancel</button>
             <button className="accent" onClick={save}>
               Save style

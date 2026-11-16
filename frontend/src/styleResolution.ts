@@ -1,7 +1,8 @@
 import { headingFormatting } from "./documentFormatting";
+import { maximumParagraphIndent } from "./rulerIndents";
 import { validHyphenation } from "./hyphenation";
 import { storyDocuments } from "./runningMatter";
-import { tabStopsCSS, validTabStops } from "./tabStops";
+import { tabStopsCSS, validTabStops, barTabsCSS } from "./tabStops";
 import type {
   NamedStyle,
   StyleKind,
@@ -53,9 +54,9 @@ const numericBounds: Record<string, [number, number]> = {
   lineSpacing: [1, 144],
   spaceAfter: [0, 144],
   spaceBefore: [0, 144],
-  leftIndent: [-144, 144],
-  rightIndent: [-144, 144],
-  firstLineIndent: [-144, 144],
+  leftIndent: [-maximumParagraphIndent, maximumParagraphIndent],
+  rightIndent: [-maximumParagraphIndent, maximumParagraphIndent],
+  firstLineIndent: [-maximumParagraphIndent, maximumParagraphIndent],
 };
 const inherited = (value: unknown) =>
   value === undefined || value === null || value === "";
@@ -221,7 +222,7 @@ export function styleDeclarations(
     const appearance = paragraphAppearanceCSS(style);
     if (appearance) css.push(appearance, "--alder-paragraph-paint:1");
     if (style.tabStops != null && validTabStops(style.tabStops))
-      css.push(`--alder-tab-stops:${tabStopsCSS(style.tabStops)}`);
+      css.push(`--alder-tab-stops:${tabStopsCSS(style.tabStops)}`,barTabsCSS(style.tabStops));
     number("lineHeight", "line-height", "");
     if (
       typeof style.lineSpacing === "number" &&
@@ -261,6 +262,8 @@ export function styleDeclarations(
     number("spaceBefore", "margin-top");
     number("leftIndent", "margin-left");
     number("rightIndent", "margin-right");
+    number("leftIndent", "--alder-left-indent");
+    number("rightIndent", "--alder-right-indent");
     number("firstLineIndent", "text-indent");
     if (
       style.align &&

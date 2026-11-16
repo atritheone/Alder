@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 import {
   shapeDefaults,
   shapeDOM,
@@ -18,6 +20,7 @@ export default function ShapeDialog({
 }) {
   const dialog = useRef<HTMLDialogElement>(null),
     preview = useRef<HTMLDivElement>(null);
+  const [unit] = useLayoutUnit();
   const [attrs, setAttrs] = useState({ ...shapeDefaults, ...initial }),
     [error, setError] = useState("");
   useEffect(() => {
@@ -86,21 +89,9 @@ export default function ShapeDialog({
           <div className="word-dialog-row">
             {(["width", "height"] as const).map((key) => (
               <label key={key}>
-                {key === "width" ? "Width" : "Height"} (mm)
-                <input
-                  aria-label={`Shape ${key}`}
-                  type="number"
-                  min={(8 * 25.4) / 96}
-                  max={(2000 * 25.4) / 96}
-                  step="any"
-                  value={Math.round(((attrs[key] * 25.4) / 96) * 10) / 10}
-                  onChange={(e) =>
-                    setAttrs({
-                      ...attrs,
-                      [key]: (Number(e.target.value) * 96) / 25.4,
-                    })
-                  }
-                />
+                {key === "width" ? "Width" : "Height"} ({unit})
+                <MeasurementInput label={`Shape ${key}`} min={6} max={1500}
+                  value={attrs[key]*.75} onChange={v=>setAttrs({...attrs,[key]:v!/.75})} />
               </label>
             ))}
           </div>

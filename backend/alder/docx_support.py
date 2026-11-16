@@ -154,8 +154,9 @@ def apply_paragraph_properties(paragraph, attrs, line_height, warnings=None):
         paragraph.alignment = {'left': WD_ALIGN_PARAGRAPH.LEFT, 'center': WD_ALIGN_PARAGRAPH.CENTER, 'right': WD_ALIGN_PARAGRAPH.RIGHT, 'justify': WD_ALIGN_PARAGRAPH.JUSTIFY}[alignment]
     for key, attribute in (('spaceAfter', 'space_after'), ('spaceBefore', 'space_before'), ('leftIndent', 'left_indent'), ('rightIndent', 'right_indent'), ('firstLineIndent' if attrs.get('firstLineIndent') is not None else 'indent', 'first_line_indent')):
         if attrs.get(key) is not None:
-            minimum = -144 if key in ('indent', 'firstLineIndent', 'leftIndent', 'rightIndent') else 0
-            setattr(props, attribute, Pt(min(144, max(minimum, float(attrs[key])))))
+            is_indent = key in ('indent', 'firstLineIndent', 'leftIndent', 'rightIndent')
+            minimum, maximum = (-1440, 1440) if is_indent else (0, 144)
+            setattr(props, attribute, Pt(min(maximum, max(minimum, float(attrs[key])))))
     if attrs.get('lineHeight'):
         props.line_spacing = min(4, max(.8, float(attrs['lineHeight'])))
     elif attrs.get('lineSpacingMode') == 'multiple':

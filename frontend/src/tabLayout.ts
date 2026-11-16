@@ -144,6 +144,7 @@ export function layoutTabs(view: EditorView, invalidate = false) {
       css.direction,
       css.textIndent,
       css.getPropertyValue("--alder-tab-stops"),
+      css.getPropertyValue("--alder-default-tab"),
     ].join("|");
     if (state.measured.get(block.key) === signature) continue;
     const contentsPage =
@@ -245,11 +246,12 @@ export function layoutTabs(view: EditorView, invalidate = false) {
       const decimal = rtl
         ? width - (decimalWidth ?? 0)
         : (decimalWidth ?? width);
-      let next = nextTab(measuredStops, x, width, decimal);
+      const interval = Number(css.getPropertyValue("--alder-default-tab")) || 36;
+      let next = nextTab(measuredStops, x, width, decimal, interval);
       rule.style.width = `${next.gap / 0.75}px`;
       if (tab.getBoundingClientRect().top > firstTop + scale * 2) {
         const wrappedX = leadingPosition(tab);
-        next = nextTab(measuredStops, wrappedX, width, decimal);
+        next = nextTab(measuredStops, wrappedX, width, decimal, interval);
         rule.style.width = `${next.gap / 0.75}px`;
       }
       rule.style.backgroundImage = leaders[next.leader];

@@ -2,6 +2,8 @@
 
 Status: implementation in progress. The complete plan and its release gates have not been achieved; retain this file until they have.
 
+The 16 November 2026 [DOCX authoring audit and implementation plan](docx-authoring-plan.md) adds ruler, direct-layout, navigation and writing-workflow improvements against the current 0.14 code. Follow its implementation order for that work and share overlapping review/layout/qualification tasks with this plan.
+
 ## Continuation — scoped Word style resolution
 
 DOCX import now reuses bounded style lookups within the one package being read. It preserves separate documents and style kinds, invalidates fallback results when restoring histories adds a style, and restores the original resolver even if import fails. Profiling identified repeated default-style scans as the dominant cost. On the same isolated Windows prose baseline, DOCX reimport at 10/100/500/1,000 authored sheets improves from 81/713/3,491/6,994 ms to 24/120/544/1,068 ms, retaining all 282,000 words at the largest size. Process peak remains approximately 126 MiB. The affected table/paragraph/running-heading/list tests pass 140 cases; additional inherited-style/list-continuation/conversion/outline checks pass 127. These measure backend import, not editor layout or cross-platform opening. Existing broader plan gates remain open.

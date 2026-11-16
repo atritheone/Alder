@@ -4,6 +4,8 @@ import { X } from "lucide-react";
 import StoryEditor from "./StoryEditor";
 import { textBoxDefaults, textBoxProperties } from "./textBoxes";
 import type { DocNode } from "./types";
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 
 export default function TextBoxDialog({
   initial,
@@ -15,6 +17,7 @@ export default function TextBoxDialog({
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [unit] = useLayoutUnit();
   const [attrs, setAttrs] = useState({ ...textBoxDefaults, ...initial.attrs });
   const [body, setBody] = useState<DocNode>({
     type: "doc",
@@ -93,21 +96,9 @@ export default function TextBoxDialog({
               ] as const
             ).map(([key, label, min, max]) => (
               <label key={key}>
-                {label} (mm)
-                <input
-                  aria-label={`Text box ${label.toLowerCase()}`}
-                  type="number"
-                  step="any"
-                  min={(min * 25.4) / 96}
-                  max={(max * 25.4) / 96}
-                  value={Math.round(((attrs[key] * 25.4) / 96) * 10) / 10}
-                  onChange={(e) =>
-                    setAttrs({
-                      ...attrs,
-                      [key]: (Number(e.target.value) * 96) / 25.4,
-                    })
-                  }
-                />
+                {label} ({unit})
+                <MeasurementInput label={`Text box ${label.toLowerCase()}`} min={min*.75} max={max*.75}
+                  value={attrs[key]*.75} onChange={v=>setAttrs({...attrs,[key]:v!/.75})} />
               </label>
             ))}
           </div>

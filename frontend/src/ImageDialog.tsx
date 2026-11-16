@@ -4,9 +4,8 @@ import { X } from "lucide-react";
 import type { Asset } from "./types";
 import { cropEdges, imageCrop, type ImageCrop } from "./imageCrop";
 import "./word-processing.css";
-
-const minimumWidthMm = 0.264583;
-const maximumWidthMm = 2645.833333;
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 
 export default function ImageDialog({
   initial,
@@ -33,19 +32,8 @@ export default function ImageDialog({
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [width, setWidth] = useState(
-    initial.width == null
-      ? ""
-      : String(
-          Math.max(
-            minimumWidthMm,
-            Math.min(
-              maximumWidthMm,
-              Math.round(((Number(initial.width) * 25.4) / 96) * 100) / 100,
-            ),
-          ),
-        ),
-  );
+  const [unit] = useLayoutUnit();
+  const [width, setWidth] = useState<number|null>(initial.width == null ? null : Number(initial.width)*.75);
   const [widthChanged, setWidthChanged] = useState(false);
   const [align, setAlign] = useState(initial.align || "left");
   const [placement, setPlacement] = useState<
@@ -55,7 +43,7 @@ export default function ImageDialog({
       ? initial.wrap
       : initial.placement || "block",
   );
-  const [wrapGap, setWrapGap] = useState(((initial.wrapGap ?? 12) * 25.4) / 96);
+  const [wrapGap, setWrapGap] = useState((initial.wrapGap ?? 12) * .75);
   const close = () => {
     dialog.current?.close();
     onClose();
@@ -100,18 +88,18 @@ export default function ImageDialog({
               placement === "left" || placement === "right"
                 ? placement
                 : "none",
-            wrapGap: (wrapGap * 96) / 25.4,
+            wrapGap: wrapGap / .75,
             width: !widthChanged
               ? initial.width == null
                 ? null
                 : Number(initial.width)
-              : width === ""
+              : width == null
                 ? null
                 : Math.max(
                     1,
                     Math.min(
                       10000,
-                      Math.round(((Number(width) * 96) / 25.4) * 1000000) /
+                      Math.round((width / .75) * 1000000) /
                         1000000,
                     ),
                   ),
@@ -157,33 +145,16 @@ export default function ImageDialog({
           </label>
           {(placement === "left" || placement === "right") && (
             <label>
-              Text spacing (mm)
-              <input
-                aria-label="Image text spacing (mm)"
-                type="number"
-                min="0"
-                max="50.8"
-                step="any"
-                value={wrapGap}
-                onChange={(event) => setWrapGap(Number(event.target.value))}
-              />
+              Text spacing ({unit})
+              <MeasurementInput label="Image text spacing" min={0} max={144}
+                value={wrapGap} onChange={v=>setWrapGap(v!)} />
             </label>
           )}
           <label>
-            Width (mm)
-            <input
-              aria-label="Image width (mm)"
-              type="number"
-              min={minimumWidthMm}
-              max={maximumWidthMm}
-              step="any"
-              placeholder="Original size"
-              value={width}
-              onChange={(event) => {
-                setWidth(event.target.value);
-                setWidthChanged(true);
-              }}
-            />
+            Width ({unit})
+            <MeasurementInput label="Image width" min={.75} max={7500} nullable
+              placeholder="Original size" value={width}
+              onChange={v=>{setWidth(v);setWidthChanged(true);}} />
           </label>
           <label>
             Alignment
@@ -278,7 +249,7 @@ export default function ImageDialog({
           <button
             type="button"
             onClick={() => {
-              setWidth("");
+              setWidth(null);
               setWidthChanged(true);
             }}
           >

@@ -98,7 +98,7 @@ class Styles:
             if colour(border[-1]):attrs['paragraphBorderColor']=border[-1]
         for key,prop in [('spaceBefore','fo:margin-top'),('spaceAfter','fo:margin-bottom'),('leftIndent','fo:margin-left'),('rightIndent','fo:margin-right'),('firstLineIndent','fo:text-indent')]:
             value=length(properties.get(q(prop)))
-            if value is not None:attrs[key]=max(-144 if key in ('leftIndent','rightIndent','firstLineIndent') else 0,min(144,value))
+            if value is not None:attrs[key]=max(-1440 if key in ('leftIndent','rightIndent','firstLineIndent') else 0,min(1440 if key in ('leftIndent','rightIndent','firstLineIndent') else 144,value))
         alignment=properties.get(q('fo:text-align'))
         if alignment in ('left','right','center','justify','start','end'):attrs['align']={'start':'left','end':'right'}.get(alignment,alignment)
         leading=properties.get(q('fo:line-height'),'')

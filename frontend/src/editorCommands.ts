@@ -189,15 +189,18 @@ export function setTextStyle(attributes: Record<string, unknown>): Command {
   };
 }
 
-export function setParagraph(attributes: Record<string, unknown>): Command {
+export function setParagraph(attributes: Record<string, unknown> | ((node: PMNode) => Record<string, unknown>)): Command {
   return (state, dispatch) => {
     const tr = closeHistory(state.tr);
     state.doc.nodesBetween(
       state.selection.from,
       state.selection.to,
       (node, pos) => {
-        if (node.isTextblock)
-          tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attributes });
+        if (node.isTextblock) {
+          const patch = typeof attributes === "function" ? attributes(node) : attributes;
+          if (Object.entries(patch).some(([key,value]) => JSON.stringify(node.attrs[key]) !== JSON.stringify(value)))
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...patch });
+        }
       },
     );
     if (!tr.steps.length) return false;

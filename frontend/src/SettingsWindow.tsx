@@ -1,4 +1,5 @@
 import { useReadReferences } from "./useReadReferences";
+import { useLayoutUnit } from "./layoutUnits";
 import TextEditorSettings from "./TextEditorSettings";
 import {
   useEffect,
@@ -138,6 +139,7 @@ function Playback({
 }
 
 export default function SettingsWindow(p: Props) {
+  const [layoutUnit, setLayoutUnit] = useLayoutUnit();
   const dialog = useRef<HTMLDialogElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
@@ -375,6 +377,16 @@ export default function SettingsWindow(p: Props) {
           {p.category === "Writing" && (
             <>
               <Section title="Documents">
+                <label className="settings-row">
+                  Measurement units
+                  <select aria-label="Measurement units" value={layoutUnit} onChange={e => setLayoutUnit(e.target.value)}>
+                    <option value="mm">Millimetres</option>
+                    <option value="pc">Picas</option>
+                    <option value="cm">Centimetres</option>
+                    <option value="in">Inches</option>
+                    <option value="pt">Points</option>
+                  </select>
+                </label>
                 <label className="settings-row">
                   Remember document position
                   <input

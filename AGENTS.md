@@ -1,5 +1,22 @@
 # Alder repository instructions
 
+## Development without desktop windows
+
+Do not open or activate Alder on the user's desktop for development. Use backend
+and focused unit tests first. When actual renderer layout or interaction is
+needed, follow `docs/hidden-development.md`: launch Electron with
+`--headless-test`, an isolated temporary profile and a temporary `ALDER_DATA_DIR`.
+Keep the sandbox enabled. Inspect DOM geometry and saved screenshots without
+showing the window. Never use the user's open Alder session as a test fixture.
+
+Handle expected native dialogs through the Electron main-process test API.
+Close isolated test instances in `finally` using
+`scripts/close-test-desktop.mjs`; it answers only the fixture's exact
+close-without-saving prompt and follows normal shutdown. Do not use desktop
+clicks, blanket dialog acceptance or forced termination of the user's Alder.
+Run only tests relevant to the change. Record platform/visible-window checks
+that cannot be established by hidden tests as outstanding.
+
 ## Git workflow
 
 Work on and push to `main`. This repository must not have other local or origin

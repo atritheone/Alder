@@ -1,6 +1,6 @@
 export type TabStop = {
   position: number;
-  align: "left" | "center" | "right" | "decimal";
+  align: "left" | "center" | "right" | "decimal" | "bar";
   leader: "none" | "dot" | "dash" | "line";
 };
 
@@ -15,8 +15,9 @@ export function validTabStops(value: unknown): value is TabStop[] {
         Number.isFinite(stop.position) &&
         stop.position > 0 &&
         stop.position <= 1440 &&
-        ["left", "center", "right", "decimal"].includes(stop.align) &&
+        ["left", "center", "right", "decimal", "bar"].includes(stop.align) &&
         ["none", "dot", "dash", "line"].includes(stop.leader) &&
+        (stop.align !== "bar" || stop.leader === "none") &&
         (!i || value[i - 1].position < stop.position),
     )
   );
@@ -56,8 +57,10 @@ export function nextTab(
   x: number,
   width: number,
   decimalWidth: number,
+  defaultInterval = 36,
 ) {
-  for (const stop of stops) {
+  const textStops = stops.filter(stop => stop.align !== "bar");
+  for (const stop of textStops) {
     if (stop.position <= x + 0.1) continue;
     const offset =
       stop.align === "right"
@@ -70,12 +73,24 @@ export function nextTab(
     if (stop.position - offset > x + 0.1)
       return { ...stop, gap: stop.position - offset - x };
   }
+  const interval=Number.isFinite(defaultInterval)&&defaultInterval>0?defaultInterval:36;
   const position =
-    (Math.floor(Math.max(x, stops.at(-1)?.position || 0) / 36) + 1) * 36;
+    (Math.floor(Math.max(x, textStops.at(-1)?.position || 0) / interval) + 1) * interval;
   return {
     position,
     align: "left" as const,
     leader: "none" as const,
     gap: position - x,
   };
+}
+
+/** Printed bars are paragraph paint, not tab characters or speech content. */
+export function barTabsCSS(stops: TabStop[]) {
+  const bars = stops.filter(stop => stop.align === "bar");
+  const paint=(direction:string,indent:string)=>bars.map(stop=>{
+    const x=`calc(${stop.position}pt - var(${indent},0pt))`;
+    const end=`calc(${stop.position+.75}pt - var(${indent},0pt))`;
+    return `linear-gradient(${direction},transparent ${x},currentColor ${x},currentColor ${end},transparent ${end})`;
+  }).join(",")||"none";
+  return `--alder-bars-ltr:${paint("to right","--alder-left-indent")};--alder-bars-rtl:${paint("to left","--alder-right-indent")};background-image:var(--alder-bar-paint,var(--alder-bars-ltr));${bars.length?"--alder-paragraph-paint:1;":""}`;
 }

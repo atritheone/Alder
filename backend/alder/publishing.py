@@ -417,6 +417,16 @@ def _block_style(node, project):
     css = []
     from .paragraph_appearance import appearance_css
     css.append(appearance_css(values))
+    bars = [stop for stop in values.get('tabStops') or [] if stop.get('align') == 'bar']
+    if bars:
+        rtl = values.get('textDirection') == 'rtl'
+        indent = _number(values.get('rightIndent' if rtl else 'leftIndent'), 0, -1440, 1440)
+        direction = 'to left' if rtl else 'to right'
+        gradients = []
+        for stop in bars:
+            x = stop['position'] - indent
+            gradients.append(f'linear-gradient({direction},transparent {x:g}pt,currentColor {x:g}pt,currentColor {x+.75:g}pt,transparent {x+.75:g}pt)')
+        css.append('background-image:' + ','.join(gradients))
     alignment = values.get("align") or values.get("textAlign")
     if alignment in ("left", "center", "right", "justify"):
         css.append("text-align:" + alignment)
@@ -435,7 +445,7 @@ def _block_style(node, project):
         css.append('line-height:' + leading + ';--alder-paragraph-leading:' + leading)
     for field, prop in (("spaceAfter", "margin-bottom"), ("spaceBefore", "margin-top"), ("leftIndent", "margin-left"), ("rightIndent", "margin-right"), ("firstLineIndent" if values.get("firstLineIndent") is not None else "indent", "text-indent")):
         if values.get(field) is not None:
-            css.append(f"{prop}:{_number(values[field], 0, -144 if field in ('indent', 'firstLineIndent', 'leftIndent', 'rightIndent') else 0, 144):g}pt")
+            css.append(f"{prop}:{_number(values[field], 0, -1440 if field in ('indent', 'firstLineIndent', 'leftIndent', 'rightIndent') else 0, 1440 if field in ('indent', 'firstLineIndent', 'leftIndent', 'rightIndent') else 144):g}pt")
     for key, prop, yes in (("keepWithNext", "break-after", "avoid"), ("keepTogether", "break-inside", "avoid"), ("pageBreakBefore", "break-before", "page")):
         if type(values.get(key)) is bool:
             css.append(f"{prop}:{yes if values[key] else 'auto'}")
@@ -636,7 +646,9 @@ def _html_node(node, project, resources, warnings, epub=False):
             extra += ' data-tab-stops="' + html.escape(json.dumps(stops), quote=True) + '"'
             if stops:
                 _warn(warnings, "HTML preserves custom tab definitions for Alder but other browsers use uniform tab spacing.")
-        if '\t' in plain_text(node): style += ';white-space:pre-wrap;tab-size:36pt'
+        if '\t' in plain_text(node):
+            interval = _number(resources.options.get('defaultTabStopPt', project.get('settings', {}).get('defaultTabStopPt')), 36, 1, 720)
+            style += f';white-space:pre-wrap;tab-size:{interval:g}pt'
     if kind in ('table', 'table_row', 'table_cell', 'table_header'):
         from .table_formatting import table_css
         style += ';' + table_css(kind, attrs)
@@ -1082,6 +1094,10 @@ def _docx(project, path, settings, warnings):
     from docx.oxml.ns import qn
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
     document = Document()
+    tabs = document.settings.element.find(qn('w:defaultTabStop'))
+    if tabs is None:
+        tabs = OxmlElement('w:defaultTabStop'); document.settings.element.append(tabs)
+    tabs.set(qn('w:val'),str(round(settings.get('defaultTabStopPt',36)*20)))
     if settings.get('stationeryPreset'):
         # Word 2010 aligns the first cell's text to the margin, shifting the
         # actual label grid left by its padding. Modern layout aligns its edge.
@@ -1820,7 +1836,19 @@ def _pdf(project, path, settings, warnings):
     from .document_fields import is_heading_field
     first_headings = refresh_body_headings(sections, warnings)
     latest_headings, page_headings = {}, {}
-    class HeadingParagraph(Paragraph):
+    class BarParagraph(Paragraph):
+        def draw(self):
+            super().draw()
+            bars = getattr(self.style, 'alderBarTabs', [])
+            if bars:
+                self.canv.saveState()
+                self.canv.setLineWidth(.75)
+                self.canv.setStrokeColor(self.style.textColor)
+                for position in bars:
+                    x = self.width - position if getattr(self.style, 'alderRTL', False) else position
+                    self.canv.line(x, 0, x, self.height)
+                self.canv.restoreState()
+    class HeadingParagraph(BarParagraph):
         def draw(self):
             super().draw()
             if hasattr(self,'running_heading'):
@@ -2096,7 +2124,7 @@ def _pdf(project, path, settings, warnings):
             level = int(_number(attrs.get("level"), 2, 1, 6))
             if kind == "heading" and merged.get('fontSize') is None:
                 size = DOCUMENT_FORMAT['headingSizes'][level-1]
-            style = ParagraphStyle("Block", parent=base, leftIndent=indent+_number(merged.get("leftIndent"), 0, -144, 144), firstLineIndent=_number(merged.get("firstLineIndent", merged.get("indent")), 0, -144, 144), rightIndent=_number(merged.get("rightIndent"), 0, -144, 144), fontSize=size,
+            style = ParagraphStyle("Block", parent=base, leftIndent=indent+_number(merged.get("leftIndent"), 0, -1440, 1440), firstLineIndent=_number(merged.get("firstLineIndent", merged.get("indent")), 0, -1440, 1440), rightIndent=_number(merged.get("rightIndent"), 0, -1440, 1440), fontSize=size,
                                    leading=size*_number(merged.get("lineHeight"), 1.25 if kind == "heading" else settings["lineHeight"], 0.8, 4),
                                    spaceBefore=_number(merged.get("spaceBefore"), 12 if kind == "heading" else 0, 0, 144), spaceAfter=_number(merged.get("spaceAfter"), 8, 0, 144),
                                    keepWithNext=bool(merged.get("keepWithNext", kind == "heading")), fontName=block_font+"-Bold" if kind == "heading" and block_font.startswith("Alder") else block_font,
@@ -2125,7 +2153,9 @@ def _pdf(project, path, settings, warnings):
             if merged.get('lineSpacingMode') != 'exact' and any(_kind(c) == 'inline_image' for c in node.get('content', [])):
                 style.autoLeading = 'max'
             if attrs.get('_headingLabel'): text = html.escape(attrs['_headingLabel']) + '&#160;' + text
-            paragraph = (HeadingParagraph if kind=='heading' else Paragraph)(html.escape(prefix)+text or "&#160;", style)
+            style.alderBarTabs = [stop['position'] for stop in merged.get('tabStops') or [] if stop['align'] == 'bar']
+            style.alderRTL = merged.get('textDirection') == 'rtl'
+            paragraph = (HeadingParagraph if kind=='heading' else BarParagraph)(html.escape(prefix)+text or "&#160;", style)
             if kind=='heading':paragraph.running_heading=(level,heading_text(node))
             if merged.get('keepTogether'):
                 paragraph = KeepTogether([paragraph])
@@ -2412,7 +2442,7 @@ def _import_html(content, warnings, assets, image_reader=None, link_reader=None,
             try: attrs['tabStops'] = validate_tab_stops(json.loads(element['data-tab-stops']))
             except (ValueError, TypeError): pass
         if css.get('text-align') in ('left', 'right', 'center', 'justify'): attrs['align'] = css['text-align']
-        for prop, key, minimum, maximum in (('font-size', 'fontSize', 6, 72), ('margin-top', 'spaceBefore', 0, 144), ('margin-bottom', 'spaceAfter', 0, 144), ('margin-left', 'leftIndent', -144, 144), ('margin-right', 'rightIndent', -144, 144), ('text-indent', 'firstLineIndent', -144, 144)):
+        for prop, key, minimum, maximum in (('font-size', 'fontSize', 6, 72), ('margin-top', 'spaceBefore', 0, 144), ('margin-bottom', 'spaceAfter', 0, 144), ('margin-left', 'leftIndent', -1440, 1440), ('margin-right', 'rightIndent', -1440, 1440), ('text-indent', 'firstLineIndent', -1440, 1440)):
             match = re.fullmatch(r'(-?[\d.]+)(pt|px)', css.get(prop, ''))
             if match:
                 try: value = float(match[1]) * (0.75 if match[2] == 'px' else 1)
@@ -3267,6 +3297,13 @@ def _read_docx(doc, path, warnings, assets, comment_reader):
     from .document_captions import associate_captions
     associate_captions(imported)
     settings = docx_page_settings(doc, warnings)
+    default_tab = doc.settings.element.find(qn('w:defaultTabStop'))
+    if default_tab is not None:
+        try:
+            interval = int(default_tab.get(qn('w:val'))) / 20
+            if 1 <= interval <= 720: settings['defaultTabStopPt'] = interval
+            else: _warn(warnings,'Unsupported default tab spacing; using 36 points.')
+        except (TypeError,ValueError): _warn(warnings,'Invalid default tab spacing; using 36 points.')
     settings['noteOptions']=note_reader.options
     from .running_matter import read_running_matter
     settings['runningMatter']=read_running_matter(doc.sections[0],paragraph,warnings,first=True,container=container)

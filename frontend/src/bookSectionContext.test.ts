@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chapterSectionContext } from "./bookSectionContext";
+import { chapterSectionContext, changeChapterPageSettings, changeDocumentPageSettings, changeChapterRunningMatter } from "./bookSectionContext";
 import { screenPageGeometry } from "./pageGeometry";
 import { sectionLayout } from "./sectionLayout";
 import type { DocNode, Project } from "./types";
@@ -57,6 +57,36 @@ const fixture = (): Project =>
   }) as unknown as Project;
 
 describe("chapter section context", () => {
+  it("changes running distances without copying linked stories into the section", () => {
+    const p=fixture();
+    changeChapterRunningMatter(p,"b",{headerDistanceMm:8});
+    expect(p.book!.chapters[0].document.content![0].attrs!.runningMatter).toEqual({headerDistanceMm:8});
+    expect(p.book!.chapters[1].document.content![0].attrs!.runningMatter).toBeUndefined();
+    changeChapterRunningMatter(p,"a",{footerDistanceMm:7});
+    expect(p.settings.runningMatter!.footerDistanceMm).toBe(7);
+  });
+  it("applies document geometry across sections while retaining their other properties", () => {
+    const p = fixture();
+    changeDocumentPageSettings(p, {marginTopMm: 30, orientation: "portrait"});
+    expect(p.settings.marginTopMm).toBe(30);
+    for(const chapter of p.book!.chapters)
+      for(const node of chapter.document.content || [])
+        if(node.type === "section_break") {
+          expect(node.attrs!.page.marginTopMm).toBe(30);
+          expect(node.attrs!.page.orientation).toBe("portrait");
+        }
+    expect(p.book!.chapters[0].document.content![0].attrs!.numberingFormat).toBe("lowerRoman");
+    expect(p.book!.chapters[0].document.content![0].attrs!.page.columns.count).toBe(2);
+  });
+  it("edits the supplying section rather than an excluded chapter or all document defaults", () => {
+    const p=fixture();
+    changeChapterPageSettings(p,"b",{marginTopMm:30});
+    expect(p.book!.chapters[0].document.content![0].attrs!.page.marginTopMm).toBe(30);
+    expect(p.book!.chapters[1].document.content![0].attrs!.page.marginTopMm).toBeUndefined();
+    expect(p.settings.marginTopMm).toBeUndefined();
+    changeChapterPageSettings(p,"a",{marginBottomMm:25});
+    expect(p.settings.marginBottomMm).toBe(25);
+  });
   it("inherits the preceding included section, without consuming the active chapter", () => {
     const p = fixture(),
       before = JSON.stringify(p);

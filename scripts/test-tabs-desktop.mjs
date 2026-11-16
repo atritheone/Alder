@@ -1,6 +1,7 @@
 import { _electron as electron, expect } from "@playwright/test";
 import { build } from "esbuild";
 import { desktopExecutable } from "./desktop-paths.mjs";
+import { closeTestDesktop } from "./close-test-desktop.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -154,22 +155,24 @@ try {
   expect(copied[2].attrs.tabStops).toEqual(content[2].attrs.tabStops);
   await page.evaluate(() => {
     localStorage.setItem("alder.ruler", "true");
+    localStorage.setItem("alder.layoutUnit", "pt");
+    window.dispatchEvent(new Event("alder-preference-changed"));
     window.dispatchEvent(new Event("alder-ruler"));
   });
-  const ruler = page.getByLabel("Paragraph ruler in points");
+  const ruler = page.getByLabel("Paragraph ruler in pt");
   await expect(ruler).toBeVisible();
-  const marker = ruler.getByRole("button", { name: "left tab at 144 points" });
+  const marker = ruler.getByRole("button", { name: "left tab at 144 pt" });
   await marker.focus();
   await page.keyboard.press("ArrowRight");
   await expect(
-    ruler.getByRole("button", { name: "left tab at 145 points" }),
+    ruler.getByRole("button", { name: "left tab at 145 pt" }),
   ).toBeVisible();
   await page.keyboard.press("Delete");
   await expect(ruler.locator(".ruler-tab")).toHaveCount(0);
   await editor.focus();
   await page.keyboard.press("Control+z");
   await expect(
-    ruler.getByRole("button", { name: "left tab at 145 points" }),
+    ruler.getByRole("button", { name: "left tab at 145 pt" }),
   ).toBeVisible();
   await page.keyboard.press("Control+z");
   await expect(marker).toBeVisible();
@@ -192,17 +195,35 @@ try {
   await expect(marker).toBeVisible();
   await page.screenshot({ path: path.join(directory, "tabs.png") });
   const leftIndent = ruler.getByRole("button", {
-    name: "Left indent: 12 points",
+    name: "Left indent: 12 pt",
     exact: true,
   });
   await leftIndent.focus();
   await page.keyboard.press("Shift+ArrowRight");
   await expect(
-    ruler.getByRole("button", { name: "Left indent: 22 points", exact: true }),
+    ruler.getByRole("button", { name: "Left indent: 22 pt", exact: true }),
   ).toBeVisible();
   await editor.focus();
   await page.keyboard.press("Control+z");
   await expect(leftIndent).toBeVisible();
+  const hanging = ruler.getByRole("button", {name:"Hanging indent: 12 pt",exact:true});
+  await hanging.focus();
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(()=>page.evaluate(()=>{
+    const attrs=window.__layoutProbe.doc().content[0].attrs;
+    return [attrs.leftIndent,attrs.firstLineIndent];
+  })).toEqual([22,-10]);
+  await editor.press("Control+z");
+  await expect(hanging).toBeVisible();
+  const indentBox=await hanging.boundingBox();
+  await page.mouse.move(indentBox.x+indentBox.width/2,indentBox.y+indentBox.height/2);
+  await page.mouse.down();
+  await page.mouse.move(indentBox.x+50,indentBox.y+indentBox.height/2);
+  await expect(page.locator(".ruler-drag-guide")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(hanging).toBeVisible();
+  await expect(page.locator(".ruler-drag-guide")).toHaveCount(0);
   await page
     .getByRole("button", { name: "More formatting", exact: true })
     .click();
@@ -230,6 +251,36 @@ try {
     const scale=p.getBoundingClientRect().width/p.offsetWidth;
     return (after.getBoundingClientRect().left-before.getBoundingClientRect().left)/scale*.75;
   })).toBeCloseTo(204,0);
+  await page.evaluate(()=>window.__layoutProbe.document({type:'doc',content:[{type:'paragraph',attrs:{leftIndent:12,tabStops:[{position:72,align:'bar',leader:'none'}]},content:[{type:'text',text:'A bar without a tab character.'}]}]}));
+  await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.querySelector('.flow-canvas .ProseMirror p')).backgroundImage)).toContain('linear-gradient');
+  await expect.poll(()=>page.evaluate(()=>window.__layoutProbe.text())).toBe('A bar without a tab character.');
+  await page.evaluate(()=>window.__layoutProbe.document({type:'doc',content:[
+    {type:'paragraph',attrs:{tabStops:[{position:72,align:'left',leader:'none'}]},content:[{type:'text',text:'First'}]},
+    {type:'paragraph',attrs:{tabStops:[{position:72,align:'right',leader:'none'},{position:144,align:'decimal',leader:'none'}]},content:[{type:'text',text:'Second'}]},
+  ]}));
+  await editor.press('Control+a');
+  const mixedTab=ruler.getByRole('button',{name:'left tab at 72 pt',exact:true});
+  await expect(mixedTab).toHaveAttribute('data-mixed','true');
+  await mixedTab.focus();
+  await page.keyboard.press('Shift+ArrowRight');
+  await expect.poll(()=>page.evaluate(()=>window.__layoutProbe.doc().content.map(p=>p.attrs.tabStops.map(s=>s.position)))).toEqual([[82],[82,144]]);
+  await editor.press('Control+z');
+  await expect.poll(()=>page.evaluate(()=>window.__layoutProbe.doc().content[1].attrs.tabStops[0].align)).toBe('right');
+  await page.evaluate(()=>window.__layoutProbe.document({type:'doc',content:[
+    {type:'paragraph',attrs:{leftIndent:240,firstLineIndent:-180},content:[{type:'text',text:'Wide hanging indent.'}]},
+  ]}));
+  await editor.click();
+  const wide=ruler.getByRole('button',{name:'Left indent: 240 pt',exact:true});
+  await expect(wide).toBeVisible();
+  await wide.focus();await page.keyboard.press('Shift+ArrowRight');
+  await expect.poll(()=>page.evaluate(()=>window.__layoutProbe.doc().content[0].attrs.leftIndent)).toBe(250);
+  await expect(ruler.getByRole('button',{name:'Left indent: 250 pt',exact:true})).toBeFocused();
+  await page.keyboard.press('Shift+ArrowRight');
+  await expect.poll(()=>page.evaluate(()=>window.__layoutProbe.doc().content[0].attrs.leftIndent)).toBe(260);
+  await editor.press('Control+z');
+  await expect.poll(()=>page.evaluate(()=>window.__layoutProbe.doc().content[0].attrs.leftIndent)).toBe(250);
+  await editor.press('Control+z');
+  await expect(wide).toBeVisible();
   report.status = "passed";
 } catch (error) {
   report.error = error.stack;
@@ -242,5 +293,5 @@ try {
     path.join(directory, "report.json"),
     JSON.stringify(report, null, 2),
   );
-  await app?.close();
+  await closeTestDesktop(app, `${profile}/data`);
 }

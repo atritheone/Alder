@@ -7,9 +7,11 @@ function describeItems(
   prefix: string,
 ): NativeMenuEntry[] {
   return entries.map((item, index) => ({
-    id: `${prefix}:${index}`,
-    label: item.label.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()),
-    checked: item.checked,
+    id: item.commandId ? `native:authoring:${item.commandId}` : `${prefix}:${index}`,
+    label: (item.label+(item.checked === "mixed" ? " (mixed)" : "")).replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()),
+    checked: item.checked === "mixed" ? false : item.checked,
+    checkType: item.checkType,
+    enabled: !item.disabled,
     submenu: item.submenu && describeItems(item.submenu, `${prefix}:${index}`),
   }));
 }
@@ -52,6 +54,15 @@ export default function NativeMenu({
   useEffect(() => {
     const off = window.alder?.onCommand((command) => {
       if (!command.startsWith("native:")) return;
+      if (command.startsWith("native:authoring:")) {
+        const id=command.slice("native:authoring:".length);
+        const find=(items:MenuEntry[]):MenuEntry|undefined=>{
+          for(const item of items){if(item.disabled)continue;if(item.commandId===id)return item;
+            if(item.submenu){const child=find(item.submenu);if(child)return child;}}
+        };
+        find(Object.values(current.current).flat())?.action?.();
+        return;
+      }
       const [, group, ...indices] = command.split(":");
       let entries = current.current[group];
       let item: MenuEntry | undefined;
@@ -59,7 +70,7 @@ export default function NativeMenu({
         item = entries?.[Number(index)];
         entries = item?.submenu ?? [];
       }
-      item?.action?.();
+      if (!item?.disabled) item?.action?.();
     });
     return () => {
       off?.();

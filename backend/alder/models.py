@@ -509,6 +509,9 @@ def validate_project(raw: Any, previous: dict | None = None) -> dict:
                 "pageNumberFormat": "decimal"}
     for k, v in defaults.items():
         p["settings"].setdefault(k, v)
+    interval = p['settings'].get('defaultTabStopPt', 36)
+    if type(interval) not in (int,float) or not 1 <= interval <= 720:
+        raise ValidationError('Default tab spacing must be between 1 and 720 points.')
     for prop, low, high in (("marginMm", 0, 100), ("fontSize", 6, 96), ("lineHeight", 0.8, 4)):
         value = p["settings"][prop]
         if not isinstance(value, (int, float)) or not low <= value <= high:

@@ -121,7 +121,7 @@ def docx_page_settings(document, warnings, section=None):
 
 def html_page_metadata(settings):
     import html
-    fields = (*PAGE_FIELDS, 'pageSize', 'orientation', 'marginMm', 'mirrorMargins', 'firstPageNumber', 'pageNumberFormat', 'columns', 'noteOptions', 'pageBorder', 'watermark', 'lineNumbering')
+    fields = (*PAGE_FIELDS, 'pageSize', 'orientation', 'marginMm', 'mirrorMargins', 'firstPageNumber', 'pageNumberFormat', 'columns', 'noteOptions', 'pageBorder', 'watermark', 'lineNumbering', 'defaultTabStopPt')
     value = {key:settings[key] for key in fields if key in settings}
     return '<meta name="alder-page-settings" content="'+html.escape(json.dumps(value),quote=True)+'"/>'
 
@@ -133,10 +133,11 @@ def read_html_page_metadata(text):
     entry = head.find('meta', attrs={'name':'alder-page-settings'}) if head else None
     if entry is None:return {}
     value = json.loads(entry.get('content','{}'))
-    allowed = {*PAGE_FIELDS, 'pageSize','orientation','marginMm','mirrorMargins','firstPageNumber','pageNumberFormat','columns','noteOptions','pageBorder','watermark','lineNumbering'}
+    allowed = {*PAGE_FIELDS, 'pageSize','orientation','marginMm','mirrorMargins','firstPageNumber','pageNumberFormat','columns','noteOptions','pageBorder','watermark','lineNumbering','defaultTabStopPt'}
     if not isinstance(value,dict) or set(value)-allowed:raise ValueError('Invalid HTML page settings.')
     if value.get('pageSize','A4') not in (*PAGE_FORMAT['sizes'],'Custom') or value.get('orientation','portrait') not in ('portrait','landscape'):raise ValueError('Invalid HTML page geometry.')
     if 'marginMm' in value and (type(value['marginMm']) not in (int,float) or not 0<=value['marginMm']<=100):raise ValueError('Invalid HTML margin.')
+    if 'defaultTabStopPt' in value and (type(value['defaultTabStopPt']) not in (int,float) or not 1<=value['defaultTabStopPt']<=720):raise ValueError('Invalid HTML default tab spacing.')
     validate_page_settings(value)
     from .note_options import note_options
     note_options(value.get('noteOptions'))

@@ -65,6 +65,17 @@ function run(state: EditorState, command: Command) {
   return result;
 }
 describe("table appearance and conversion", () => {
+  it("resizes a merged grid at fractional ruler precision with one undo", () => {
+    const before = selected(table([
+      row('merged',[cell('wide',{colspan:2,colwidth:[100,200]})]),
+      row('ordinary',[cell('left',{colwidth:[100]}),cell('right',{colwidth:[200]})]),
+    ]));
+    const after = run(before,sizeTableColumns([112.5,187.5]));
+    expect(after.doc.firstChild!.child(0).firstChild!.attrs.colwidth).toEqual([112.5,187.5]);
+    expect(after.doc.firstChild!.child(1).child(1).attrs.colwidth).toEqual([187.5]);
+    expect(after.doc.textContent).toBe(before.doc.textContent);
+    expect(run(after,undo).doc.eq(before.doc)).toBe(true);
+  });
   it("changes selected row break preferences with undo and reports mixed selections", () => {
     const before = selected();
     const after = run(

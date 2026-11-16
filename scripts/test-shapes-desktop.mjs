@@ -63,7 +63,7 @@ try {
     await editor.pressSequentially(`SHAPE_${i} before `);
     await show();
     await properties.getByLabel("Shape kind").selectOption(kind);
-    if(process.argv.includes("--pages"))await properties.getByLabel("Shape height",{exact:true}).fill("70");
+    if(process.argv.includes("--pages"))await properties.getByLabel("Shape height (mm)",{exact:true}).fill("70");
     await properties.getByLabel("Shape description").fill(`${kind} diagram`);
     if(kind === "arrow")await properties.getByLabel("Decorative",{exact:true}).check();
     if(kind !== "line") await properties.getByLabel("Shape fill colour").fill("#c9d8e8");
@@ -83,7 +83,7 @@ try {
   const first = editor.locator("[data-document-shape]").first();
   const original = JSON.parse(await first.getAttribute("data-document-shape"));
   await first.dblclick();
-  await properties.getByLabel("Shape width", { exact: true }).fill("60");
+  await properties.getByLabel("Shape width (mm)", { exact: true }).fill("60");
   await properties
     .getByLabel("Shape description")
     .fill("Edited rectangle diagram");

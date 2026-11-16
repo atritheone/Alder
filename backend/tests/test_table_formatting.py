@@ -38,6 +38,25 @@ def test_table_appearance_survives_exchange(tmp_path, format):
         assert doc.tables[0].rows[0].height.pt == 34.5
 
 
+@pytest.mark.parametrize('format', ['docx', 'html'])
+def test_fractional_ruler_dimensions_survive_exchange(tmp_path, format):
+    project, _ = fixture()
+    table = project['book']['chapters'][0]['document']['content'][0]
+    for row in table['content']:
+        row['attrs'] = {**row.get('attrs', {}), 'minHeight': 42.35}
+        for cell, width in zip(row['content'], [112.5, 187.5]):
+            cell['attrs']['colwidth'] = [width]
+    validate_project(project)
+    exported = build_export(project, format, tmp_path)
+    imported = import_document(Path(exported['path']))
+    result = next(node for node in imported['document']['content'] if node['type'] == 'table')
+    for row in result['content']:
+        assert row['attrs']['minHeight'] == pytest.approx(42.35, abs=.05)
+        for cell, width in zip(row['content'], [112.5, 187.5]):
+            # Word stores physical distances as twentieths of a point.
+            assert cell['attrs']['colwidth'] == pytest.approx([width], abs=.067)
+
+
 def test_table_pdf_contains_all_text_and_custom_shading(tmp_path):
     from pypdf import PdfReader
     project, _ = fixture()

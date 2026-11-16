@@ -1,6 +1,6 @@
 import { screenPageGeometry } from "./pageGeometry";
 import { sectionLayout } from "./sectionLayout";
-import { chapterSectionContext } from "./bookSectionContext";
+import { chapterSectionContext, changeChapterPageSettings, changeDocumentPageSettings, changeChapterRunningMatter } from "./bookSectionContext";
 import { formatInteger, parseInteger } from "./numberDisplay";
 import { chapterRunningMatter } from "./runningMatter";
 import { chapterHeadingContext } from "./runningHeadings";
@@ -26,6 +26,7 @@ import {
   Volume2,
 } from "lucide-react";
 import Editor, { type EditorHandle } from "./Editor";
+import WriteZoom from "./WriteZoom";
 import PlainTextEditor from "./PlainTextEditor";
 import { isPlainDocument } from "./plainTextTools";
 import { editorFileType } from "./documentCapabilities";
@@ -188,6 +189,7 @@ export default function BookWorkspace(p: Props) {
   const [pageNumber, setPageNumber] = useState("1");
   useEffect(() => setPageNumber("1"), [chapter?.id]);
   const [zoom, setZoom] = useState(0.8);
+  const [fitPreference] = useStoredPreference("alder.writeFit", "percentage");
   const [arrangementZoom, setArrangementZoom] = useState(0.8);
   const [rememberPosition] = useStoredPreference(
     "alder.rememberDocumentPosition",
@@ -248,17 +250,17 @@ export default function BookWorkspace(p: Props) {
     if (
       !saved ||
       (!pages.length && !plainWrite) ||
-      zoom !== saved.zoom ||
+      (zoom !== saved.zoom && !(!plainWrite && !showRaw && ["width","page"].includes(fitPreference))) ||
       chapter?.id !== chapters[Math.min(saved.chapter, chapters.length - 1)]?.id
     )
       return;
     const frame = requestAnimationFrame(() => {
-      p.editorRef.current?.restoreDocumentPosition(saved);
+      p.editorRef.current?.restoreDocumentPosition({...saved,top:saved.top*zoom/saved.zoom,left:saved.left*zoom/saved.zoom});
       pendingPosition.current = null;
       positionReady.current = true;
     });
     return () => cancelAnimationFrame(frame);
-  }, [pages, chapter?.id, zoom, plainWrite]);
+  }, [pages, chapter?.id, zoom, plainWrite, showRaw, fitPreference]);
   useEffect(queuePosition, [zoom]);
   useEffect(() => {
     p.onPlaybackChange?.(speechPlaying);
@@ -671,13 +673,15 @@ export default function BookWorkspace(p: Props) {
                 !!p.externalPlayback ||
                 (showRaw && !!chapter.rawSource?.error)
               }
-              onChange={(document, text) =>
+              onChange={(document, text, documentSettings) =>
                 showRaw
                   ? editRaw(text)
-                  : update((c) => {
+                  : p.change(project => {
+                      const c=project.book!.chapters.find(c=>c.id===chapter.id)!;
                       c.document = document;
                       c.text = text;
                       delete c.rawSource;
+                      if(documentSettings)Object.assign(project.settings,documentSettings);
                     })
               }
               onSelection={(word, text, range) => {
@@ -711,6 +715,10 @@ export default function BookWorkspace(p: Props) {
               readingRange={showRaw ? null : readingRange}
               persistentCaret
               pageLayout={layout}
+              defaultTabStopPt={p.project.settings.defaultTabStopPt}
+              onBasePageSettings={patch => p.change(project => changeChapterPageSettings(project, chapter.id, patch))}
+                onDocumentPageSettings={patch => p.change(project => changeDocumentPageSettings(project, patch))}
+                onBaseRunningMatter={patch => p.change(project => changeChapterRunningMatter(project, chapter.id, patch))}
               layoutVisible={p.view === "Write" && !p.previewActive}
               capturePages={p.view === "Pages"}
               onPageSnapshots={(next) =>
@@ -848,7 +856,9 @@ export default function BookWorkspace(p: Props) {
                     {status.progress}
                   </span>
                 )}
-              <label className="writing-zoom">
+              {p.view === "Write" ? <WriteZoom zoom={zoom} onChange={setZoom}
+                page={pages[Math.max(0,parseInteger(pageNumber)-1)]?.frame?.layout || layout}
+                identity={`${chapter.id}:${showRaw}`} fitEnabled={!plainWrite && !showRaw} /> : <label className="writing-zoom">
                 Zoom{" "}
                 <select
                   aria-label="Page zoom"
@@ -867,7 +877,7 @@ export default function BookWorkspace(p: Props) {
                     ),
                   )}
                 </select>
-              </label>
+              </label>}
               {p.view === "Write" && (
                 <button
                   type="button"

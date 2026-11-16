@@ -12,6 +12,8 @@ import LineNumberFields from "./LineNumberFields";
 import { validColumns } from "./columns";
 import NoteOptionsFields from "./NoteOptionsFields";
 import { type NoteOptions } from "./noteOptions";
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 
 export default function SectionDialog({
   initial,
@@ -28,6 +30,7 @@ export default function SectionDialog({
   onRemove?: () => void;
   inheritedNotes: NoteOptions;
 }) {
+  const [unit] = useLayoutUnit();
   const dialog = useRef<HTMLDialogElement>(null);
   const [value, setValue] = useState(initial);
   useEffect(() => {
@@ -193,17 +196,14 @@ export default function SectionDialog({
             ][]
           ).map(([key, label]) => (
             <label key={key}>
-              {label} (mm)
-              <input
-                aria-label={`Section ${label.toLowerCase()}`}
-                type="number"
-                min={key.startsWith("page") ? 50 : 0}
+              {label} ({unit})
+              <MeasurementInput
+                label={`Section ${label.toLowerCase()}`}
+                min={(key.startsWith("page") ? 50 : 0)*72/25.4}
                 max={
-                  key.startsWith("page") ? 1000 : key === "gutterMm" ? 50 : 100
+                  (key.startsWith("page") ? 1000 : key === "gutterMm" ? 50 : 100)*72/25.4
                 }
-                step="any"
-                required
-                value={
+                value={Number(
                   value.page[key] ??
                   (key === "pageWidthMm"
                     ? 210
@@ -212,11 +212,11 @@ export default function SectionDialog({
                       : key === "gutterMm"
                         ? 0
                         : (value.page.marginMm ?? 22))
-                }
-                onChange={(e) =>
+                )*72/25.4}
+                onChange={points => points != null &&
                   setValue({
                     ...value,
-                    page: { ...value.page, [key]: Number(e.target.value) },
+                    page: { ...value.page, [key]: points*25.4/72 },
                   })
                 }
               />

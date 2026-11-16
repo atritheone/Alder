@@ -50,3 +50,36 @@ def test_invalid_style_tab_rejected():
     p=fixture()
     p['styles'][0]['tabStops']=[{'position':1,'align':'left','leader':'bad'}]
     with pytest.raises(ValidationError): validate_project(p)
+
+@pytest.mark.parametrize('format', ['docx', 'rtf'])
+def test_bar_tab_round_trip_does_not_add_text_or_require_a_tab_character(tmp_path, format):
+    p=fixture()
+    bars=[{'position':90,'align':'bar','leader':'none'}]
+    p['styles'][0]['tabStops']=bars
+    p['book']['chapters'][0]['document']['content'][0]['content']=[{'type':'text','text':'A printed bar, no tab character.'}]
+    result=build_export(p,format,tmp_path)
+    opened=import_document(Path(result['path']))
+    assert opened['document']['content'][0]['attrs']['tabStops']==bars
+    assert document_text(opened['document']).startswith('A printed bar, no tab character.')
+
+def test_pdf_prints_bar_tabs_without_changing_text(tmp_path):
+    from pypdf import PdfReader
+    p=fixture()
+    p['styles'][0]['tabStops']=[{'position':90,'align':'bar','leader':'none'}]
+    result=build_export(p,'pdf',tmp_path)
+    pdf=PdfReader(result['path'])
+    assert 'First' in pdf.pages[0].extract_text()
+    assert b'90 0 m 90 ' in pdf.pages[0].get_contents().get_data()
+
+@pytest.mark.parametrize('format',['docx','rtf','html','epub'])
+def test_document_default_tab_interval_round_trips(tmp_path, format):
+    p=fixture(); p['settings']['defaultTabStopPt']=48
+    result=build_export(p,format,tmp_path)
+    opened=import_document(Path(result['path']))
+    assert opened['settings']['defaultTabStopPt']==48
+    if format=='html':assert 'tab-size:48pt' in Path(result['path']).read_text(encoding='utf-8')
+
+@pytest.mark.parametrize('interval',[True,0,721,float('nan'),float('inf'),'36'])
+def test_invalid_default_interval_is_rejected(interval):
+    p=fixture();p['settings']['defaultTabStopPt']=interval
+    with pytest.raises(ValidationError):validate_project(p)

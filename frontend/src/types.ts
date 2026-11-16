@@ -169,6 +169,7 @@ export type Project = {
   pronunciation: Pronunciation[];
   styles: NamedStyle[];
   settings: {
+    defaultTabStopPt?: number;
     stationeryPreset?: string | null;
     citationStyle?: import('./citationTypes').CitationStyle;
     pronunciationDictionaries?: string[];
@@ -401,6 +402,8 @@ export type Voice = {
   [key: string]: any;
 };
 export type NativeMenuEntry = {
+  checkType?: "checkbox" | "radio";
+  enabled?: boolean;
   id: string;
   label: string;
   checked?: boolean;

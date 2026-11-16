@@ -8,18 +8,26 @@ import ParagraphAppearanceFields from "./ParagraphAppearanceFields";
 import TabStopsEditor from "./TabStopsEditor";
 import HyphenationFields from "./HyphenationFields";
 import type { TabStop } from "./tabStops";
+import MeasurementInput from "./MeasurementInput";
+import { useLayoutUnit } from "./layoutUnits";
 import "./word-processing.css";
 
 export default function ParagraphDialog({
   initial,
   onApply,
   onClose,
+  defaultTabStopPt,
+  focusTabs = false,
 }: {
   initial: Record<string, unknown>;
-  onApply: (values: Record<string, unknown>) => void;
+  onApply: (values: Record<string, unknown>, defaultTabStopPt?: number) => void;
   onClose: () => void;
+  defaultTabStopPt?: number;
+  focusTabs?: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [interval,setInterval] = useState(defaultTabStopPt);
+  const [unit] = useLayoutUnit();
   const [values, setValues] = useState(() =>
     Object.fromEntries(
       paragraphProperties.map((key) => [
@@ -32,6 +40,7 @@ export default function ParagraphDialog({
   const preview = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     dialog.current?.showModal();
+    if(focusTabs)dialog.current?.querySelector<HTMLElement>(".tab-stop-editor input,.tab-stop-editor button")?.focus();
   }, []);
   useEffect(() => {
     if (preview.current) {
@@ -73,7 +82,7 @@ export default function ParagraphDialog({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          onApply(changed);
+          onApply(changed,interval);
         }}
       >
         <header>
@@ -132,13 +141,13 @@ export default function ParagraphDialog({
           </label>
           {(
             [
-              ["leftIndent", "Left indent (pt)", -144, 144, 1],
-              ["rightIndent", "Right indent (pt)", -144, 144, 1],
+              ["leftIndent", "Left indent (pt)", -1440, 1440, 1],
+              ["rightIndent", "Right indent (pt)", -1440, 1440, 1],
               [
                 "firstLineIndent",
                 "First line / hanging indent (pt)",
-                -144,
-                144,
+                -1440,
+                1440,
                 1,
               ],
               ["spaceBefore", "Space before (pt)", 0, 144, 1],
@@ -153,8 +162,11 @@ export default function ParagraphDialog({
             )
             .map(([key, label, min, max, step]) => (
               <label key={key}>
-                {label}
-                <input
+                {key.endsWith("Indent") ? `${label.replace(" (pt)", "")} (${unit})` : label}
+                {key.endsWith("Indent") ? <MeasurementInput
+                  label={label.replace(" (pt)", "")} min={min} max={max} nullable
+                  value={values[key] === "" ? null : Number(values[key])}
+                  onChange={value=>edit(key,value == null ? "" : String(value))} /> : <input
                   aria-label={label}
                   type="number"
                   min={min}
@@ -163,7 +175,7 @@ export default function ParagraphDialog({
                   placeholder="Inherited / mixed"
                   value={values[key]}
                   onChange={(e) => edit(key, e.target.value)}
-                />
+                />}
               </label>
             ))}
           {(
@@ -213,6 +225,7 @@ export default function ParagraphDialog({
           onChange={(patch) => setChanged((old) => ({ ...old, ...patch }))}
         />
         <TabStopsEditor
+          defaultInterval={interval}
           value={
             (Object.hasOwn(changed, "tabStops")
               ? changed.tabStops
@@ -221,6 +234,10 @@ export default function ParagraphDialog({
           onChange={(tabStops) => setChanged((old) => ({ ...old, tabStops }))}
         />
         <div className="paragraph-preview" aria-label="Paragraph preview">
+          {interval !== undefined && <label>Default tab spacing for this document ({unit})
+            <MeasurementInput label="Default tab spacing" min={1} max={720} value={interval}
+              onChange={value=>{if(value!=null)setInterval(value);}} />
+          </label>}
           <p ref={preview}>
             A paragraph can have its own alignment, spacing and indentation.
             Negative first-line indentation creates a hanging indent.

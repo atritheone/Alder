@@ -93,13 +93,14 @@ export function mirrorShiftToPosition(
       )
     : 0;
 }
+export function isMirroredPage(layout: PageLayout, page: number): boolean {
+  return !!layout.mirrorMargins && (page + (layout.pageNumberOffset ?? layout.firstPageNumber ?? 1)) % 2 === 0;
+}
 export function mirroredPageLayout(
   layout: PageLayout,
   page: number,
 ): PageLayout {
-  const number =
-    page + (layout.pageNumberOffset ?? layout.firstPageNumber ?? 1);
-  if (!layout.mirrorMargins || number % 2 !== 0) return layout;
+  if (!isMirroredPage(layout, page)) return layout;
   const margins = pageInsets(layout);
   return {
     ...layout,

@@ -1,10 +1,14 @@
 import { useState } from "react";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight, Minus } from "lucide-react";
 
 export type MenuEntry = {
   label: string;
+  commandId?: string;
+  keywords?: string[];
+  checkType?: "checkbox" | "radio";
   action?: () => void;
-  checked?: boolean;
+  checked?: boolean | "mixed";
+  disabled?: boolean;
   submenu?: MenuEntry[];
 };
 
@@ -20,7 +24,7 @@ export default function MenuItems({
     <div
       className="menu-entry"
       key={item.label}
-      onMouseEnter={() => setOpen(item.submenu ? item.label : null)}
+      onMouseEnter={() => setOpen(item.submenu && !item.disabled ? item.label : null)}
       onMouseLeave={() => setOpen(null)}
       onBlur={(event) => {
         if (
@@ -30,7 +34,7 @@ export default function MenuItems({
           setOpen(null);
       }}
       onKeyDown={(event) => {
-        if (item.submenu && event.key === "ArrowRight") {
+        if (!item.disabled && item.submenu && event.key === "ArrowRight") {
           event.preventDefault();
           setOpen(item.label);
           const entry = event.currentTarget;
@@ -53,7 +57,8 @@ export default function MenuItems({
       }}
     >
       <button
-        role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+        disabled={item.disabled}
+        role={item.checked === undefined ? "menuitem" : item.checkType === "checkbox" ? "menuitemcheckbox" : "menuitemradio"}
         aria-checked={item.checked}
         aria-haspopup={item.submenu ? "menu" : undefined}
         aria-expanded={item.submenu ? open === item.label : undefined}
@@ -67,7 +72,7 @@ export default function MenuItems({
       >
         {item.checked !== undefined && (
           <span className="menu-check">
-            {item.checked && <Check size={12} />}
+            {item.checked === "mixed" ? <Minus size={12} /> : item.checked && <Check size={12} />}
           </span>
         )}
         {item.label}
